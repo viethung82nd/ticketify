@@ -21,7 +21,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **0.6** `ClockService`: inject được để test có thể điều khiển thời gian
 
 ### Tuần 2: Schema, test, frontend, CI
-- [ ] **0.7** Prisma schema cho mọi bảng (trừ voucher) + migration đầu tiên
+- [x] **0.7** Prisma schema cho mọi bảng (trừ voucher) + migration đầu tiên
 - [ ] **0.8** Migration raw SQL:
   - `btree_gist` + exclusion constraint cho `Showtime`
   - CHECK constraint cho `ShowtimeSeat`
