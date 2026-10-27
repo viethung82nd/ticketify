@@ -17,7 +17,10 @@
     "format": "prettier --write .",
     "typecheck": "pnpm -r --if-present typecheck",
     "test:unit": "pnpm -r --if-present test:unit",
-    "test:integration": "pnpm -r --if-present test:integration"
+    "test:integration": "pnpm -r --if-present test:integration",
+    "db:migrate": "pnpm --filter @ticketify/api db:migrate",
+    "db:deploy": "pnpm --filter @ticketify/api db:deploy",
+    "db:seed": "pnpm --filter @ticketify/api db:seed"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.4",
