@@ -31,7 +31,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
   - helper Testcontainers (khởi động PG + Redis, chạy migration)
   - test integration đầu tiên: xác nhận các constraint ở 0.8 chặn đúng
 - [x] **0.10** Seed: admin, staff, user mẫu; 1 phòng 10×12 có đủ ghế thường/VIP/đôi; bảng giá; vài phim
-- [ ] **0.11** `apps/web`: Vite + React + TS, Tailwind, shadcn/ui, React Router, TanStack Query, axios client, layout chung
+- [x] **0.11** `apps/web`: Vite + React + TS, Tailwind, shadcn/ui, React Router, TanStack Query, axios client, layout chung
 - [ ] **0.12** `packages/shared`: các enum trạng thái, zod schema dùng chung
 - [ ] **0.13** GitHub Actions CI: install → lint → typecheck → unit → integration → build
 - [ ] **0.14** Đăng ký VNPay sandbox; vẽ ERD lưu vào `docs/`
