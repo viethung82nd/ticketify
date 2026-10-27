@@ -1,1 +1,5 @@
-{ "name": "@ticketify/shared", "version": "0.0.0", "private": true }
+{
+  "name": "@ticketify/shared",
+  "version": "0.0.0",
+  "private": true
+}
