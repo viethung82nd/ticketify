@@ -10,9 +10,14 @@
   },
   "scripts": {
     "prepare": "husky",
+    "dev": "pnpm -r --parallel --if-present dev",
+    "build": "pnpm -r --if-present build",
     "lint": "eslint . && prettier --check .",
     "lint:fix": "eslint . --fix && prettier --write .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test:unit": "pnpm -r --if-present test:unit",
+    "test:integration": "pnpm -r --if-present test:integration"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.4",
