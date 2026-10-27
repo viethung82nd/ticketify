@@ -121,8 +121,9 @@ Ticket       : ISSUED ──► CHECKED_IN
 | `SeatPrice` | seatType, dayType, price | unique(seatType, dayType) |
 | `Holiday` | date | unique(date) |
 | `ShowtimeSeat` | showtimeId, seatId, status, bookingId, heldUntil, price | **PK(showtimeId, seatId)**. CHECK: `HELD` ⇒ bookingId và heldUntil không null; `AVAILABLE` ⇒ bookingId null. `price` được chốt khi tạo suất chiếu |
-| `Booking` | code, userId, showtimeId, status, subtotal, discount, total, expiresAt, holdUntil, idempotencyKey, requestHash, confirmedAt | unique(code), unique(userId, idempotencyKey) |
+| `Booking` | code, userId, showtimeId, status, subtotal, discount, total, expiresAt, holdUntil, idempotencyKey, requestHash, confirmedAt, emailSentAt | unique(code), unique(userId, idempotencyKey) |
 | `BookingSeat` | bookingId, showtimeId, seatId, price | unique(bookingId, seatId). Lưu lịch sử ghế của đơn, kể cả khi ghế đã được nhả |
+| `Combo` | name, description, price, imageKey, isActive | Bổ sung 10/2026: bảng gốc cho `BookingCombo.comboId` (CRUD ở 1.16) |
 | `BookingCombo` | bookingId, comboId, comboName, unitPrice, quantity | Snapshot tên và giá |
 | `Ticket` | bookingId, showtimeId, seatId, code, status, checkedInAt, checkedInBy | **Partial unique (showtimeId, seatId) WHERE status <> 'VOID'**. Đây là lớp chặn cuối cùng chống vé trùng |
 | `Payment` | bookingId, txnRef, amount, status, vnpTransactionNo, bankCode, responseCode, rawPayload, processedAt | unique(txnRef), unique(vnpTransactionNo); **partial unique(bookingId) WHERE status='SUCCESS'** |
