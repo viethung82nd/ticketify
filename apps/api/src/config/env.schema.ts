@@ -51,12 +51,13 @@ export const envSchema = z.object({
   HOLD_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   PAYMENT_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(300),
 
-  MINIO_ENDPOINT: z.string().min(1),
-  MINIO_PORT: port,
-  MINIO_USE_SSL: booleanString.default(false),
-  MINIO_ACCESS_KEY: z.string().min(1),
-  MINIO_SECRET_KEY: z.string().min(8),
-  MINIO_BUCKET: z.string().min(3),
+  /** S3-compatible object storage (RustFS in dev). */
+  S3_ENDPOINT: z.url({ protocol: /^https?$/ }),
+  S3_REGION: z.string().min(1).default('us-east-1'),
+  S3_ACCESS_KEY: z.string().min(1),
+  S3_SECRET_KEY: z.string().min(8),
+  S3_BUCKET: z.string().min(3),
+  S3_FORCE_PATH_STYLE: booleanString.default(true),
 
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: port,

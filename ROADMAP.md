@@ -16,7 +16,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **0.1** Khởi tạo git, pnpm workspace (`apps/api`, `apps/web`, `packages/shared`), `.nvmrc` (Node 24 LTS — NestJS 12 + Jest cần Node ≥ 24.9; Node 22 hết hỗ trợ 04/2027), `.editorconfig`, `.gitignore`
 - [x] **0.2** ESLint + Prettier dùng chung; husky + lint-staged; commitlint (Conventional Commits)
 - [x] **0.3** `apps/api`: scaffold NestJS; `ConfigModule` kiểm tra biến môi trường bằng zod; logger pino; `ValidationPipe` global; exception filter chuẩn hóa lỗi; Swagger tại `/docs`
-- [ ] **0.4** `docker-compose.yml`: Postgres 16, Redis 7, MinIO (kèm container tạo bucket), Mailpit; tạo `.env.example`
+- [x] **0.4** `docker-compose.yml`: Postgres 16, Redis 7, RustFS — S3-compatible, thay MinIO vì MinIO ngừng phát hành Docker image (kèm container tạo bucket), Mailpit; tạo `.env.example`
 - [ ] **0.5** Cài Prisma, viết `PrismaService`, health check (`/health`: kiểm tra DB và Redis)
 - [ ] **0.6** `ClockService`: inject được để test có thể điều khiển thời gian
 
@@ -50,7 +50,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [ ] **1.5** FE: trang đăng nhập/đăng ký, auth store, interceptor tự gọi refresh, route bảo vệ theo role
 
 ### Tuần 4: Phim & lưu trữ
-- [ ] **1.6** `StorageService` (MinIO): upload, presigned URL; upload poster
+- [ ] **1.6** `StorageService` (S3 API — RustFS): upload, presigned URL; upload poster
 - [ ] **1.7** CRUD phim + thể loại (admin); API public: danh sách phân trang, lọc theo trạng thái/thể loại, chi tiết theo slug
 - [ ] **1.8** FE: trang chủ, danh sách phim, chi tiết phim; admin: bảng phim + form
 
@@ -138,13 +138,13 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 
 ### Tuần 15: PDF & email
 - [ ] **4.4** PDF bằng pdfkit + qrcode, mỗi vé 1 trang. **Phải nhúng font Unicode** (vd. Be Vietnam Pro) vì font chuẩn của PDF không hiển thị được tiếng Việt có dấu
-- [ ] **4.5** Upload lên MinIO với key cố định; endpoint tải PDF qua presigned URL (chỉ chủ đơn được tải)
+- [ ] **4.5** Upload lên S3 (RustFS) với key cố định; endpoint tải PDF qua presigned URL (chỉ chủ đơn được tải)
 - [ ] **4.6** Email: Nodemailer + template Handlebars (`confirmed`, `needs_review`), đính kèm PDF, kiểm tra/ghi `emailSentAt`; xem kết quả qua Mailpit
 
 ### Tuần 16: Check-in & kịch bản D
 - [ ] **4.7** Token QR ký HMAC; `POST /tickets/check-in` (role STAFF), trả về: hợp lệ / đã dùng / sai suất chiếu / không tồn tại
 - [ ] **4.8** FE staff: quét QR bằng camera + nhập mã thủ công; FE user: lịch sử vé, tải PDF
-- [ ] **4.9** Kịch bản D: kill worker sau khi DB commit; SMTP lỗi; MinIO không truy cập được (dừng container trong test); khởi động lại và xác minh mọi sự kiện được xử lý, không có vé trùng
+- [ ] **4.9** Kịch bản D: kill worker sau khi DB commit; SMTP lỗi; RustFS không truy cập được (dừng container trong test); khởi động lại và xác minh mọi sự kiện được xử lý, không có vé trùng
 
 **DoD:** kịch bản D pass; luồng chọn ghế → thanh toán → nhận email có PDF chạy trọn vẹn.
 
