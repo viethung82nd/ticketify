@@ -14,7 +14,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 
 ### Tuần 1: Khung dự án
 - [x] **0.1** Khởi tạo git, pnpm workspace (`apps/api`, `apps/web`, `packages/shared`), `.nvmrc` (Node 24 LTS — NestJS 12 + Jest cần Node ≥ 24.9; Node 22 hết hỗ trợ 04/2027), `.editorconfig`, `.gitignore`
-- [ ] **0.2** ESLint + Prettier dùng chung; husky + lint-staged; commitlint (Conventional Commits)
+- [x] **0.2** ESLint + Prettier dùng chung; husky + lint-staged; commitlint (Conventional Commits)
 - [ ] **0.3** `apps/api`: scaffold NestJS; `ConfigModule` kiểm tra biến môi trường bằng zod; logger pino; `ValidationPipe` global; exception filter chuẩn hóa lỗi; Swagger tại `/docs`
 - [ ] **0.4** `docker-compose.yml`: Postgres 16, Redis 7, MinIO (kèm container tạo bucket), Mailpit; tạo `.env.example`
 - [ ] **0.5** Cài Prisma, viết `PrismaService`, health check (`/health`: kiểm tra DB và Redis)
