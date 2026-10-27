@@ -3,6 +3,8 @@ packages:
   - packages/*
 allowBuilds:
   '@parcel/watcher': false
+  '@prisma/engines': true
   '@scarf/scarf': false
   '@swc/core': true
+  prisma: true
   unrs-resolver: true

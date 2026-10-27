@@ -17,7 +17,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **0.2** ESLint + Prettier dùng chung; husky + lint-staged; commitlint (Conventional Commits)
 - [x] **0.3** `apps/api`: scaffold NestJS; `ConfigModule` kiểm tra biến môi trường bằng zod; logger pino; `ValidationPipe` global; exception filter chuẩn hóa lỗi; Swagger tại `/docs`
 - [x] **0.4** `docker-compose.yml`: Postgres 16, Redis 7, RustFS — S3-compatible, thay MinIO vì MinIO ngừng phát hành Docker image (kèm container tạo bucket), Mailpit; tạo `.env.example`
-- [ ] **0.5** Cài Prisma, viết `PrismaService`, health check (`/health`: kiểm tra DB và Redis)
+- [x] **0.5** Cài Prisma, viết `PrismaService`, health check (`/health`: kiểm tra DB và Redis)
 - [ ] **0.6** `ClockService`: inject được để test có thể điều khiển thời gian
 
 ### Tuần 2: Schema, test, frontend, CI
