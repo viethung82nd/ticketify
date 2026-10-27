@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+pnpm-lock.yaml
+apps/api/src/generated/
+apps/api/prisma/migrations/
+# Hand-written docs (Vietnamese tables) are not auto-formatted.
+*.md
