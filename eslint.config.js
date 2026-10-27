@@ -66,6 +66,13 @@ export default defineConfig(
     files: ['apps/web/**/*.{ts,tsx}'],
     extends: [reactHooks.configs.flat.recommended, reactRefresh.configs.vite],
     languageOptions: { globals: { ...globals.browser } },
+    rules: {
+      // shadcn/ui components export their cva variant helpers next to the component.
+      'react-refresh/only-export-components': [
+        'error',
+        { allowConstantExport: true, allowExportNames: ['buttonVariants', 'badgeVariants'] },
+      ],
+    },
   },
 
   // Must stay last: turns off stylistic rules that conflict with Prettier.
