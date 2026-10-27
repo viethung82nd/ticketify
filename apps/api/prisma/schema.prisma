@@ -1,0 +1,12 @@
+// Ticketify database schema. Design: PLAN.md section 3.
+// Constraints Prisma cannot express live in hand-written SQL migrations; see prisma/README.md.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
