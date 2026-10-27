@@ -8,6 +8,7 @@ Web đặt vé xem phim thời gian thực cho **một rạp**. Project portfoli
 > - Định nghĩa chặt các luồng hết hạn, IPN đến muộn và thứ tự khóa.
 > - Voucher dời sang giai đoạn 5, sau khi luồng thanh toán đã ổn định.
 > - Tiêu chí test viết lại theo 4 kịch bản A–D. Hạ tầng bắt đầu với 1 API + 1 worker.
+> - **(10/2026)** Object storage: MinIO → **RustFS** (S3-compatible) vì MinIO ngừng phát hành Docker image; code dùng S3 API chuẩn. Node 24 LTS thay Node 22.
 
 ## 1. Tóm tắt yêu cầu
 
@@ -23,7 +24,7 @@ Web đặt vé xem phim thời gian thực cho **một rạp**. Project portfoli
 | Giá vé | Loại ghế (Thường/VIP/Đôi) × loại ngày (Ngày thường/Cuối tuần/Lễ), tính theo múi giờ rạp `Asia/Ho_Chi_Minh` |
 | Bán thêm | Combo (giai đoạn 1); voucher (giai đoạn 5) |
 | Thanh toán | VNPay (sandbox) |
-| Sau thanh toán | PDF vé (QR từng ghế) lưu MinIO, email (Nodemailer + SMTP qua BullMQ), thông báo realtime qua WebSocket |
+| Sau thanh toán | PDF vé (QR từng ghế) lưu object storage S3 (RustFS), email (Nodemailer + SMTP qua BullMQ), thông báo realtime qua WebSocket |
 | Testing | Unit, integration, e2e, kịch bản A–D, load test k6. Coverage tổng ≥ 80%, module lõi ≥ 90% |
 | DevOps | Docker Compose, GitHub Actions CI/CD, deploy lên VPS (môi trường demo) |
 
@@ -44,7 +45,7 @@ Web đặt vé xem phim thời gian thực cho **một rạp**. Project portfoli
                └──────────┘ └──────────┘     │ email, notify  │
                                              └───┬────────┬───┘
                                            ┌─────▼──┐  ┌──▼───┐
-                                           │ MinIO  │  │ SMTP │
+                                           │ RustFS │  │ SMTP │
                                            └────────┘  └──────┘
        VNPay ── redirect user / IPN server-to-server ──► API
 ```
@@ -62,7 +63,7 @@ ticketify/
 │   │   ├── src/
 │   │   │   ├── main.ts / main.worker.ts
 │   │   │   ├── common/      # guards, interceptors, filters, decorators
-│   │   │   ├── infra/       # prisma, redis, queue, storage(minio), mail, clock
+│   │   │   ├── infra/       # prisma, redis, queue, storage(S3 — RustFS), mail, clock
 │   │   │   └── modules/
 │   │   │       ├── auth/  users/
 │   │   │       ├── movies/  rooms/  showtimes/  pricing/  combos/
@@ -79,7 +80,7 @@ ticketify/
 ├── packages/shared/         # types / zod schema / enum dùng chung
 ├── load-tests/              # kịch bản k6 + báo cáo
 ├── docker/                  # Dockerfile, Caddyfile
-├── docker-compose.yml       # dev: postgres, redis, minio, mailpit
+├── docker-compose.yml       # dev: postgres, redis, rustfs (S3), mailpit
 ├── docker-compose.prod.yml
 └── .github/workflows/
 ```
@@ -256,7 +257,7 @@ OutboxEvent ─► Relay (claim theo lô: FOR UPDATE SKIP LOCKED, set lockedAt/l
                retry với nextRetryAt + backoff, ghi lastError) ─► BullMQ
 
 booking.confirmed     ─► generate-pdf  : pdfkit + qrcode, 1 trang / vé
-                                         → MinIO key cố định tickets/{bookingId}.pdf (ghi đè an toàn)
+                                         → S3 key cố định tickets/{bookingId}.pdf (ghi đè an toàn)
                       ─► send-email    : bỏ qua nếu emailSentAt đã có; gửi xong thì cập nhật emailSentAt
                       ─► notify        : Notification + emit WS user:{id}
 booking.needs_review  ─► email xin lỗi user + notify admin
@@ -302,7 +303,7 @@ Tiêu chí chính là **tính đúng đắn**: state machine, tranh chấp, idem
 | **A** | 500 request đồng thời giữ cùng 1 ghế | Đúng 1 thành công, còn lại `409`. Không lỗi 5xx, không cạn connection pool |
 | **B** | Nhiều request chọn các nhóm ghế giao nhau | Không có ghế nào thuộc 2 booking; không giữ thiếu ghế (all-or-nothing); không deadlock |
 | **C** | IPN trùng, sai chữ ký, sai số tiền, đến trong grace period, đến sau khi ghế đã bán cho người khác; IPN chạy song song với expire job | Trạng thái Payment/Booking/Seat/Ticket cuối cùng nhất quán; không bao giờ có 2 Ticket cho 1 ghế; đơn `NEEDS_REVIEW` không có Ticket |
-| **D** | Kill worker sau khi DB commit; SMTP lỗi; MinIO tạm thời không truy cập được; khởi động lại | Mọi sự kiện cuối cùng đều được xử lý; không phát hành vé trùng; PDF/email được retry |
+| **D** | Kill worker sau khi DB commit; SMTP lỗi; object storage (RustFS) tạm thời không truy cập được; khởi động lại | Mọi sự kiện cuối cùng đều được xử lý; không phát hành vé trùng; PDF/email được retry |
 
 Thời gian được inject qua `ClockService` để test hết hạn và grace period mà không phải chờ thật.
 
@@ -315,11 +316,11 @@ Thời gian được inject qua `ClockService` để test hết hạn và grace 
 
 ## 11. DevOps
 
-- **Local**: `docker-compose.yml` gồm postgres, redis, minio, mailpit.
+- **Local**: `docker-compose.yml` gồm postgres, redis, rustfs (S3), mailpit.
 - **CI (mọi PR)**: lint → typecheck → unit → integration/e2e (Testcontainers) → build → coverage gate.
 - **CD (push `main`)**: build image → push GHCR → SSH vào VPS → chạy `prisma migrate deploy` như **một bước riêng** → `docker compose up -d`.
 - **Migration**: theo kiểu expand/contract, nghĩa là mỗi migration phải tương thích ngược với phiên bản app đang chạy.
-- **VPS (môi trường demo)**: Caddy, **1 API + 1 worker**, postgres, redis, minio. API instance thứ hai chỉ bật khi thử nghiệm phân phối tải.
+- **VPS (môi trường demo)**: Caddy, **1 API + 1 worker**, postgres, redis, rustfs (S3). API instance thứ hai chỉ bật khi thử nghiệm phân phối tải.
 - **Backup**: pg_dump hằng ngày ra nơi lưu trữ ngoài VPS. Có script khôi phục và **chạy thử khôi phục** ít nhất 1 lần, ghi lại kết quả.
 - **Vận hành**: Swagger (`/docs`), log JSON bằng pino, health check (`@nestjs/terminus`). Bull Board đặt sau guard xác thực admin.
 - **Bảo mật**: helmet, CORS, validate DTO, argon2, refresh token rotation, rate limit cho login và đặt vé.
@@ -335,7 +336,7 @@ Danh sách task chi tiết theo tuần: xem [ROADMAP.md](ROADMAP.md).
 | **1. Auth & danh mục** | 3–6 | Auth + roles; CRUD phim, phòng/ghế, suất chiếu (sinh `ShowtimeSeat` + chốt giá), bảng giá, ngày lễ, combo; FE danh sách/chi tiết phim, admin CRUD | Admin quản lý được dữ liệu; test tính giá theo múi giờ |
 | **2. Giữ ghế** ⭐ | 7–10 | Luồng giữ ghế, idempotency, rate limit, hết hạn (job + cron), WebSocket; FE sơ đồ ghế realtime | **Kịch bản A, B pass** |
 | **3. Thanh toán** | 11–13 | VNPay URL/return/IPN, querydr, grace period, `NEEDS_REVIEW` + trang admin | **Kịch bản C pass** |
-| **4. Giao vé** | 14–16 | Outbox relay, PDF + MinIO, email, notification, check-in từng vé; FE lịch sử vé, thông báo, trang staff | **Kịch bản D pass** |
+| **4. Giao vé** | 14–16 | Outbox relay, PDF + S3 (RustFS), email, notification, check-in từng vé; FE lịch sử vé, thông báo, trang staff | **Kịch bản D pass** |
 | **5. Voucher & hoàn thiện** | 17–19 | Voucher (mục 6), FE polish, Playwright | Test tranh chấp lượt voucher cuối cùng |
 | **6. Hiệu năng & chất lượng** | 20–21 | k6 + báo cáo, tối ưu index/query, bổ sung coverage, rà soát bảo mật | Báo cáo load test có số liệu thật |
 | **7. Deploy & tài liệu** | 22–24 | CD lên VPS, HTTPS, backup + chạy thử khôi phục, README, sơ đồ kiến trúc + sequence, video demo | Bản demo public; còn ~1 tuần dự phòng |
