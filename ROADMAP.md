@@ -22,11 +22,11 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 
 ### Tuần 2: Schema, test, frontend, CI
 - [x] **0.7** Prisma schema cho mọi bảng (trừ voucher) + migration đầu tiên
-- [ ] **0.8** Migration raw SQL:
+- [x] **0.8** Migration raw SQL:
   - `btree_gist` + exclusion constraint cho `Showtime`
   - CHECK constraint cho `ShowtimeSeat`
   - partial unique cho `Ticket` và `Payment`
-- [ ] **0.9** Hạ tầng test:
+- [x] **0.9** Hạ tầng test:
   - tách cấu hình Jest `unit` / `integration`
   - helper Testcontainers (khởi động PG + Redis, chạy migration)
   - test integration đầu tiên: xác nhận các constraint ở 0.8 chặn đúng

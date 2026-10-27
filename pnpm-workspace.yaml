@@ -6,5 +6,8 @@ allowBuilds:
   '@prisma/engines': true
   '@scarf/scarf': false
   '@swc/core': true
+  cpu-features: false
   prisma: true
+  protobufjs: false
+  ssh2: false
   unrs-resolver: true
