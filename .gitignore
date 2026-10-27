@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Generated code
+apps/api/src/generated/
+
+# Environment (only .env.example is committed)
+.env
+.env.*
+!.env.example
+
+# Test & coverage
+coverage/
+*.lcov
+junit.xml
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editors & OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Tooling caches
+.eslintcache
+.turbo/
+.vite/
