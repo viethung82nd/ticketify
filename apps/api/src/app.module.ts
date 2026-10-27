@@ -7,6 +7,7 @@ import { validationExceptionFactory } from './common/errors/api-error';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { AppConfigModule } from './config/app-config.module';
 import { AppConfig } from './config/app-config.service';
+import { ClockModule } from './infra/clock/clock.module';
 import { PrismaModule } from './infra/prisma/prisma.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { HealthModule } from './modules/health/health.module';
@@ -35,6 +36,7 @@ const requestIdFrom = (req: IncomingMessage): string => {
         },
       }),
     }),
+    ClockModule,
     PrismaModule,
     RedisModule,
     HealthModule,

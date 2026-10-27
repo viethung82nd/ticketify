@@ -13,6 +13,8 @@ import { Test } from '@nestjs/testing';
 import { IsInt, IsString, Min } from 'class-validator';
 import request from 'supertest';
 import type { App } from 'supertest/types';
+import { ClockService } from '../../infra/clock/clock.service';
+import { FakeClock } from '../../infra/clock/testing/fake-clock';
 import { validationExceptionFactory } from '../errors/api-error';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 
@@ -48,6 +50,8 @@ class ThingsController {
   }
 }
 
+const NOW = '2026-11-01T03:00:00.000Z';
+
 describe('global ValidationPipe + AllExceptionsFilter', () => {
   let app: INestApplication<App>;
 
@@ -65,6 +69,7 @@ describe('global ValidationPipe + AllExceptionsFilter', () => {
           }),
         },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },
+        { provide: ClockService, useValue: new FakeClock(NOW) },
       ],
     }).compile();
     app = moduleRef.createNestApplication({ logger: false });
@@ -115,6 +120,7 @@ describe('global ValidationPipe + AllExceptionsFilter', () => {
       code: 'NOT_FOUND',
       message: 'Thing not found',
       path: '/things/missing',
+      timestamp: NOW,
     });
   });
 
@@ -138,6 +144,7 @@ describe('global ValidationPipe + AllExceptionsFilter', () => {
       code: 'INTERNAL_ERROR',
       message: 'Internal server error',
       path: '/things/boom',
+      timestamp: NOW,
     });
   });
 

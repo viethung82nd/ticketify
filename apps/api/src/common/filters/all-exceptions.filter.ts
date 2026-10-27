@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
+import { ClockService } from '../../infra/clock/clock.service';
 import { type ApiErrorBody, defaultErrorCode } from '../errors/api-error';
 
 interface RequestLike {
@@ -25,7 +26,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
-  constructor(private readonly adapterHost: HttpAdapterHost) {}
+  constructor(
+    private readonly adapterHost: HttpAdapterHost,
+    private readonly clock: ClockService,
+  ) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const { httpAdapter } = this.adapterHost;
@@ -42,6 +46,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   toBody(exception: unknown, request: RequestLike): ApiErrorBody {
     const path = request.url ?? '';
     const requestId = typeof request.id === 'string' ? request.id : undefined;
+    const timestamp = this.clock.now().toISOString();
 
     if (!(exception instanceof HttpException)) {
       const statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
@@ -50,6 +55,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         code: defaultErrorCode(statusCode),
         message: 'Internal server error',
         path,
+        timestamp,
         requestId,
       };
     }
@@ -73,6 +79,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
       if (response.details !== undefined) details = response.details;
     }
 
-    return { statusCode, code, message, details, path, requestId };
+    return { statusCode, code, message, details, path, timestamp, requestId };
   }
 }
