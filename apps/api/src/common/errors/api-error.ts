@@ -10,6 +10,8 @@ export interface ApiErrorBody {
   /** Optional structured details (validation errors, conflicting ids...). */
   details?: unknown;
   path: string;
+  /** ISO-8601 instant from ClockService. */
+  timestamp: string;
   requestId?: string;
 }
 
