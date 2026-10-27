@@ -1,16 +1,5 @@
-import { z } from 'zod';
+import { healthResponseSchema } from '@ticketify/shared';
 import { apiClient } from '@/lib/api-client';
-
-const indicatorSchema = z.object({
-  status: z.enum(['up', 'down']),
-  message: z.string().optional(),
-});
-
-/** 200 → terminus result; 503 → standard API error body whose details hold the indicators. */
-const healthResponseSchema = z.union([
-  z.object({ status: z.literal('ok'), details: z.record(z.string(), indicatorSchema) }),
-  z.object({ statusCode: z.literal(503), details: z.record(z.string(), indicatorSchema) }),
-]);
 
 export interface ServiceHealth {
   name: string;

@@ -1,24 +1,8 @@
 import { BadRequestException, HttpStatus, type ValidationError } from '@nestjs/common';
+import type { ApiError, FieldError } from '@ticketify/shared';
 
-/** Body of every error response returned by the API. */
-export interface ApiErrorBody {
-  statusCode: number;
-  /** Machine-readable code, e.g. `VALIDATION_FAILED`, `NOT_FOUND`, `SEAT_UNAVAILABLE`. */
-  code: string;
-  /** Human-readable summary. */
-  message: string;
-  /** Optional structured details (validation errors, conflicting ids...). */
-  details?: unknown;
-  path: string;
-  /** ISO-8601 instant from ClockService. */
-  timestamp: string;
-  requestId?: string;
-}
-
-export interface FieldError {
-  field: string;
-  messages: string[];
-}
+/** Body of every error response returned by the API (schema lives in @ticketify/shared). */
+export type ApiErrorBody = ApiError;
 
 const DEFAULT_CODES: Partial<Record<number, string>> = {
   [HttpStatus.BAD_REQUEST]: 'BAD_REQUEST',
