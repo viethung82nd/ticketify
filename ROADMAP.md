@@ -1,4 +1,4 @@
-﻿# Ticketify — Lộ trình chi tiết
+# Ticketify — Lộ trình chi tiết
 
 Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việc theo tuần. Mỗi task có thể hoàn thành trong khoảng 0,5–2 ngày.
 
