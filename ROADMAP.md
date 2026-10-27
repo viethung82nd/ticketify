@@ -34,7 +34,9 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **0.11** `apps/web`: Vite + React + TS, Tailwind, shadcn/ui, React Router, TanStack Query, axios client, layout chung
 - [x] **0.12** `packages/shared`: các enum trạng thái, zod schema dùng chung
 - [x] **0.13** GitHub Actions CI: install → lint → typecheck → unit → integration → build
-- [ ] **0.14** Đăng ký VNPay sandbox; vẽ ERD lưu vào `docs/`
+- **0.14** Tài liệu & VNPay
+  - [x] Vẽ ERD lưu vào `docs/erd.md` (có test so với schema thật)
+  - [ ] Đăng ký VNPay sandbox (việc làm tay của chủ dự án; hướng dẫn trong README)
 
 **DoD:** `docker compose up` + `pnpm dev` chạy được cả API lẫn web; CI xanh; test constraint pass.
 
