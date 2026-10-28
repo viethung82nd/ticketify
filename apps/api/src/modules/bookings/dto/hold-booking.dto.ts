@@ -1,7 +1,18 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BOOKING_LIMITS } from '@ticketify/shared';
-import { Transform, type TransformFnParams } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsUUID } from 'class-validator';
+import { Transform, type TransformFnParams, Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
+  IsInt,
+  IsOptional,
+  IsUUID,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 
 /** UUIDs are compared lower-case, so `A…` and `a…` are the same seat (duplicates, hash). */
 const lowerCase = ({ value }: TransformFnParams): unknown =>
@@ -11,9 +22,24 @@ const lowerCaseEach = ({ value }: TransformFnParams): unknown =>
     ? value.map((item: unknown) => (typeof item === 'string' ? item.toLowerCase() : item))
     : value;
 
+/** Mirrors `comboItemSchema`. */
+export class ComboItemDto {
+  @ApiProperty()
+  @Transform(lowerCase)
+  @IsUUID('all')
+  comboId: string;
+
+  @ApiProperty({ minimum: 1, maximum: BOOKING_LIMITS.comboQuantityMax })
+  @IsInt()
+  @Min(1)
+  @Max(BOOKING_LIMITS.comboQuantityMax)
+  quantity: number;
+}
+
 /**
  * Mirrors `holdBookingRequestSchema`. Count, duplicates and format are value limits
- * (`400 VALIDATION_FAILED`); seat existence, couple pairs and availability need the database.
+ * (`400 VALIDATION_FAILED`); seat existence, couple pairs, availability and combos being on sale
+ * need the database.
  */
 export class HoldBookingDto {
   @ApiProperty()
@@ -34,4 +60,17 @@ export class HoldBookingDto {
   @ArrayUnique()
   @IsUUID('all', { each: true })
   seatIds: string[];
+
+  @ApiPropertyOptional({
+    type: [ComboItemDto],
+    maxItems: BOOKING_LIMITS.comboLinesMax,
+    description: 'Active combos; one line per combo (default: none)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(BOOKING_LIMITS.comboLinesMax)
+  @ArrayUnique((item: ComboItemDto) => item?.comboId)
+  @ValidateNested({ each: true })
+  @Type(() => ComboItemDto)
+  comboItems?: ComboItemDto[];
 }

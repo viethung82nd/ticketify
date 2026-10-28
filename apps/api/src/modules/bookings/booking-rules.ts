@@ -78,6 +78,28 @@ export function missingCouplePartners(
     .sort();
 }
 
+export interface BookingTotals {
+  /** Seats + combos. */
+  subtotal: number;
+  discount: number;
+  total: number;
+}
+
+/**
+ * Money of a booking (VND). Seat prices are the showtime's locked prices, combo lines the
+ * snapshot unit price × quantity. `discount` stays 0 until vouchers (phase 5).
+ */
+export function bookingTotals(
+  seatPrices: readonly number[],
+  comboLines: readonly { unitPrice: number; quantity: number }[],
+  discount = 0,
+): BookingTotals {
+  const seats = seatPrices.reduce((sum, price) => sum + price, 0);
+  const combos = comboLines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+  const subtotal = seats + combos;
+  return { subtotal, discount, total: subtotal - discount };
+}
+
 /** No 0/O or 1/I: the code is read out at the counter. */
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const CODE_LENGTH = 10;

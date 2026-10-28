@@ -6,6 +6,7 @@ import {
   ApiCreatedResponse,
   ApiHeader,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
@@ -31,6 +32,10 @@ export class BookingsController {
       '(A–Z a–z 0–9 . _ ~ : -), new for every booking attempt; resend it when retrying',
   })
   @ApiCreatedResponse({ description: 'Seats HELD until holdUntil; booking PENDING' })
+  @ApiOkResponse({
+    description:
+      'Same Idempotency-Key and same payload as an earlier request: that booking, as it is now',
+  })
   @ApiBadRequestResponse({
     description: 'VALIDATION_FAILED: body, seat count/duplicates, or the Idempotency-Key header',
   })
@@ -40,7 +45,9 @@ export class BookingsController {
       'SEAT_LOCKED, SEAT_UNAVAILABLE (details.seatIds), SHOWTIME_CANCELLED, BOOKING_ALREADY_PENDING',
   })
   @ApiUnprocessableEntityResponse({
-    description: 'SEAT_NOT_FOUND, COUPLE_INCOMPLETE, SHOWTIME_STARTED',
+    description:
+      'SEAT_NOT_FOUND, COUPLE_INCOMPLETE, SHOWTIME_STARTED, COMBO_NOT_AVAILABLE (details.comboIds), ' +
+      'IDEMPOTENCY_KEY_REUSED (same key, different payload)',
   })
   async hold(
     @CurrentUser() user: AuthUser,
@@ -52,6 +59,7 @@ export class BookingsController {
       userId: user.id,
       showtimeId: dto.showtimeId,
       seatIds: dto.seatIds,
+      comboItems: dto.comboItems ?? [],
       idempotencyKey,
     });
     res.status(result.created ? HttpStatus.CREATED : HttpStatus.OK);

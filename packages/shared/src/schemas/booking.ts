@@ -5,6 +5,9 @@ import { BookingStatus, SeatType } from '../enums.js';
 export const BOOKING_LIMITS = {
   /** Seats per booking (PLAN §1). */
   seatsMax: 6,
+  /** Different combos per booking, and units of one combo. */
+  comboLinesMax: 10,
+  comboQuantityMax: 10,
   /** `Idempotency-Key` header length. */
   idempotencyKeyMin: 8,
   idempotencyKeyMax: 128,
@@ -27,6 +30,18 @@ export function isIdempotencyKey(value: string): boolean {
 const hasNoDuplicates = (values: readonly string[]): boolean =>
   new Set(values.map((value) => value.toLowerCase())).size === values.length;
 
+export const comboItemSchema = z.object({
+  comboId: z.uuid(),
+  quantity: z
+    .number()
+    .int()
+    .min(1)
+    .max(BOOKING_LIMITS.comboQuantityMax, {
+      error: `Tối đa ${BOOKING_LIMITS.comboQuantityMax} phần mỗi combo`,
+    }),
+});
+export type ComboItem = z.infer<typeof comboItemSchema>;
+
 // ─── Requests ───
 
 /**
@@ -40,8 +55,16 @@ export const holdBookingRequestSchema = z.object({
     .min(1, { error: 'Vui lòng chọn ghế' })
     .max(BOOKING_LIMITS.seatsMax, { error: `Tối đa ${BOOKING_LIMITS.seatsMax} ghế mỗi đơn` })
     .refine(hasNoDuplicates, { error: 'Một ghế chỉ được chọn một lần' }),
+  /** Active combos only (`422 COMBO_NOT_AVAILABLE`); name and price are copied into the booking. */
+  comboItems: z
+    .array(comboItemSchema)
+    .max(BOOKING_LIMITS.comboLinesMax)
+    .refine((items) => hasNoDuplicates(items.map((item) => item.comboId)), {
+      error: 'Mỗi combo chỉ một dòng, tăng số lượng thay vì thêm dòng',
+    })
+    .default([]),
 });
-export type HoldBookingRequest = z.infer<typeof holdBookingRequestSchema>;
+export type HoldBookingRequest = z.input<typeof holdBookingRequestSchema>;
 
 // ─── Responses ───
 
@@ -57,6 +80,18 @@ export const bookingSeatSchema = z.object({
 });
 export type BookingSeat = z.infer<typeof bookingSeatSchema>;
 
+/** Snapshot taken at hold time: later combo edits never change it. */
+export const bookingComboSchema = z.object({
+  comboId: z.uuid(),
+  name: z.string(),
+  /** VND per unit. */
+  unitPrice: z.number().int(),
+  quantity: z.number().int(),
+  /** unitPrice × quantity. */
+  amount: z.number().int(),
+});
+export type BookingCombo = z.infer<typeof bookingComboSchema>;
+
 /** `201` (new) or `200` (same `Idempotency-Key` and payload again) body of `POST /bookings`. */
 export const bookingSchema = z.object({
   id: z.uuid(),
@@ -69,6 +104,8 @@ export const bookingSchema = z.object({
   /** expiresAt + payment grace: the seats stay HELD until then. */
   holdUntil: z.string(),
   seats: z.array(bookingSeatSchema),
+  combos: z.array(bookingComboSchema),
+  /** Seats + combos. */
   subtotal: z.number().int(),
   discount: z.number().int(),
   total: z.number().int(),
@@ -90,6 +127,10 @@ export const BookingErrorCode = {
   SHOWTIME_CANCELLED: 'SHOWTIME_CANCELLED',
   /** 422: the showtime has started (`startsAt <= now`). */
   SHOWTIME_STARTED: 'SHOWTIME_STARTED',
+  /** 422: a combo that does not exist or is switched off; `details.comboIds`. */
+  COMBO_NOT_AVAILABLE: 'COMBO_NOT_AVAILABLE',
+  /** 422: this Idempotency-Key was already used by the user for a different request. */
+  IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
   /** 409: the user already has a live PENDING booking for this showtime; `details.bookingId`. */
   BOOKING_ALREADY_PENDING: 'BOOKING_ALREADY_PENDING',
 } as const;
