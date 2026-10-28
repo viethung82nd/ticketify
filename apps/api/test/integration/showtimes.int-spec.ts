@@ -742,9 +742,37 @@ describe('Showtimes, schedule and seat map (real Postgres + Redis)', () => {
         },
         room: { id: room.id, name: room.name, rows: 3, cols: 4 },
       });
-      expect(map.seats).toHaveLength(11);
-      expect(map.seats.map((seat) => seat.label)).not.toContain('B4');
+      // Every seat of the room (3 × 4), including B4 which was off when the showtime was created.
+      const roomSeatCount = await db.prisma.seat.count({ where: { roomId: room.id } });
+      expect(roomSeatCount).toBe(12);
+      expect(map.seats).toHaveLength(roomSeatCount);
+      expect(map.seats.map((seat) => seat.label)).toEqual([
+        'A1',
+        'A2',
+        'A3',
+        'A4',
+        'B1',
+        'B2',
+        'B3',
+        'B4',
+        'C1',
+        'C2',
+        'C3',
+        'C4',
+      ]);
       const byLabel = new Map(map.seats.map((seat) => [seat.label, seat]));
+      expect(byLabel.get('B4')).toEqual({
+        id: room.seats.find((seat) => seat.row === 'B' && seat.number === 4)!.id,
+        row: 'B',
+        number: 4,
+        label: 'B4',
+        type: 'STANDARD',
+        isActive: false,
+        coupleGroup: null,
+        price: null,
+        status: 'UNAVAILABLE',
+      });
+      expect(map.seats.filter((seat) => seat.status === 'UNAVAILABLE')).toHaveLength(1);
       expect(byLabel.get('A1')).toMatchObject({ status: 'SOLD', type: 'VIP', price: 95_000 });
       expect(byLabel.get('A2')?.status).toBe('HELD');
       expect(byLabel.get('A3')?.status).toBe('AVAILABLE');

@@ -29,26 +29,34 @@ export function assertStartsInFuture(startsAt: Date, now: Date): void {
 }
 
 export interface SeatState {
-  status: ShowtimeSeatStatus;
-  heldUntil: Date | null;
-  /** `Seat.isActive`: a switched-off seat is never offered. */
+  /**
+   * The seat's ShowtimeSeat row, or `null` when it has none: only seats switched on when the
+   * showtime was created get one, so the others are not sold for this showtime.
+   */
+  showtimeSeat: { status: ShowtimeSeatStatus; heldUntil: Date | null } | null;
+  /** `Seat.isActive` now: a switched-off seat is never offered. */
   isActive: boolean;
 }
 
 /**
  * Status shown to customers, with lazy expiry (PLAN §4): a HELD seat whose `heldUntil` has
  * passed is AVAILABLE even before any job releases it. Read-only, nothing is written.
+ *
+ * No ShowtimeSeat row → UNAVAILABLE. A seat switched off after the showtime was created is
+ * UNAVAILABLE too; the layout is frozen while a showtime is upcoming, so that can only happen
+ * once the showtime has ended.
  */
 export function publicSeatStatus(seat: SeatState, now: Date): PublicSeatStatus {
-  if (!seat.isActive) return PublicSeatStatus.UNAVAILABLE;
+  const row = seat.showtimeSeat;
+  if (row === null || !seat.isActive) return PublicSeatStatus.UNAVAILABLE;
   if (
-    seat.status === ShowtimeSeatStatus.HELD &&
-    seat.heldUntil !== null &&
-    seat.heldUntil.getTime() <= now.getTime()
+    row.status === ShowtimeSeatStatus.HELD &&
+    row.heldUntil !== null &&
+    row.heldUntil.getTime() <= now.getTime()
   ) {
     return PublicSeatStatus.AVAILABLE;
   }
-  return seat.status;
+  return row.status;
 }
 
 export type CancelDecision =

@@ -28,7 +28,11 @@ export class ShowtimesController {
   }
 
   @Get(':id/seats')
-  @ApiOkResponse({ description: 'Room grid and every seat with its locked price and status' })
+  @ApiOkResponse({
+    description:
+      'Room grid and every seat of the room: locked price and status (expired holds shown ' +
+      'AVAILABLE); seats without a ShowtimeSeat row are UNAVAILABLE with price null',
+  })
   @ApiNotFoundResponse({ description: 'SHOWTIME_NOT_FOUND (also for cancelled showtimes)' })
   seats(@Param('id', new ParseUUIDPipe()) id: string): Promise<ShowtimeSeatMap> {
     return this.schedule.seatMap(id);

@@ -65,7 +65,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 ### Tuần 6: Suất chiếu & combo
 - [x] **1.13** Tạo suất chiếu: `endsAt = startsAt + thời lượng + thời gian dọn phòng`. Trong cùng transaction tạo `Showtime` + sinh `ShowtimeSeat`, chốt giá từng ghế (`PricingService.dayType(startsAt, tx)` + `priceFor`). Lỗi exclusion constraint trả về `409`. **Khóa dòng phòng bằng `SELECT … FROM rooms WHERE id = $1 FOR SHARE` trước khi đọc danh sách ghế**, để không chạy đồng thời với một lần sửa ghế (`PATCH /admin/rooms/:id/seats` giữ `FOR UPDATE` trên cùng dòng)
 - [x] **1.14** Hủy suất chiếu: chỉ cho phép khi chưa có ghế `HELD/SOLD` (vì không có hoàn tiền)
-- [x] **1.15** API public: lịch chiếu theo phim/ngày; `GET /showtimes/:id/seats`
+- [x] **1.15** API public: lịch chiếu theo phim/ngày; `GET /showtimes/:id/seats` trả **mọi ghế của phòng** (left join với `ShowtimeSeat` của suất): ghế có dòng trả `AVAILABLE` / `HELD` còn hạn / `SOLD` kèm giá đã chốt, `HELD` hết hạn trả `AVAILABLE` (hết hạn lười, không ghi DB); ghế không có dòng (tắt lúc tạo suất) trả `UNAVAILABLE`, `price: null`
 - [x] **1.16** CRUD combo
 - [x] **1.17** FE: lịch chiếu trên trang chi tiết phim; admin: form suất chiếu, quản lý combo
 

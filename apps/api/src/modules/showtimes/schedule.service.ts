@@ -91,9 +91,11 @@ export class ScheduleService {
   }
 
   /**
-   * The room grid and the state of every seat of the showtime, enough to draw the seat map in
-   * one call. Seats without a ShowtimeSeat row (switched off when the showtime was created) are
-   * not listed; their grid positions are gaps. A cancelled showtime is not shown to customers.
+   * The room grid and every seat of the room with its state for this showtime, enough to draw
+   * the seat map in one call: the room's seats left-joined with the showtime's ShowtimeSeat
+   * rows. A seat without a row (switched off when the showtime was created) is UNAVAILABLE with
+   * `price: null`. A cancelled showtime is not shown to customers. A showtime that has started
+   * is still shown; holding seats must check `startsAt > now` itself (ROADMAP 2.2).
    */
   async seatMap(id: string): Promise<ShowtimeSeatMap> {
     const showtime = await this.prisma.showtime.findUnique({
@@ -104,13 +106,14 @@ export class ScheduleService {
         endsAt: true,
         status: true,
         movie: { select: { id: true, title: true, slug: true, duration: true, ageRating: true } },
-        room: { select: { id: true, name: true, rows: true, cols: true } },
-        showtimeSeats: {
+        room: {
           select: {
-            status: true,
-            heldUntil: true,
-            price: true,
-            seat: {
+            id: true,
+            name: true,
+            rows: true,
+            cols: true,
+            // Every seat of the room, with this showtime's row when it has one (a LEFT JOIN).
+            seats: {
               select: {
                 id: true,
                 row: true,
@@ -118,10 +121,14 @@ export class ScheduleService {
                 type: true,
                 isActive: true,
                 coupleGroup: true,
+                showtimeSeats: {
+                  where: { showtimeId: id },
+                  select: { status: true, heldUntil: true, price: true },
+                },
               },
+              orderBy: [{ row: 'asc' }, { number: 'asc' }],
             },
           },
-          orderBy: [{ seat: { row: 'asc' } }, { seat: { number: 'asc' } }],
         },
       },
     });
@@ -134,19 +141,27 @@ export class ScheduleService {
     }
 
     const now = this.clock.now();
-    const { showtimeSeats, ...rest } = showtime;
+    const {
+      room: { seats, ...room },
+      ...rest
+    } = showtime;
     return {
       showtime: {
         ...rest,
+        room,
         startsAt: rest.startsAt.toISOString(),
         endsAt: rest.endsAt.toISOString(),
       },
-      seats: showtimeSeats.map(({ seat, status, heldUntil, price }) => ({
-        ...seat,
-        label: seatLabel(seat),
-        price,
-        status: publicSeatStatus({ status, heldUntil, isActive: seat.isActive }, now),
-      })),
+      seats: seats.map(({ showtimeSeats, ...seat }) => {
+        // PK(showtime_id, seat_id): at most one row per seat.
+        const showtimeSeat = showtimeSeats[0] ?? null;
+        return {
+          ...seat,
+          label: seatLabel(seat),
+          price: showtimeSeat?.price ?? null,
+          status: publicSeatStatus({ showtimeSeat, isActive: seat.isActive }, now),
+        };
+      }),
     };
   }
 }

@@ -84,9 +84,18 @@ describe('cinemaDayRange (CINEMA_TZ = Asia/Ho_Chi_Minh, UTC+7)', () => {
 
 describe('publicSeatStatus (lazy expiry, read-only)', () => {
   const seat = (status: ShowtimeSeatStatus, heldUntil: string | null, isActive = true) => ({
-    status,
-    heldUntil: heldUntil === null ? null : instant(heldUntil),
+    showtimeSeat: { status, heldUntil: heldUntil === null ? null : instant(heldUntil) },
     isActive,
+  });
+
+  it('a seat without a ShowtimeSeat row (off when the showtime was created) is UNAVAILABLE', () => {
+    expect(publicSeatStatus({ showtimeSeat: null, isActive: false }, NOW)).toBe(
+      PublicSeatStatus.UNAVAILABLE,
+    );
+    // Even if it was switched back on later: it is not sold for this showtime.
+    expect(publicSeatStatus({ showtimeSeat: null, isActive: true }, NOW)).toBe(
+      PublicSeatStatus.UNAVAILABLE,
+    );
   });
 
   it('an expired HELD seat is AVAILABLE', () => {
@@ -112,7 +121,7 @@ describe('publicSeatStatus (lazy expiry, read-only)', () => {
     expect(publicSeatStatus(seat('SOLD', null), NOW)).toBe(PublicSeatStatus.SOLD);
   });
 
-  it('a switched-off seat is UNAVAILABLE, never AVAILABLE, whatever its row says', () => {
+  it('a seat switched off after creation is UNAVAILABLE, never AVAILABLE, whatever its row says', () => {
     expect(publicSeatStatus(seat('AVAILABLE', null, false), NOW)).toBe(
       PublicSeatStatus.UNAVAILABLE,
     );

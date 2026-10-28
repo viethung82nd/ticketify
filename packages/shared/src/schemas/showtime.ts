@@ -132,7 +132,8 @@ export type ShowtimeDates = z.infer<typeof showtimeDatesSchema>;
 
 /**
  * Seat status shown to customers. Lazy expiry: a HELD seat whose hold has passed is shown
- * AVAILABLE. UNAVAILABLE = the seat is switched off in the room; it can never be booked.
+ * AVAILABLE. UNAVAILABLE = the seat is not sold for this showtime (it was switched off when the
+ * showtime was created, so it has no ShowtimeSeat row); it can never be booked.
  */
 export const PublicSeatStatus = {
   AVAILABLE: 'AVAILABLE',
@@ -151,15 +152,16 @@ export const showtimeSeatSchema = z.object({
   isActive: z.boolean(),
   /** The two seats of a couple pair share this number and are booked together. */
   coupleGroup: z.number().int().nullable(),
-  /** VND, locked when the showtime was created. */
-  price: z.number().int(),
+  /** VND, locked when the showtime was created; `null` for an UNAVAILABLE seat without a row. */
+  price: z.number().int().nullable(),
   status: z.enum(PublicSeatStatus),
 });
 export type ShowtimeSeat = z.infer<typeof showtimeSeatSchema>;
 
 /**
- * `GET /showtimes/:id/seats`: everything the seat map needs in one call. Seats are ordered by
- * row then number; grid positions without a seat (`rows × cols` minus `seats`) are gaps.
+ * `GET /showtimes/:id/seats`: everything the seat map needs in one call. Every seat of the room
+ * is listed, ordered by row then number; a seat not sold for this showtime is UNAVAILABLE with
+ * `price: null`. Grid positions without a seat (`rows × cols` minus `seats`) are gaps.
  */
 export const showtimeSeatMapSchema = z.object({
   showtime: z.object({
