@@ -14,7 +14,7 @@ import { EmptyState, ErrorState } from '@/components/catalog/query-states';
 import { BookingStepper } from '@/components/booking/booking-stepper';
 import { Button } from '@/components/ui/button';
 import { holdErrorMessage } from '@/features/bookings/booking-errors';
-import { holdBooking, pendingBookingIdOf, seatIdsOf } from '@/features/bookings/bookings-api';
+import { holdBooking, pendingBookingOf, seatIdsOf } from '@/features/bookings/bookings-api';
 import { errorCodeOf } from '@/features/catalog/catalog-errors';
 import { useCombos } from '@/features/combos/combos-api';
 import { SeatLegend, SeatMap } from '@/features/seats/seat-map';
@@ -215,7 +215,7 @@ export function BookingPage() {
         await reload();
       }
       const text = holdErrorMessage(error);
-      setNotice({ text, bookingId: pendingBookingIdOf(error) });
+      setNotice({ text, bookingId: pendingBookingOf(error)?.existingBookingId });
       setAnnouncement(text);
     },
     onSettled: () => {
@@ -404,17 +404,14 @@ export function BookingPage() {
               className="flex gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive"
             >
               <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-              <p>
-                {notice.text}
+              <div className="space-y-2">
+                <p>{notice.text}</p>
                 {notice.bookingId && (
-                  <>
-                    {' '}
-                    <Link to={`/bookings/${notice.bookingId}`} className="font-semibold underline">
-                      Xem đơn đang chờ
-                    </Link>
-                  </>
+                  <Button asChild variant="outline" size="sm" className="rounded-lg text-cream">
+                    <Link to={`/bookings/${notice.bookingId}`}>Xem đơn đang chờ</Link>
+                  </Button>
                 )}
-              </p>
+              </div>
             </div>
           )}
 

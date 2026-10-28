@@ -40,7 +40,8 @@ const JOIN_TIMEOUT_MS = 10_000;
 const JOIN_FAILURES: Record<string, string> = {
   SHOWTIME_NOT_FOUND: 'Suất chiếu không còn tồn tại hoặc đã bị hủy.',
   TOO_MANY_ATTEMPTS: 'Bạn mở sơ đồ ghế quá nhiều lần trong một phút. Vui lòng thử lại sau.',
-  TOO_MANY_SUBSCRIPTIONS: 'Bạn đang mở quá nhiều suất chiếu cùng lúc. Hãy đóng bớt các tab khác.',
+  TOO_MANY_SUBSCRIPTIONS:
+    'Bạn đang xem quá nhiều suất chiếu cùng lúc. Hãy đóng bớt các tab đang mở sơ đồ ghế rồi tải lại trang.',
 };
 
 /**

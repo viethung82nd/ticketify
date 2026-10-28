@@ -1,6 +1,7 @@
 import { BookingErrorCode, CommonErrorCode } from '@ticketify/shared';
 import { apiErrorOf, isNetworkError } from '@/lib/api-error';
-import { retryAfterOf } from './bookings-api';
+import { cinemaTime } from '@/lib/cinema-time';
+import { pendingBookingOf, retryAfterOf } from './bookings-api';
 
 /**
  * Vietnamese message for a failed `POST /bookings` that is not a seat conflict (those name the
@@ -18,8 +19,12 @@ export function holdErrorMessage(error: unknown): string {
         ? `Bạn thao tác quá nhanh. Vui lòng thử lại sau ${seconds} giây.`
         : 'Bạn thao tác quá nhanh. Vui lòng thử lại sau ít phút.';
     }
-    case BookingErrorCode.BOOKING_ALREADY_PENDING:
-      return 'Bạn đang có một đơn chờ thanh toán cho suất này. Ghế của đơn đó vẫn được giữ đến hết thời gian chờ.';
+    case BookingErrorCode.BOOKING_ALREADY_PENDING: {
+      const pending = pendingBookingOf(error);
+      return pending
+        ? `Bạn đang có một đơn chờ thanh toán cho suất này (hạn thanh toán ${cinemaTime(pending.expiresAt)}). Hãy hoàn tất đơn đó, hoặc đặt lại sau khi đơn hết hạn.`
+        : 'Bạn đang có một đơn chờ thanh toán cho suất này. Hãy hoàn tất đơn đó, hoặc đặt lại sau khi đơn hết hạn.';
+    }
     case BookingErrorCode.SHOWTIME_STARTED:
       return 'Suất chiếu đã bắt đầu, không thể đặt vé nữa.';
     case BookingErrorCode.SHOWTIME_CANCELLED:

@@ -1,4 +1,5 @@
 import {
+  bookingAlreadyPendingDetailsSchema,
   type Booking,
   bookingSchema,
   type ComboItem,
@@ -67,16 +68,18 @@ export const useBooking = (id: string) =>
 // ─── Errors of POST /bookings ───
 
 const seatIdsDetails = z.object({ seatIds: z.array(z.string()) });
-const bookingIdDetails = z.object({ bookingId: z.string() });
 
 export const seatIdsOf = (error: unknown): string[] => {
   const parsed = seatIdsDetails.safeParse(apiErrorOf(error)?.details);
   return parsed.success ? parsed.data.seatIds : [];
 };
 
-export const pendingBookingIdOf = (error: unknown): string | undefined => {
-  const parsed = bookingIdDetails.safeParse(apiErrorOf(error)?.details);
-  return parsed.success ? parsed.data.bookingId : undefined;
+/** The booking behind a `409 BOOKING_ALREADY_PENDING`: its id and when it stops blocking. */
+export const pendingBookingOf = (
+  error: unknown,
+): { existingBookingId: string; expiresAt: string } | undefined => {
+  const parsed = bookingAlreadyPendingDetailsSchema.safeParse(apiErrorOf(error)?.details);
+  return parsed.success ? parsed.data : undefined;
 };
 
 export const retryAfterOf = (error: unknown): number | undefined => {
