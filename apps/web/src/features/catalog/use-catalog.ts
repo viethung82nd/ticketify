@@ -6,6 +6,7 @@ import {
   getMovie,
   listAdminGenres,
   listAdminMovies,
+  listAllCurrentMovies,
   listGenres,
   listMovies,
 } from './catalog-api';
@@ -19,6 +20,7 @@ export const catalogKeys = {
   adminMovies: (query: Partial<MovieListQuery>) => ['catalog', 'admin-movies', query] as const,
   adminMovie: (id: string) => ['catalog', 'admin-movie', id] as const,
   adminGenres: ['catalog', 'admin-genres'] as const,
+  currentMovies: ['catalog', 'current-movies'] as const,
 };
 
 /** Retry once on network/5xx errors; a 4xx (e.g. 404) will not change on retry. */
@@ -61,3 +63,7 @@ export const useAdminMovie = (id: string) =>
 
 export const useAdminGenres = () =>
   useQuery({ queryKey: catalogKeys.adminGenres, queryFn: listAdminGenres });
+
+/** Every COMING_SOON / NOW_SHOWING movie (all pages), e.g. for the showtime form. */
+export const useAllCurrentMovies = () =>
+  useQuery({ queryKey: catalogKeys.currentMovies, queryFn: listAllCurrentMovies });

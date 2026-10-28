@@ -1,6 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
-  CATALOG_LIMITS,
   CatalogErrorCode,
   type CreateShowtimeRequest,
   DayType,
@@ -13,7 +12,7 @@ import {
 } from '@ticketify/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CalendarClock, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { type FocusEvent, useEffect, useState } from 'react';
 import { type FieldPath, useForm, useWatch } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { z } from 'zod';
@@ -24,7 +23,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { FormAlert } from '@/features/auth/auth-card';
 import { catalogErrorMessage, errorCodeOf, errorFieldsOf } from '@/features/catalog/catalog-errors';
-import { useAdminMovies } from '@/features/catalog/use-catalog';
+import { useAllCurrentMovies } from '@/features/catalog/use-catalog';
 import { useRooms } from '@/features/rooms/use-rooms';
 import {
   createShowtime,
@@ -32,7 +31,14 @@ import {
   useShowtimePreview,
 } from '@/features/showtimes/showtimes-api';
 import { apiErrorOf } from '@/lib/api-error';
-import { cinemaDate, cinemaIso, cinemaTime, cinemaToday, longDayLabel } from '@/lib/cinema-time';
+import {
+  cinemaDate,
+  cinemaIso,
+  cinemaTime,
+  cinemaToday,
+  longDayLabel,
+  normalizeTime,
+} from '@/lib/cinema-time';
 
 const DAY_TYPE_NAMES: Record<DayType, string> = {
   [DayType.WEEKDAY]: 'Ngày thường',
@@ -45,7 +51,9 @@ const formSchema = z.object({
   movieId: z.string().min(1, { error: 'Vui lòng chọn phim' }),
   roomId: z.string().min(1, { error: 'Vui lòng chọn phòng' }),
   date: z.string().refine(isIsoDate, { error: 'Vui lòng chọn ngày chiếu' }),
-  time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, { error: 'Vui lòng nhập giờ bắt đầu' }),
+  time: z.string().refine((value) => normalizeTime(value) !== null, {
+    error: 'Nhập giờ dạng HH:mm (24 giờ), ví dụ 19:30',
+  }),
 });
 type FormValues = z.infer<typeof formSchema>;
 
@@ -170,7 +178,8 @@ export function NewShowtimePage() {
   const queryClient = useQueryClient();
   const [params] = useSearchParams();
   const initialDate = params.get('date') ?? '';
-  const movies = useAdminMovies({ page: 1, pageSize: CATALOG_LIMITS.pageSizeMax });
+  // Every page: the select must offer all schedulable movies, not just the first 50.
+  const movies = useAllCurrentMovies();
   const rooms = useRooms();
   const [formError, setFormError] = useState<string | null>(null);
   // The overlap error belongs to the values it was returned for; editing any field hides it.
@@ -183,6 +192,7 @@ export function NewShowtimePage() {
     control,
     handleSubmit,
     setError,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -198,7 +208,7 @@ export function NewShowtimePage() {
     control,
     name: ['movieId', 'roomId', 'date', 'time'],
   });
-  const startsAt = cinemaIso(date, time);
+  const startsAt = cinemaIso(date, normalizeTime(time) ?? '');
   const live = movieId && roomId && startsAt ? { movieId, roomId, startsAt } : null;
   const debounced = useDebounced(live, 300);
   // Never show a preview for values the form no longer has.
@@ -211,7 +221,7 @@ export function NewShowtimePage() {
   const onSubmit = async (values: FormValues) => {
     setFormError(null);
     setOverlap(null);
-    const iso = cinemaIso(values.date, values.time);
+    const iso = cinemaIso(values.date, normalizeTime(values.time) ?? '');
     if (!iso) return;
     try {
       await createShowtime({ movieId: values.movieId, roomId: values.roomId, startsAt: iso });
@@ -240,7 +250,8 @@ export function NewShowtimePage() {
     }
   };
 
-  const schedulable = movies.data?.items.filter((movie) => movie.status !== MovieStatus.ENDED);
+  // GET /movies already hides ENDED; filtered again in case a status changed meanwhile.
+  const schedulable = movies.data?.filter((movie) => movie.status !== MovieStatus.ENDED);
 
   return (
     <AdminShell
@@ -287,8 +298,26 @@ export function NewShowtimePage() {
             >
               <Input type="date" min={cinemaToday()} {...register('date')} />
             </FormField>
-            <FormField label="Giờ bắt đầu" error={errors.time} hint="Theo giờ Việt Nam (GMT+7).">
-              <Input type="time" step={300} {...register('time')} />
+            <FormField
+              label="Giờ bắt đầu"
+              error={errors.time}
+              hint="HH:mm, 24 giờ, theo giờ Việt Nam (GMT+7). Ví dụ 19:30."
+            >
+              {/* Not <input type="time">: it shows AM/PM or 24 h depending on the visitor's locale. */}
+              <Input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="19:30"
+                {...register('time', {
+                  onBlur: (e: FocusEvent<HTMLInputElement>) => {
+                    const normalized = normalizeTime(e.target.value);
+                    if (normalized && normalized !== e.target.value) {
+                      setValue('time', normalized, { shouldValidate: true });
+                    }
+                  },
+                })}
+              />
             </FormField>
           </div>
 

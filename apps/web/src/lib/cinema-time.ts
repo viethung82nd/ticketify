@@ -31,6 +31,18 @@ export const nextDays = (from: string, n: number): string[] =>
   Array.from({ length: n }, (_, i) => addDays(from, i));
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const LOOSE_TIME = /^(\d{1,2})\s*[:.hH]?\s*(\d{2})$/;
+
+/**
+ * A 24-hour time typed by hand → `HH:mm`, or `null` when it is not one. Accepts `19:30`,
+ * `9:30`, `1930`, `19.30`, `19h30`. No AM/PM: the field is the cinema's 24-hour wall clock.
+ */
+export function normalizeTime(text: string): string | null {
+  const match = LOOSE_TIME.exec(text.trim());
+  if (!match) return null;
+  const time = `${match[1]!.padStart(2, '0')}:${match[2]!}`;
+  return TIME_PATTERN.test(time) ? time : null;
+}
 
 /**
  * Date + time typed in the cinema's time zone → ISO 8601 with its offset
