@@ -19,7 +19,7 @@ export const ipKey = (ip: string): string => `rl:login:ip:${ip}`;
 /**
  * Login throttling with two fixed-window counters:
  * - per email (key = SHA-256 of the normalized email, so Redis never holds raw emails);
- * - per client IP (`req.ip`; behind a reverse proxy this needs `trust proxy`).
+ * - per client IP (`req.ip`, which follows `TRUST_PROXY` behind a reverse proxy).
  *
  * Every attempt is counted *before* the password is checked: counting atomically up front
  * means a burst of parallel guesses cannot slip past the limit. A successful login resets

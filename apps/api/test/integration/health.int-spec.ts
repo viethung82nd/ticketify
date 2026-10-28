@@ -5,6 +5,7 @@ import { Redis } from 'ioredis';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { PrismaClient } from '../../src/generated/prisma/client';
+import { appTestEnv } from '../support/app-env';
 import { createTestDatabase, type TestDatabase } from '../support/database';
 import { createTestRedis, type TestRedis } from '../support/redis';
 
@@ -29,21 +30,7 @@ describe('GET /health (real Postgres + Redis)', () => {
   beforeAll(async () => {
     [db, redis] = await Promise.all([createTestDatabase(), createTestRedis()]);
     // ConfigModule reads process.env when the module graph is first imported.
-    Object.assign(process.env, {
-      NODE_ENV: 'test',
-      LOG_LEVEL: 'silent',
-      CORS_ORIGINS: 'http://localhost:5173',
-      DATABASE_URL: db.url,
-      REDIS_URL: redis.url,
-      S3_ENDPOINT: 'http://localhost:9000',
-      S3_ACCESS_KEY: 'test',
-      S3_SECRET_KEY: 'test-secret',
-      S3_BUCKET: 'test-bucket',
-      SMTP_HOST: 'localhost',
-      SMTP_PORT: '1025',
-      SMTP_FROM: 'test@ticketify.local',
-      JWT_ACCESS_SECRET: 'integration-test-access-secret-0123456789',
-    });
+    Object.assign(process.env, appTestEnv({ databaseUrl: db.url, redisUrl: redis.url }));
     ({ AppModule } = await import('../../src/app.module.js'));
     ({ REDIS } = await import('../../src/infra/redis/redis.module.js'));
     ({ PrismaService } = await import('../../src/infra/prisma/prisma.service.js'));

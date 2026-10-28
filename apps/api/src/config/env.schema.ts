@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
 
 /** Treat `KEY=` (empty string) the same as an unset variable. */
@@ -29,6 +30,50 @@ const commaSeparatedUrls = z
   )
   .pipe(z.array(z.url({ protocol: /^https?$/ })).min(1));
 
+const TRUST_PROXY_PRESETS = new Set(['loopback', 'linklocal', 'uniquelocal']);
+
+/** A preset, an IP address, or a CIDR range (what Express' proxy-addr accepts). */
+const isTrustProxyEntry = (entry: string): boolean => {
+  if (TRUST_PROXY_PRESETS.has(entry)) return true;
+  const [address = '', prefix, ...rest] = entry.split('/');
+  const version = isIP(address);
+  if (version === 0 || rest.length > 0) return false;
+  if (prefix === undefined) return true;
+  return /^\d{1,3}$/.test(prefix) && Number(prefix) <= (version === 4 ? 32 : 128);
+};
+
+/**
+ * Express `trust proxy` — which hops may set `X-Forwarded-For`, i.e. where `req.ip` comes from.
+ * - `false` (default): the socket address; right when nothing sits in front of the API.
+ * - a hop count (`1` behind a single Caddy), or a list of presets / IPs / CIDRs.
+ * `true` is refused: it trusts any client-supplied header, so anyone could change their IP
+ * on every request and walk around the per-IP login limit.
+ */
+const trustProxy = z
+  .string()
+  .trim()
+  .default('false')
+  .transform((value, ctx): false | number | string[] => {
+    if (value === '' || value === 'false' || value === '0') return false;
+    if (/^\d+$/.test(value)) return Number(value);
+    const entries = value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+    const invalid = entries.filter((entry) => !isTrustProxyEntry(entry));
+    if (invalid.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          value === 'true'
+            ? '"true" would trust any client-supplied X-Forwarded-For; use a hop count or proxy addresses'
+            : `must be false, a hop count, or loopback/linklocal/uniquelocal/IP/CIDR (got ${invalid.join(', ')})`,
+      });
+      return z.NEVER;
+    }
+    return entries;
+  });
+
 /**
  * Single source of truth for API configuration.
  * Every key here must also appear in the repo-root `.env.example` (enforced by a unit test).
@@ -39,6 +84,7 @@ export const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   /** Comma-separated list of allowed browser origins. */
   CORS_ORIGINS: commaSeparatedUrls,
+  TRUST_PROXY: trustProxy,
 
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/, error: 'must be a postgresql:// URL' }),
   REDIS_URL: z.url({ protocol: /^rediss?$/, error: 'must be a redis:// URL' }),

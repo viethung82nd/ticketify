@@ -9,6 +9,7 @@ import { type AuthUser, CurrentUser } from '../../src/common/decorators/current-
 import { Roles } from '../../src/common/decorators/roles.decorator';
 import { ClockService } from '../../src/infra/clock/clock.service';
 import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
+import { appTestEnv } from '../support/app-env';
 import { createTestDatabase, type TestDatabase } from '../support/database';
 import { bodyOf, cookieValue, errorOf, setCookieLine } from '../support/http';
 import { createTestRedis, type TestRedis } from '../support/redis';
@@ -75,23 +76,13 @@ describe('Auth (real Postgres + Redis)', () => {
   beforeAll(async () => {
     [db, redis] = await Promise.all([createTestDatabase(), createTestRedis()]);
     // ConfigModule reads process.env when the module graph is first imported.
-    Object.assign(process.env, {
-      NODE_ENV: 'test',
-      LOG_LEVEL: 'silent',
-      CORS_ORIGINS: 'http://localhost:5173',
-      DATABASE_URL: db.url,
-      REDIS_URL: redis.url,
-      S3_ENDPOINT: 'http://localhost:9000',
-      S3_ACCESS_KEY: 'test',
-      S3_SECRET_KEY: 'test-secret',
-      S3_BUCKET: 'test-bucket',
-      SMTP_HOST: 'localhost',
-      SMTP_PORT: '1025',
-      SMTP_FROM: 'test@ticketify.local',
-      JWT_ACCESS_SECRET: 'integration-test-access-secret-0123456789',
-      LOGIN_RATE_LIMIT_MAX: String(LOGIN_MAX),
-      LOGIN_RATE_LIMIT_WINDOW_SECONDS: '900',
-    });
+    Object.assign(
+      process.env,
+      appTestEnv(
+        { databaseUrl: db.url, redisUrl: redis.url },
+        { LOGIN_RATE_LIMIT_MAX: String(LOGIN_MAX), LOGIN_RATE_LIMIT_WINDOW_SECONDS: '900' },
+      ),
+    );
     ({ AppModule } = await import('../../src/app.module.js'));
     ({ REDIS } = await import('../../src/infra/redis/redis.module.js'));
     clock = new FakeClock(START);
@@ -502,6 +493,22 @@ describe('Auth (real Postgres + Redis)', () => {
       expect(responses.every((res) => res.status === 401)).toBe(true);
 
       expectTooMany(await login(uniqueEmail(), 'wrong password!'));
+    });
+
+    it('per IP: a spoofed X-Forwarded-For is ignored by default (TRUST_PROXY=false)', async () => {
+      const responses = await Promise.all(
+        Array.from({ length: IP_MAX }, (_, i) =>
+          login(uniqueEmail(), 'wrong password!').set('X-Forwarded-For', `203.0.113.${i + 1}`),
+        ),
+      );
+      expect(responses.every((res) => res.status === 401)).toBe(true);
+
+      expectTooMany(
+        await login(uniqueEmail(), 'wrong password!').set('X-Forwarded-For', '198.51.100.7'),
+      );
+      const keys = await redis.client.keys('rl:login:ip:*');
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).toMatch(/127\.0\.0\.1$/);
     });
 
     it('a successful login resets the email counter', async () => {
