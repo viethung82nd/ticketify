@@ -12,8 +12,10 @@ import { TrustProxySetup } from './config/trust-proxy';
 import { ClockModule } from './infra/clock/clock.module';
 import { PrismaModule } from './infra/prisma/prisma.module';
 import { RedisModule } from './infra/redis/redis.module';
+import { StorageModule } from './infra/storage/storage.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { MoviesModule } from './modules/movies/movies.module';
 import { UsersModule } from './modules/users/users.module';
 
 const requestIdFrom = (req: IncomingMessage): string => {
@@ -43,9 +45,11 @@ const requestIdFrom = (req: IncomingMessage): string => {
     ClockModule,
     PrismaModule,
     RedisModule,
+    StorageModule,
     HealthModule,
     AuthModule,
     UsersModule,
+    MoviesModule,
   ],
   providers: [
     {
