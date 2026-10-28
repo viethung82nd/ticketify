@@ -1,4 +1,9 @@
-import { CatalogErrorCode, fieldErrorSchema } from '@ticketify/shared';
+import {
+  CatalogErrorCode,
+  fieldErrorSchema,
+  PricingErrorCode,
+  RoomErrorCode,
+} from '@ticketify/shared';
 import { z } from 'zod';
 import { apiErrorOf, isNetworkError } from '@/lib/api-error';
 
@@ -15,6 +20,22 @@ const MESSAGES: Record<string, string> = {
   [CatalogErrorCode.POSTER_NOT_UPLOADED]: 'Poster chưa được tải lên xong. Vui lòng tải lại ảnh.',
   [CatalogErrorCode.STORAGE_UNAVAILABLE]:
     'Kho lưu trữ ảnh đang tạm thời gián đoạn. Vui lòng thử lại sau.',
+  // Rooms & seat layout (admin).
+  [RoomErrorCode.ROOM_NOT_FOUND]: 'Không tìm thấy phòng. Có thể phòng đã bị xóa.',
+  [RoomErrorCode.ROOM_NAME_TAKEN]: 'Tên phòng này đã được dùng.',
+  [RoomErrorCode.ROOM_HAS_SHOWTIMES]:
+    'Phòng đã có suất chiếu (kể cả suất đã qua hoặc đã hủy) nên không thể xóa.',
+  [RoomErrorCode.ROOM_IN_USE]:
+    'Phòng đang có suất chiếu chưa kết thúc nên sơ đồ ghế bị khóa. Bạn vẫn có thể đổi tên phòng.',
+  [RoomErrorCode.SEAT_NOT_FOUND]:
+    'Sơ đồ ghế đã thay đổi ở nơi khác. Hãy hủy thay đổi để tải lại rồi thử lại.',
+  [RoomErrorCode.INVALID_COUPLE]: 'Ghế đôi chưa hợp lệ. Xem danh sách lỗi bên dưới.',
+  [RoomErrorCode.COUPLE_INCONSISTENT]:
+    'Hai ghế của một cặp ghế đôi phải cùng bật hoặc cùng tắt. Xem danh sách lỗi bên dưới.',
+  // Prices & holidays (admin).
+  [PricingErrorCode.PRICE_NOT_FOUND]: 'Không tìm thấy ô giá này. Hãy chạy lại seed dữ liệu giá.',
+  [PricingErrorCode.HOLIDAY_EXISTS]: 'Ngày này đã có trong danh sách ngày lễ.',
+  [PricingErrorCode.HOLIDAY_NOT_FOUND]: 'Không tìm thấy ngày lễ. Có thể đã bị xóa.',
   FORBIDDEN: 'Bạn không có quyền thực hiện thao tác này.',
   UNAUTHORIZED: 'Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.',
   VALIDATION_FAILED: 'Thông tin chưa hợp lệ. Vui lòng kiểm tra lại các trường được đánh dấu.',

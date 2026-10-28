@@ -28,6 +28,8 @@ Web đặt vé xem phim thời gian thực cho **một rạp**. Project portfoli
 | Testing | Unit, integration, e2e, kịch bản A–D, load test k6. Coverage tổng ≥ 80%, module lõi ≥ 90% |
 | DevOps | Docker Compose, GitHub Actions CI/CD, deploy lên VPS (môi trường demo) |
 
+> **Làm rõ (10/2026, không đổi thiết kế):** loại ngày của một suất chiếu tính theo **ngày lịch của `startsAt`** tại `CINEMA_TZ`. Suất 23:30 Chủ nhật → 01:30 thứ Hai là suất `WEEKEND`. Thứ tự ưu tiên: ngày có trong bảng `Holiday` → `HOLIDAY`; thứ Bảy, Chủ nhật → `WEEKEND`; còn lại → `WEEKDAY`.
+
 ## 2. Kiến trúc tổng thể
 
 ```
