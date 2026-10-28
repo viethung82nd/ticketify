@@ -504,12 +504,12 @@ describe('Seat hold — POST /bookings (real Postgres + Redis)', () => {
       ).toBe(201);
     });
 
-    it('a PENDING booking past its holdUntil does not count', async () => {
+    it('a PENDING booking past its expiresAt does not count (it can no longer be paid)', async () => {
       const { seat, showtime: st } = await scene();
       const user = await newUser();
       expect((await hold(user, { showtimeId: st.id, seatIds: [seat('A1')] })).status).toBe(201);
 
-      clock.advance({ seconds: HOLD_TTL_SECONDS + PAYMENT_GRACE_SECONDS - 1 });
+      clock.advance({ seconds: HOLD_TTL_SECONDS - 1 });
       user.token = tokenOf(user.id);
       expect((await hold(user, { showtimeId: st.id, seatIds: [seat('A2')] })).status).toBe(409);
 
