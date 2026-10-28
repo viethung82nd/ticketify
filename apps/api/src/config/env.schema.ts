@@ -87,6 +87,11 @@ export const envSchema = z.object({
   TRUST_PROXY: trustProxy,
 
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/, error: 'must be a postgresql:// URL' }),
+  /**
+   * Postgres connections per API process (node-postgres pool `max`). Seat holds fail fast with
+   * NOWAIT instead of queueing on row locks, so a request only waits here, for a free connection.
+   */
+  DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(200).default(10),
   REDIS_URL: z.url({ protocol: /^rediss?$/, error: 'must be a redis:// URL' }),
 
   /** Cinema time zone used for day-based business rules (weekend/holiday pricing). */

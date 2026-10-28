@@ -14,6 +14,7 @@ import { PrismaModule } from './infra/prisma/prisma.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { StorageModule } from './infra/storage/storage.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { BookingsModule } from './modules/bookings/bookings.module';
 import { CombosModule } from './modules/combos/combos.module';
 import { HealthModule } from './modules/health/health.module';
 import { MoviesModule } from './modules/movies/movies.module';
@@ -58,6 +59,7 @@ const requestIdFrom = (req: IncomingMessage): string => {
     PricingModule,
     ShowtimesModule,
     CombosModule,
+    BookingsModule,
   ],
   providers: [
     {

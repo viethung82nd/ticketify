@@ -14,6 +14,7 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
     super({
       adapter: new PrismaPg({
         connectionString: config.get('DATABASE_URL'),
+        max: config.get('DATABASE_POOL_MAX'),
         // node-postgres waits forever by default; fail fast instead.
         connectionTimeoutMillis: 5_000,
       }),
