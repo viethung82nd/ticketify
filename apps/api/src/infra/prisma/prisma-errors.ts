@@ -5,11 +5,38 @@ export const PrismaErrorCode = {
   uniqueViolation: 'P2002',
   foreignKeyViolation: 'P2003',
   recordNotFound: 'P2025',
+  /** Interactive transaction API errors: start timeout, expired, closed, unknown id. */
+  transactionApi: 'P2028',
 } as const;
 type PrismaErrorCode = (typeof PrismaErrorCode)[keyof typeof PrismaErrorCode];
 
 export function isPrismaError(error: unknown, code: PrismaErrorCode): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
+}
+
+/**
+ * The two `P2028` errors that mean "the database did not get to it in time", as opposed to the
+ * other `P2028`s (a query on a committed, rolled-back or unknown transaction), which are bugs.
+ * Prisma gives them no code of their own, only these fixed messages (Prisma 7 TransactionManager).
+ */
+const TRANSACTION_TIMEOUT_MESSAGES = [
+  // `maxWait` passed before a pool connection was free to start the transaction.
+  'Unable to start a transaction in the given time',
+  // `timeout` passed while the transaction was running; Prisma has rolled it back.
+  'cannot be executed on an expired transaction',
+] as const;
+
+/**
+ * `true` for a transaction that could not start within `maxWait` or ran past `timeout`.
+ * Nothing was written (the transaction never began or was rolled back), so the request can be
+ * retried as is: `AllExceptionsFilter` answers `503 DATABASE_BUSY`.
+ */
+export function isTransactionTimeout(error: unknown): boolean {
+  return (
+    isPrismaError(error, PrismaErrorCode.transactionApi) &&
+    error instanceof Error &&
+    TRANSACTION_TIMEOUT_MESSAGES.some((text) => error.message.includes(text))
+  );
 }
 
 /** Postgres SQLSTATE codes the services react to. */

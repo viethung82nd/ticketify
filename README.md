@@ -33,6 +33,7 @@ pnpm install                  # build packages/shared + sinh Prisma Client
 pnpm db:deploy                # áp dụng migration (gồm ràng buộc SQL viết tay)
 pnpm db:seed                  # dữ liệu mẫu, chạy lại bao nhiêu lần cũng được
 pnpm dev                      # API + web + shared (watch)
+pnpm --filter @ticketify/api dev:worker   # worker BullMQ: hết hạn giữ ghế (terminal riêng)
 ```
 
 | Địa chỉ | Nội dung |
@@ -52,6 +53,7 @@ API **không khởi động** nếu biến môi trường thiếu hoặc sai: l�
 | Lệnh | Việc |
 |---|---|
 | `pnpm dev` | Chạy API (`nest start --watch`), web (Vite), shared (`tsc --watch`) song song |
+| `pnpm --filter @ticketify/api dev:worker` | Worker BullMQ (`main.worker.ts`, watch). Bản build: `start:worker` (`node dist/main.worker.js`) |
 | `pnpm lint` | ESLint (typed) + Prettier check |
 | `pnpm typecheck` | `tsc --noEmit` cho mọi package |
 | `pnpm test:unit` | Unit test (không cần Docker) |
@@ -59,6 +61,7 @@ API **không khởi động** nếu biến môi trường thiếu hoặc sai: l�
 | `pnpm build` | Build shared, API, web |
 | `pnpm db:migrate` | `prisma migrate dev` (tạo migration mới khi đổi schema) |
 | `pnpm db:deploy` / `pnpm db:seed` | Áp dụng migration / seed dữ liệu mẫu |
+| `pnpm --filter @ticketify/api db:cleanup-test-data -- [--prefix "<tên phòng>"] [--apply]` | Xóa phòng có tên bắt đầu bằng tiền tố (mặc định `Phòng W8 Expiry`) cùng ghế, suất, ghế của suất và đơn của các suất đó, chỉ trên DB local. Không có `--apply` thì chỉ in số bản ghi sẽ xóa; dừng, không xóa gì nếu đơn nào đã có payment hoặc vé |
 
 ### Integration test
 
@@ -106,15 +109,36 @@ pnpm test:integration
 - Gửi lại cùng key và cùng nội dung → `200` với đơn cũ; cùng key khác nội dung → `422 IDEMPOTENCY_KEY_REUSED`.
 - Ghế đang bị request khác khóa → `409 SEAT_LOCKED`; ghế đã bán hoặc đang được giữ → `409 SEAT_UNAVAILABLE` (`details.seatIds`). Client tải lại sơ đồ ghế khi nhận `409`.
 - Suất đã hủy → `409 SHOWTIME_CANCELLED`; suất đã bắt đầu → `422 SHOWTIME_STARTED`; đã có đơn `PENDING` còn hạn cho suất này → `409 BOOKING_ALREADY_PENDING`.
+- Rate limit theo user: `BOOKING_RATE_LIMIT_MAX` (10) request mỗi cửa sổ cố định `BOOKING_RATE_LIMIT_WINDOW_SECONDS` (60 giây), key Redis `rl:booking:user:{userId}`. Vượt → `429 TOO_MANY_ATTEMPTS` với `details.retryAfterSeconds`. Đếm trước transaction giữ ghế và trước khi tra `Idempotency-Key` (request bị chặn không chạm DB); gửi lại cùng key cũng bị đếm. Redis lỗi thì bỏ qua giới hạn (fail-open, như giới hạn đăng nhập).
+
+**Đọc đơn** (đăng nhập, mọi vai trò):
+
+- `GET /bookings/:id`: đơn kèm `seats`, `combos`, `status`, `expiresAt`, `holdUntil`, `subtotal`, `total`. Đơn của người khác hoặc không tồn tại → `404 BOOKING_NOT_FOUND` (không dùng `403` để không lộ đơn có tồn tại); id sai định dạng → `400 VALIDATION_FAILED`.
+- `GET /me/bookings?status=&page=&pageSize=`: đơn của user hiện tại, mới nhất trước (`createdAt` giảm dần). `pageSize` mặc định 10, tối đa 50.
+- **`expired: boolean`** (cả trong `POST /bookings`) = `status == PENDING && holdUntil <= now`: đơn đã hết hạn dù job chưa kịp đánh dấu. `status` vẫn trả đúng giá trị đang lưu (`PENDING`), client dựa vào `expired` để hiện "đã hết hạn".
+
+**Hết hạn** (worker, `pnpm --filter @ticketify/api start:worker`): `holdUntil` trong DB là mốc chuẩn; job và cron chỉ dọn dẹp. Trong lúc chờ, luồng giữ ghế đã coi ghế `HELD` quá `held_until` là ghế trống (hết hạn lười).
+
+- Sau khi transaction giữ ghế commit, API thêm job BullMQ `expire-booking` (queue `bookings`, `jobId = expire-booking-{bookingId}` nên thêm hai lần vẫn một job) với `delay = max(0, holdUntil − now)` tính bằng `ClockService`.
+- **Đánh đổi khi enqueue lỗi**: nếu Redis không nhận job (lỗi hoặc không trả lời trong 1 giây) **sau khi** đơn đã commit, API ghi log `error` và vẫn trả `201`. Ghế đã được giữ thật; báo lỗi lúc này là nói "không" với một đơn đang tồn tại. Cái giá: đơn có thể bị đánh dấu `EXPIRED` trễ tới khoảng một phút, do cron mỗi phút bắt được. Trong khoảng đó không ai bị chặn: ghế quá hạn đã trống với người sau, và `expired` đã là `true`.
+- `expireBooking(bookingId)` chạy trong một transaction riêng cho mỗi đơn: khóa đơn `FOR UPDATE SKIP LOCKED` (đang bị job/cron khác giữ → `skipped`); không còn `PENDING` → `noop`; chưa tới `holdUntil` → `early` (job tự hẹn lại đúng `holdUntil`); còn lại → đơn `EXPIRED`, nhả ghế bằng `UPDATE … WHERE booking_id = $1 AND status = 'HELD'`. Điều kiện `booking_id` giữ nguyên ghế mà đơn khác đã lấy (hết hạn lười), và không bao giờ đụng ghế `SOLD`.
+- **Thứ tự khóa khi giải phóng ghế**: `bookings` (`FOR UPDATE SKIP LOCKED`) rồi các `showtime_seats` `HELD` của đơn (`FOR UPDATE ORDER BY seat_id`). Không có vòng chờ: luồng giữ ghế không chờ khóa nào (`NOWAIT`); hủy suất khóa `showtimes` rồi `showtime_seats` (`ORDER BY seat_id`) và không bao giờ khóa `bookings`.
+- **Cron mỗi phút** (job lặp của BullMQ, chỉ chạy trong worker): `SELECT id FROM bookings WHERE status = 'PENDING' AND hold_until <= now ORDER BY hold_until LIMIT 100` (không khóa), rồi `expireBooking` từng đơn. Lỗi ở một đơn được log và không chặn các đơn khác. Đủ 100 đơn thì quét tiếp ngay trong cùng job, tối đa 10 vòng. Chọn job lặp của BullMQ thay vì `@nestjs/schedule` vì lịch nằm trong Redis: nhiều process worker thì mỗi phút vẫn chỉ một job do một worker chạy, lịch còn nguyên sau khi khởi động lại, và không thêm dependency.
+- **Chờ khóa có giới hạn**: mỗi transaction hết hạn đơn của worker (job và cron) đặt `SET LOCAL lock_timeout` = `WORKER_LOCK_TIMEOUT_MS` (3 giây). Ghế bị phiên khác khóa lâu hơn → Postgres hủy câu lệnh (`55P03`), transaction rollback, đơn được coi là "bận": job được BullMQ thử lại theo backoff sẵn có (5 lần, lũy thừa từ 1 giây), cron đếm vào `busy` và để lần quét sau. Luồng giữ ghế của API không đặt `lock_timeout` vì đã dùng `NOWAIT`.
+- **Dừng worker**: concurrency 5. Nhận `SIGTERM`/`SIGINT` → ngừng nhận job mới, chờ job đang chạy kết thúc, đóng Postgres và Redis rồi thoát mã `0`. Toàn bộ việc này có **hạn cứng `WORKER_SHUTDOWN_GRACE_MS` (10 giây)** tính từ lúc nhận tín hiệu: quá hạn, worker ghi log `error` nêu tên job, id và `bookingId` đang chạy, rồi thoát mã `1` mà không chờ thêm (không chờ `app.close()`). An toàn vì transaction chưa commit bị Postgres rollback khi kết nối đứt (không bao giờ có đơn `EXPIRED` mà ghế còn `HELD`); job dở được BullMQ đánh dấu stalled và chạy lại khi khóa của nó trong Redis hết hạn (khoảng 30 giây), cron cũng xử lý đơn đó; `expireBooking` idempotent nên chạy lại không sai. Kết quả đo trên Linux (`worker-shutdown.int-spec.ts`, process worker thật + `SIGTERM` thật):
+  - Khóa ghế nhả 2 giây sau tín hiệu: job xong, thoát mã `0` sau khoảng 2,0–2,1 giây, đơn `EXPIRED`.
+  - Khóa giữ 20 giây: `lock_timeout` 3 giây cắt câu lệnh đang chờ, thoát mã `0` sau khoảng 2,9 giây, đơn vẫn `PENDING`; khóa nhả xong, lần chạy lại xử lý xong trong khoảng 0,64 giây.
+  - Câu lệnh treo (không phải chờ khóa): hạn cứng, thoát mã `1` sau 10,0 giây, đơn `PENDING`, ghế `HELD` (đã rollback); phục hồi mất khoảng 30–40 giây do khóa job mồ côi trong BullMQ.
+- **Chạy suite shutdown**: chỉ chạy khi đặt `RUN_SIGNAL_TESTS=1`, trên Linux/macOS (Windows không gửi được `SIGTERM` tới process khác nên luôn bỏ qua). `pnpm test:integration` thường bỏ qua suite này; workflow `Worker shutdown (Linux)` bật biến cho PR đụng `modules/bookings`, `infra/queue`, `main.worker.ts`, cho push lên `main`, hằng tuần và khi chạy tay. Chạy tay: `RUN_SIGNAL_TESTS=1 pnpm --filter @ticketify/api test:integration -- worker-shutdown`; log từng kịch bản nằm ở `artifacts/worker-shutdown/` (không commit).
 
 ## Cấu trúc
 
 ```
-apps/api/            NestJS API (sau này thêm worker)
+apps/api/            NestJS API (main.ts) + worker BullMQ (main.worker.ts)
   prisma/            schema, migrations (kèm SQL viết tay), seed
   src/config         env schema (zod) + AppConfig
   src/common         exception filter, định dạng lỗi
-  src/infra          prisma, redis, clock, storage (S3)
+  src/infra          prisma, redis, clock, storage (S3), queue (BullMQ)
   src/modules        health, auth, users, movies (phim, thể loại, upload poster)
   test/              integration test + helper Testcontainers
 apps/web/            React app

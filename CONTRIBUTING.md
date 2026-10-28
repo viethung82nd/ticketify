@@ -6,6 +6,17 @@
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) and are checked by commitlint in the `commit-msg` hook.
 - The `pre-commit` hook runs ESLint + Prettier on staged files (lint-staged). Never bypass hooks with `--no-verify`.
 
+## Tests that need OS signals
+
+A suite that sends real signals (`SIGTERM`, `SIGINT`…) to a child process is opt-in: it runs only when `RUN_SIGNAL_TESTS=1` and the platform is not Windows (Node cannot deliver a signal to another process there: `process.kill()` is a hard `TerminateProcess`). Gate it with the same two lines as `worker-shutdown.int-spec.ts`:
+
+```ts
+const signalTestsEnabled = process.env.RUN_SIGNAL_TESTS === '1' && process.platform !== 'win32';
+const describeSignal = signalTestsEnabled ? describe : describe.skip;
+```
+
+A plain `pnpm test:integration` (and the `ci` job) skips these suites. They run in their own workflow on `ubuntu-latest`, which sets `RUN_SIGNAL_TESTS=1` at job level and runs only that suite (see `.github/workflows/worker-shutdown.yml`). Never set the variable in `ci.yml`.
+
 ## Code rules
 
 - No `any`, no disabling lint rules to make CI green.
@@ -26,5 +37,11 @@ Every error body follows `ApiError` from `@ticketify/shared`, with a fixed machi
   - `422` — well-formed but breaks a rule that needs the database to check (`INVALID_COUPLE`, `COUPLE_INCONSISTENT`, `SEAT_NOT_FOUND`, `INVALID_GENRES`, `MOVIE_ENDED`), or a batch that is ambiguous as a whole: `INVALID_CHANGES` when one `seatId` appears more than once in `PATCH /admin/rooms/:id/seats` (`details.seatIds` lists them; nothing is written). (A repeated seat used to be a `400 VALIDATION_FAILED`.)
 
 Seat holds (`POST /bookings`, phase 2) follow the same tiers: seat count (1–6), repeated seats and a missing or malformed `Idempotency-Key` header are `400 VALIDATION_FAILED`; `409 SEAT_LOCKED` (another hold has the seat locked right now — Postgres `55P03` from `FOR UPDATE NOWAIT`), `409 SEAT_UNAVAILABLE` (`details.seatIds`), `409 SHOWTIME_CANCELLED`, `409 BOOKING_ALREADY_PENDING`; `422 SEAT_NOT_FOUND`, `422 COUPLE_INCOMPLETE` (`details.missingSeatIds`), `422 COMBO_NOT_AVAILABLE` (`details.comboIds`), `422 IDEMPOTENCY_KEY_REUSED` (same key, different payload; the same key with the same payload answers `200` with the existing booking instead of `201`) and `422 SHOWTIME_STARTED`. The same code `SHOWTIME_STARTED` is a `409` when an admin cancels a started showtime (a state conflict on the admin's own action) and a `422` when a customer tries to hold seats of it.
+
+Booking reads and limits (week 8): `GET /bookings/:id` answers `404 BOOKING_NOT_FOUND` both for an unknown id and for another user's booking — never `403`, which would confirm that the booking exists; a malformed id is `400 VALIDATION_FAILED`, like `GET /me/bookings` with an unknown `status` or a `pageSize` outside 1–50. `POST /bookings` beyond `BOOKING_RATE_LIMIT_MAX` requests per user per window is `429 TOO_MANY_ATTEMPTS` with `details.retryAfterSeconds` (the same code as the login limit).
+
+Database pressure (week 8): a request whose interactive transaction cannot get a pool connection within its `maxWait`, or runs past its `timeout` and is rolled back by Prisma (both Prisma `P2028`), answers `503 DATABASE_BUSY` (`CommonErrorCode` in `@ticketify/shared`), never `500`: nothing was written and the client may retry. Other `P2028` errors (a query on a committed, rolled-back or unknown transaction) are bugs and stay `500`, as do deadlocks (`P2034` / `40P01`), which mean a lock order is wrong. A transaction that can wait on locks or on a busy pool sets `maxWait` and `timeout` explicitly in a named constant with the reason next to it (`HOLD_TX`, `EXPIRE_TX`, `SHOWTIME_TX`) rather than relying on Prisma's implicit defaults (2 s / 5 s), which the other transactions still use. Do not raise `DATABASE_POOL_MAX` (default 10) to hide a 5xx: find what holds the connections.
+
+Worker transactions (week 8): every transaction the worker opens that can wait on a row lock starts with `SET LOCAL lock_timeout` (via `set_config('lock_timeout', …, true)`) set from a named constant with its reason, `WORKER_LOCK_TIMEOUT_MS` (3 s) for the booking expiry. A `55P03` there means "busy, try later", never a permanent failure: a job rethrows a plain `Error` so BullMQ retries it with the queue's backoff (never `UnrecoverableError`), the sweep counts it in `busy` and moves on. API flows that must not wait use `NOWAIT` instead and get no `lock_timeout` (`HOLD_TX`). Worker shutdown has one hard deadline, `WORKER_SHUTDOWN_GRACE_MS` (10 s) from the signal, after which `main.worker.ts` logs the running jobs and exits with code 1; keep `WORKER_LOCK_TIMEOUT_MS` well under it so a lock wait ends (and rolls back) before the deadline. Durations in this area are always named constants, never bare numbers.
 
 Known exception kept from week 4: `422 POSTER_NOT_UPLOADED` (and the content-type mismatch on the stored poster) — the key is well-formed but the object is missing or wrong in storage.

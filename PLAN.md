@@ -185,22 +185,24 @@ COMMIT;
 
 ```
 BEGIN
-  SELECT booking FOR UPDATE
+  SELECT booking FOR UPDATE SKIP LOCKED
+  không lấy được dòng (luồng khác đang khóa) → COMMIT, kết thúc ("skipped")
   nếu status ≠ PENDING                    → COMMIT, kết thúc (idempotent)
   nếu now < holdUntil                     → COMMIT, hẹn lại job
   nếu có Payment PENDING                  → gọi VNPay querydr (ngoài transaction, xem bên dưới)
        giao dịch thành công               → chạy confirmPayment() như IPN
        còn lại                            → Payment = EXPIRED
   Booking = EXPIRED
+  SELECT showtime_seats WHERE booking_id = $id AND status = 'HELD' ORDER BY seat_id FOR UPDATE
   UPDATE showtime_seats SET status='AVAILABLE', booking_id=NULL, held_until=NULL
     WHERE booking_id = $id AND status = 'HELD'
   (giai đoạn 5) VoucherUsage RESERVED → RELEASED
-  INSERT outbox(seats.released)
+  (giai đoạn 4) INSERT outbox(seats.released)   -- chưa có: hoãn sang 4.1, xem ROADMAP 2.7
 COMMIT
 ```
 
 - Lời gọi HTTP querydr nằm **ngoài** transaction: trước tiên đọc trạng thái, gọi querydr, rồi mở transaction mới và kiểm tra lại điều kiện.
-- **Cron mỗi phút** là lưới an toàn khi job bị mất: `SELECT id FROM bookings WHERE status='PENDING' AND hold_until <= now() ORDER BY hold_until LIMIT 100 FOR UPDATE SKIP LOCKED`, sau đó gọi `expireBooking` cho từng id.
+- **Cron mỗi phút** là lưới an toàn khi job bị mất: `SELECT id FROM bookings WHERE status='PENDING' AND hold_until <= now() ORDER BY hold_until LIMIT 100` (**không khóa**), sau đó gọi `expireBooking` cho từng id, mỗi đơn một transaction. `SKIP LOCKED` nằm ở bước khóa đơn bên trong `expireBooking`, không ở câu SELECT của cron: cron không giữ khóa nào trong suốt vòng lặp, và một đơn đang bị luồng khác khóa (job của chính đơn đó, hoặc IPN từ giai đoạn 3) trả `skipped` ngay, không chờ; nếu luồng kia không xử lý xong, lần quét sau sẽ thử lại.
 
 ### Realtime
 
@@ -269,7 +271,7 @@ seats.released        ─► emit WS showtime:{id}
 
 - **Phát hành vé** (tạo `Ticket`) diễn ra trong transaction thanh toán. Worker chỉ lo **giao vé**, vì vậy worker chạy lại không bao giờ tạo vé trùng.
 - Email đảm bảo *at-least-once*: nếu crash đúng lúc giữa SMTP gửi xong và lúc cập nhật `emailSentAt`, user có thể nhận 2 email. Đây là giới hạn được chấp nhận và ghi rõ trong tài liệu.
-- Job ID của BullMQ = `{eventId}:{action}` để chống enqueue trùng.
+- Job ID của BullMQ = `{eventId}-{action}` để chống enqueue trùng. Dấu gạch ngang, không phải `:`: BullMQ từ chối id tự đặt chứa `:` (lỗi "Custom Id cannot contain :"; chỉ chừa dạng có đúng hai dấu `:` của job lặp kiểu cũ), nên `{eventId}:{action}` không dùng được. Cùng quy ước với `expire-booking-{bookingId}` (ROADMAP 2.7).
 - **Check-in theo từng vé**: QR chứa token ký HMAC của `ticketCode`. Staff quét → `UPDATE tickets SET status='CHECKED_IN' WHERE code=$1 AND status='ISSUED'`. Kết quả cho biết vé hợp lệ, đã dùng, sai suất chiếu hay không tồn tại.
 
 ## 8. Realtime (Socket.IO)

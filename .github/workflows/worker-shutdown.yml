@@ -1,0 +1,93 @@
+name: Worker shutdown (Linux)
+
+# Real SIGTERM against the real worker process (worker-shutdown.int-spec.ts, ROADMAP 2.6).
+# The suite is opt-in (RUN_SIGNAL_TESTS=1); only this workflow turns it on.
+on:
+  pull_request:
+    paths:
+      - 'apps/api/src/modules/bookings/**'
+      - 'apps/api/src/infra/queue/**'
+      - 'apps/api/src/main.worker.ts'
+      - 'apps/api/test/integration/worker-shutdown.int-spec.ts'
+      - 'apps/api/test/support/worker-preload/**'
+      - '.github/workflows/worker-shutdown.yml'
+  push:
+    branches: [main]
+  # Weekly, for regressions from changes outside the paths above (Monday 02:00 UTC).
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: worker-shutdown-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  worker-shutdown:
+    name: worker shutdown on SIGTERM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUN_SIGNAL_TESTS: '1'
+      # Service containers below instead of Testcontainers. No storage: the suite never calls S3.
+      TEST_DATABASE_URL: postgresql://ticketify:ticketify@localhost:5432/ticketify
+      TEST_REDIS_URL: redis://localhost:6379
+    # Same images as docker-compose.yml and test/support/test-env.ts.
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_USER: ticketify
+          POSTGRES_PASSWORD: ticketify
+          POSTGRES_DB: ticketify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ticketify"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4.12-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Version comes from "packageManager" in package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Also builds packages/shared (prepare) and generates the Prisma client (postinstall).
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # The suite also compiles the worker itself (dist/.worker-shutdown) from the current sources.
+      - name: Worker shutdown test
+        run: pnpm --filter @ticketify/api test:integration -- worker-shutdown
+
+      - name: Upload worker logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: worker-shutdown-logs
+          path: artifacts/worker-shutdown/
+          if-no-files-found: ignore

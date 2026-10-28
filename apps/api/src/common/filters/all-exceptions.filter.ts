@@ -7,7 +7,9 @@ import {
   Logger,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
+import { CommonErrorCode } from '@ticketify/shared';
 import { ClockService } from '../../infra/clock/clock.service';
+import { isTransactionTimeout } from '../../infra/prisma/prisma-errors';
 import { type ApiErrorBody, defaultErrorCode } from '../errors/api-error';
 
 interface RequestLike {
@@ -20,7 +22,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * Turns every thrown error into the single `ApiErrorBody` shape.
- * Unknown errors become 500 without leaking internals to the client.
+ * Unknown errors become 500 without leaking internals to the client. A transaction that could not
+ * start within `maxWait` or ran past `timeout` (Prisma `P2028`) becomes `503 DATABASE_BUSY`:
+ * nothing was written and the client may retry. Both are still logged like any 5xx.
  */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -47,6 +51,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const path = request.url ?? '';
     const requestId = typeof request.id === 'string' ? request.id : undefined;
     const timestamp = this.clock.now().toISOString();
+
+    if (isTransactionTimeout(exception)) {
+      const statusCode = HttpStatus.SERVICE_UNAVAILABLE;
+      return {
+        statusCode,
+        code: CommonErrorCode.DATABASE_BUSY,
+        message: 'The database is busy, please try again',
+        path,
+        timestamp,
+        requestId,
+      };
+    }
 
     if (!(exception instanceof HttpException)) {
       const statusCode = HttpStatus.INTERNAL_SERVER_ERROR;

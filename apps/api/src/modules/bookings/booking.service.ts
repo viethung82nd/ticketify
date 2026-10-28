@@ -1,10 +1,8 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
-  type BookingCombo,
   type Booking as BookingView,
   BookingErrorCode,
   BookingStatus,
-  seatLabel,
   type SeatType,
   ShowtimeErrorCode,
   ShowtimeSeatStatus,
@@ -16,6 +14,7 @@ import type { Prisma } from '../../generated/prisma/client';
 import { ClockService } from '../../infra/clock/clock.service';
 import { isConstraintViolation, SQLSTATE, sqlStateOf } from '../../infra/prisma/prisma-errors';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { BookingExpirationQueue } from './booking-expiration-queue';
 import {
   bookingCode,
   bookingTotals,
@@ -27,7 +26,7 @@ import {
   showtimeRefusal,
   unavailableSeatIds,
 } from './booking-rules';
-import { ExpirationScheduler } from './expiration-scheduler';
+import { BookingViews } from './booking-views';
 import { requestHash } from './request-hash';
 
 type Tx = Prisma.TransactionClient;
@@ -171,7 +170,8 @@ export class BookingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
-    private readonly scheduler: ExpirationScheduler,
+    private readonly expirations: BookingExpirationQueue,
+    private readonly views: BookingViews,
     config: AppConfig,
   ) {
     this.holdTtlSeconds = config.get('HOLD_TTL_SECONDS');
@@ -208,11 +208,11 @@ export class BookingService {
 
     if (outcome.kind === 'existing') {
       if (outcome.requestHash !== hash) throw keyReused();
-      return { booking: await this.view(outcome.id), created: false };
+      return { booking: await this.views.byId(outcome.id), created: false };
     }
     // After commit: a job must never see a booking that was rolled back.
-    await this.scheduler.schedule(outcome.id, outcome.holdUntil);
-    return { booking: await this.view(outcome.id), created: true };
+    await this.expirations.schedule(outcome.id, outcome.holdUntil);
+    return { booking: await this.views.byId(outcome.id), created: true };
   }
 
   /** Steps of PLAN §4 inside one interactive transaction (READ COMMITTED). */
@@ -393,55 +393,6 @@ export class BookingService {
       where: { userId_idempotencyKey: { userId, idempotencyKey } },
       select: { id: true, requestHash: true },
     });
-  }
-
-  /** The booking as the API returns it: seats by row then number, combo lines by id. */
-  async view(id: string): Promise<BookingView> {
-    const booking = await this.prisma.booking.findUniqueOrThrow({
-      where: { id },
-      include: {
-        seats: {
-          include: {
-            showtimeSeat: { select: { seat: { select: { row: true, number: true, type: true } } } },
-          },
-        },
-        combos: { orderBy: { id: 'asc' } },
-      },
-    });
-    const seats = booking.seats
-      .map((line) => {
-        const { row, number, type } = line.showtimeSeat.seat;
-        return {
-          seatId: line.seatId,
-          row,
-          number,
-          label: seatLabel({ row, number }),
-          type,
-          price: line.price,
-        };
-      })
-      .sort((a, b) => a.row.localeCompare(b.row) || a.number - b.number);
-    const combos: BookingCombo[] = booking.combos.map((line) => ({
-      comboId: line.comboId,
-      name: line.comboName,
-      unitPrice: line.unitPrice,
-      quantity: line.quantity,
-      amount: line.unitPrice * line.quantity,
-    }));
-    return {
-      id: booking.id,
-      code: booking.code,
-      showtimeId: booking.showtimeId,
-      status: booking.status,
-      expiresAt: booking.expiresAt.toISOString(),
-      holdUntil: booking.holdUntil.toISOString(),
-      seats,
-      combos,
-      subtotal: booking.subtotal,
-      discount: booking.discount,
-      total: booking.total,
-      createdAt: booking.createdAt.toISOString(),
-    };
   }
 }
 
