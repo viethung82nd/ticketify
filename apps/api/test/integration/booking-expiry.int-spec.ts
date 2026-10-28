@@ -300,6 +300,31 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
     return /40P01|deadlock/i.test(text) ? '40P01' : undefined;
   };
 
+  /**
+   * Splits expirations by booking and by who did them. The sweep expires each booking through
+   * `expiry.expire`, so a spy on it sees every booking the sweep touched; the "job" side calls
+   * the returned `job` (the original method), which the spy does not see.
+   */
+  function attributeExpirations() {
+    const job = expiry.expire.bind(expiry);
+    const bySweep: { id: string; outcome: ExpireOutcomeKind }[] = [];
+    jest.spyOn(expiry, 'expire').mockImplementation(async (id) => {
+      const result = await job(id);
+      bySweep.push({ id, outcome: result.outcome });
+      return result;
+    });
+    return {
+      job,
+      /** Outcomes of `id` in the sweep since the last `reset()`. */
+      sweepOutcomes: (id: string) =>
+        bySweep.filter((call) => call.id === id).map((call) => call.outcome),
+      /** Expirations of `id` by the sweep since the last `reset()`. */
+      sweepExpired: (id: string) =>
+        bySweep.filter((call) => call.id === id && call.outcome === 'expired').length,
+      reset: () => bySweep.splice(0),
+    };
+  }
+
   // ─── expire-booking job ───
 
   describe('expireBooking (job)', () => {
@@ -349,7 +374,16 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
         await other.query('BEGIN');
         await other.query('SELECT 1 FROM bookings WHERE id = $1 FOR UPDATE', [booking.id]);
 
-        await expect(expiry.expire(booking.id)).resolves.toEqual({ outcome: 'skipped' });
+        // SKIP LOCKED: no wait on the other transaction (it never commits here), no error.
+        const who = attributeExpirations();
+        // Wall-clock time spent waiting (performance.now(): not business time, no ClockService).
+        const started = performance.now();
+        await expect(who.job(booking.id)).resolves.toEqual({ outcome: 'skipped' });
+        const report = await expiry.sweep();
+        expect(performance.now() - started).toBeLessThan(1_000);
+        expect(report.failed).toBe(0);
+        // (Bookings left overdue by earlier tests may be expired by this sweep: only ours counts.)
+        expect(who.sweepOutcomes(booking.id)).toEqual(['skipped']);
         expect(await bookingStatus(booking.id)).toBe('PENDING');
       } finally {
         await other.query('ROLLBACK');
@@ -477,24 +511,38 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
       const { seat, showtime: st } = await scene();
       const user = await newUser();
       const tally = { job: emptyOutcomes(), sweep: emptyOutcomes() };
+      const who = attributeExpirations();
+      const rows: string[] = [];
+      let total = 0;
       for (let i = 0; i < 10; i++) {
         await expiry.sweep();
         const id = await pendingBooking(user.id, st.id, [seat('A1')], clock.now());
+        who.reset();
         // Alternate which one starts first.
         const [job, sweep] = await Promise.all([
-          pause(i % 2 === 0 ? 0 : 25).then(() => expiry.expire(id)),
+          pause(i % 2 === 0 ? 0 : 25).then(() => who.job(id)),
           pause(i % 2 === 0 ? 1 : 0).then(() => expiry.sweep()),
         ]);
         tally.job[job.outcome] += 1;
         for (const [kind, n] of Object.entries(sweep.outcomes)) {
           tally.sweep[kind as ExpireOutcomeKind] += n;
         }
-        expect(Number(job.outcome === 'expired') + sweep.outcomes.expired).toBe(1);
+        // This booking, this round: expired exactly once, by the job or by the sweep.
+        const byJob = Number(job.outcome === 'expired');
+        const bySweep = who.sweepExpired(id);
+        rows.push(`round ${i + 1}: job ${job.outcome}, sweep expired ${bySweep}`);
+        expect(byJob + bySweep).toBe(1);
         expect(['expired', 'skipped', 'noop']).toContain(job.outcome);
+        expect(sweep.failed).toBe(0);
         expect(await bookingStatus(id)).toBe('EXPIRED');
         expect((await seatRow(st.id, seat('A1'))).status).toBe('AVAILABLE');
+        total += byJob + bySweep;
       }
-      console.info(`[2.10] job vs sweep on one booking, 10 rounds: ${JSON.stringify(tally)}`);
+      expect(total).toBe(10);
+      console.info(
+        `[2.10] job vs sweep on one booking, 10 rounds: ${JSON.stringify(tally)}\n  ` +
+          rows.join('\n  '),
+      );
     });
 
     it('job and sweep in parallel, 20 rounds (seed 8): each booking expired exactly once, no error, no deadlock', async () => {
@@ -504,6 +552,8 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
       const tally = { job: emptyOutcomes(), sweep: emptyOutcomes() };
       let errors = 0;
       let deadlocks = 0;
+      const rows: string[] = [];
+      const who = attributeExpirations();
 
       for (let round = 0; round < 20; round++) {
         await expiry.sweep();
@@ -512,16 +562,17 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
         for (const seatId of seats.slice(0, 6)) {
           ids.push(await pendingBooking(user.id, st.id, [seatId], clock.now()));
         }
+        who.reset();
         // Jobs start 0–11 ms late, sweeps 0–3 ms: either side may reach a booking first.
         const delayed = <T>(maxMs: number, work: () => Promise<T>) =>
           pause(Math.floor(rnd() * maxMs)).then(work);
         const settled = await Promise.allSettled<ExpireOutcome | SweepReport>([
-          ...ids.map((id) => delayed(12, () => expiry.expire(id))),
+          ...ids.map((id) => delayed(12, () => who.job(id))),
           delayed(4, () => expiry.sweep()),
           delayed(4, () => expiry.sweep()),
         ]);
 
-        let expired = 0;
+        const byJob = new Map<string, number>();
         for (const [i, result] of settled.entries()) {
           if (result.status === 'rejected') {
             errors += 1;
@@ -531,18 +582,24 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
           if (i < ids.length) {
             const outcome = (result.value as ExpireOutcome).outcome;
             tally.job[outcome] += 1;
-            if (outcome === 'expired') expired += 1;
+            byJob.set(ids[i]!, Number(outcome === 'expired'));
           } else {
             const report = result.value as SweepReport;
             errors += report.failed;
             for (const [kind, n] of Object.entries(report.outcomes)) {
               tally.sweep[kind as ExpireOutcomeKind] += n;
             }
-            expired += report.outcomes.expired;
           }
         }
-        // All 6 end EXPIRED and only 6 expirations were counted: each booking exactly once.
-        expect(expired).toBe(ids.length);
+        // Per booking, not a round total: each of the 6 expired exactly once (job or sweep).
+        const perBooking = ids.map((id) => ({
+          job: byJob.get(id) ?? 0,
+          sweep: who.sweepExpired(id),
+        }));
+        const mark = (b: { job: number; sweep: number }) =>
+          b.job + b.sweep !== 1 ? `!${b.job + b.sweep}` : b.job ? 'J' : 'S';
+        rows.push(`round ${String(round + 1).padStart(2)}: ${perBooking.map(mark).join(' ')}`);
+        expect(perBooking.map((b) => b.job + b.sweep)).toEqual(ids.map(() => 1));
         expect(
           await db.prisma.booking.count({ where: { id: { in: ids }, status: 'EXPIRED' } }),
         ).toBe(ids.length);
@@ -551,7 +608,8 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
 
       console.info(
         `[2.10] job vs sweep, 20 rounds × 6 bookings: ${JSON.stringify(tally)}; ` +
-          `errors ${errors}; deadlocks ${deadlocks}`,
+          `errors ${errors}; deadlocks ${deadlocks}\n  (J = expired by its job, S = by a sweep)\n  ` +
+          rows.join('\n  '),
       );
       expect(errors).toBe(0);
       expect(deadlocks).toBe(0);
@@ -950,10 +1008,22 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
       const { retryAfterSeconds } = errorOf(blocked).details as { retryAfterSeconds: number };
       expect(retryAfterSeconds).toBeGreaterThan(0);
       expect(retryAfterSeconds).toBeLessThanOrEqual(60);
+      // Exactly the time left in the window (the counter key's TTL in Redis).
+      const key = `rl:booking:user:${user.id}`;
+      expect(Math.abs(retryAfterSeconds - (await redis.client.ttl(key)))).toBeLessThanOrEqual(1);
       expect(await db.prisma.booking.count({ where: { showtimeId: st.id } })).toBe(before);
 
       const res = await hold(await newUser(), st.id, [seat('A3')]);
       expect(res.status).toBe(201);
+
+      // End of the window (shortened, real Redis expiry): the user is allowed again.
+      await redis.client.pexpire(key, 100);
+      await eventually(async () => (await redis.client.exists(key)) === 0, 2_000);
+      const again = await hold(user, st.id, [seat('A4')]);
+      // Past the limiter, back to the business rules: A1 is still this user's live booking.
+      expect(again.status).toBe(409);
+      expect(errorOf(again).code).toBe('BOOKING_ALREADY_PENDING');
+      expect(await redis.client.get(key)).toBe('1');
     });
   });
 });
