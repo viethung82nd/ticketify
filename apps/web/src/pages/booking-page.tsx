@@ -1,6 +1,12 @@
-import { BookingErrorCode, formatVnd, type ShowtimeSeat } from '@ticketify/shared';
+import {
+  BOOKING_LIMITS,
+  BookingErrorCode,
+  type ComboItem,
+  formatVnd,
+  type ShowtimeSeat,
+} from '@ticketify/shared';
 import { useMutation } from '@tanstack/react-query';
-import { AlertTriangle, ChevronLeft, Loader2, WifiOff } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, Loader2, Minus, Plus, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { AgeBadge } from '@/components/catalog/movie-card';
@@ -10,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { holdErrorMessage } from '@/features/bookings/booking-errors';
 import { holdBooking, pendingBookingIdOf, seatIdsOf } from '@/features/bookings/bookings-api';
 import { errorCodeOf } from '@/features/catalog/catalog-errors';
+import { useCombos } from '@/features/combos/combos-api';
 import { SeatLegend, SeatMap } from '@/features/seats/seat-map';
 import {
   dropTaken,
@@ -22,6 +29,11 @@ import {
 import { type LiveState, useSeatMap } from '@/features/seats/use-seat-map';
 import { cinemaDate, cinemaTime, longDayLabel } from '@/lib/cinema-time';
 import { cn } from '@/lib/utils';
+
+/** Router state handed to the booking page, to compare the server total with what was shown. */
+export interface BookingPageState {
+  localTotal?: number;
+}
 
 interface Notice {
   text: string;
@@ -66,9 +78,47 @@ function LiveBand({ live }: { live: LiveState }) {
   );
 }
 
+function QuantityStepper({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1" role="group" aria-label={`Số lượng ${label}`}>
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-sm"
+        aria-label={`Bớt một ${label}`}
+        disabled={value <= 0}
+        onClick={() => onChange(value - 1)}
+      >
+        <Minus aria-hidden />
+      </Button>
+      <span className="w-6 text-center text-sm font-semibold tabular-nums" aria-live="polite">
+        {value}
+      </span>
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-sm"
+        aria-label={`Thêm một ${label}`}
+        disabled={value >= BOOKING_LIMITS.comboQuantityMax}
+        onClick={() => onChange(value + 1)}
+      >
+        <Plus aria-hidden />
+      </Button>
+    </div>
+  );
+}
+
 /**
- * `/showtimes/:id/book` (ROADMAP 2.12): realtime seat map and "Tiếp tục", which holds the seats
- * (`POST /bookings`) and opens the booking.
+ * `/showtimes/:id/book` (ROADMAP 2.12–2.13): realtime seat map, combos, summary and "Tiếp tục",
+ * which holds the seats (`POST /bookings`) and opens the booking with its countdown.
  */
 export function BookingPage() {
   const { id: showtimeId = '' } = useParams();
@@ -76,6 +126,7 @@ export function BookingPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [announcement, setAnnouncement] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
   /** Seats of the request in flight: their own `seat:held` must not read as "someone took it". */
   const submitting = useRef<Set<string> | null>(null);
   /** One Idempotency-Key per attempt: kept for a retry of the same selection, new once it changes. */
@@ -97,6 +148,7 @@ export function BookingPage() {
   }, []);
 
   const { query, live, reload } = useSeatMap(showtimeId, onSeatsTaken);
+  const combos = useCombos();
   const map = query.data;
   const seats = useMemo(() => map?.seats ?? [], [map]);
   useEffect(() => {
@@ -105,18 +157,29 @@ export function BookingPage() {
 
   const byId = useMemo(() => new Map(seats.map((seat) => [seat.id, seat])), [seats]);
   const chosenSeats = selected.flatMap((id) => byId.get(id) ?? []);
+  const comboItems: ComboItem[] = (combos.data ?? [])
+    .filter((combo) => (quantities[combo.id] ?? 0) > 0)
+    .map((combo) => ({ comboId: combo.id, quantity: quantities[combo.id] ?? 0 }));
+  const seatsTotal = chosenSeats.reduce((sum, seat) => sum + (seat.price ?? 0), 0);
+  const combosTotal = (combos.data ?? []).reduce(
+    (sum, combo) => sum + combo.price * (quantities[combo.id] ?? 0),
+    0,
+  );
+  const localTotal = seatsTotal + combosTotal;
+
   const hold = useMutation({
     mutationFn: () => {
       const seatIds = [...selected].sort();
-      const signature = JSON.stringify({ seatIds });
+      const signature = JSON.stringify({ seatIds, comboItems });
       if (attempt.current?.signature !== signature) {
         attempt.current = { signature, key: crypto.randomUUID() };
       }
       submitting.current = new Set(seatIds);
-      return holdBooking({ showtimeId, seatIds, comboItems: [] }, attempt.current.key);
+      return holdBooking({ showtimeId, seatIds, comboItems }, attempt.current.key);
     },
     onSuccess: (booking) => {
-      void navigate(`/bookings/${booking.id}`);
+      const state: BookingPageState = { localTotal };
+      void navigate(`/bookings/${booking.id}`, { state });
     },
     onError: async (error) => {
       const code = errorCodeOf(error);
@@ -141,6 +204,13 @@ export function BookingPage() {
         setAnnouncement(text);
         return;
       }
+      if (code === BookingErrorCode.COMBO_NOT_AVAILABLE) {
+        const refreshed = await combos.refetch();
+        const onSale = new Set((refreshed.data ?? []).map((combo) => combo.id));
+        setQuantities((current) =>
+          Object.fromEntries(Object.entries(current).filter(([id]) => onSale.has(id))),
+        );
+      }
       if (code === BookingErrorCode.SEAT_NOT_FOUND || code === BookingErrorCode.COUPLE_INCOMPLETE) {
         await reload();
       }
@@ -159,6 +229,15 @@ export function BookingPage() {
     setSelected(result.selected);
     setAnnouncement(result.message);
     if (!result.refused) setNotice(null);
+  };
+
+  const setQuantity = (comboId: string, quantity: number) => {
+    const lines = Object.entries(quantities).filter(([id, n]) => id !== comboId && n > 0).length;
+    if (quantity > 0 && lines >= BOOKING_LIMITS.comboLinesMax) {
+      setAnnouncement(`Mỗi đơn tối đa ${BOOKING_LIMITS.comboLinesMax} loại combo.`);
+      return;
+    }
+    setQuantities((current) => ({ ...current, [comboId]: quantity }));
   };
 
   if (query.isPending) {
@@ -271,6 +350,53 @@ export function BookingPage() {
               </ul>
             )}
           </div>
+
+          <div className="border-t border-white/10 pt-4">
+            <h2 className="font-semibold text-cream">Đồ ăn & uống</h2>
+            {combos.isPending ? (
+              <p className="mt-2 text-sm text-muted-foreground">Đang tải combo…</p>
+            ) : combos.error ? (
+              <p className="mt-2 text-sm text-destructive">Không tải được danh sách combo.</p>
+            ) : combos.data.length === 0 ? (
+              <p className="mt-2 text-sm text-muted-foreground">Hiện chưa có combo.</p>
+            ) : (
+              <ul className="mt-2 space-y-3" aria-label="Combo">
+                {combos.data.map((combo) => (
+                  <li key={combo.id} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 text-sm">
+                      <p className="truncate font-medium text-cream">{combo.name}</p>
+                      <p className="text-muted-foreground tabular-nums">{vnd(combo.price)}</p>
+                    </div>
+                    <QuantityStepper
+                      label={combo.name}
+                      value={quantities[combo.id] ?? 0}
+                      onChange={(next) => setQuantity(combo.id, next)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <dl className="space-y-1.5 border-t border-white/10 pt-4 text-sm">
+            <div className="flex justify-between">
+              <dt className="text-muted-foreground">Vé</dt>
+              <dd className="tabular-nums">{vnd(seatsTotal)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-muted-foreground">Combo</dt>
+              <dd className="tabular-nums">{vnd(combosTotal)}</dd>
+            </div>
+            <div className="flex justify-between pt-1 text-base font-bold text-cream">
+              <dt>Tổng cộng</dt>
+              <dd className="text-brand tabular-nums" data-testid="local-total">
+                {vnd(localTotal)}
+              </dd>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Tạm tính. Máy chủ tính lại tổng tiền khi tạo đơn.
+            </p>
+          </dl>
 
           {notice && (
             <div

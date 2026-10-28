@@ -11,7 +11,12 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(Logger));
 
   const config = app.get(AppConfig);
-  app.enableCors({ origin: config.get('CORS_ORIGINS'), credentials: true });
+  // `Date` is exposed so the web can anchor countdowns to the server clock (ROADMAP 2.13).
+  app.enableCors({
+    origin: config.get('CORS_ORIGINS'),
+    credentials: true,
+    exposedHeaders: ['Date'],
+  });
   // Socket.IO on the same HTTP server: Redis adapter, CORS_ORIGINS (ROADMAP 2.11).
   await setupRealtime(app);
   app.enableShutdownHooks();

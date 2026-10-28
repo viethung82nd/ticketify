@@ -4,9 +4,12 @@ import {
   type ComboItem,
   tooManyAttemptsDetailsSchema,
 } from '@ticketify/shared';
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
 import { z } from 'zod';
 import { apiClient } from '@/lib/api-client';
 import { apiErrorOf } from '@/lib/api-error';
+import { serverOffsetOf } from '@/lib/server-clock';
 
 export interface HoldRequest {
   showtimeId: string;
@@ -25,6 +28,41 @@ export async function holdBooking(body: HoldRequest, idempotencyKey: string): Pr
   });
   return bookingSchema.parse(res.data);
 }
+
+export interface TimedBooking {
+  booking: Booking;
+  /** Server clock − local clock (ms), from the response's `Date`; `null` if unreadable. */
+  serverOffsetMs: number | null;
+}
+
+/** `GET /bookings/:id` plus the server clock offset taken from the same response. */
+export async function getBooking(id: string): Promise<TimedBooking> {
+  const res = await apiClient.get<unknown>(`/bookings/${id}`);
+  return {
+    booking: bookingSchema.parse(res.data),
+    serverOffsetMs: serverOffsetOf(res, Date.now()),
+  };
+}
+
+export const bookingKeys = {
+  detail: (id: string) => ['bookings', id] as const,
+};
+
+/** A 4xx (404 not mine, 400) will not change on retry. */
+const retryUnlessClientError = (failureCount: number, error: unknown): boolean => {
+  const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+  return failureCount < 1 && !(status !== undefined && status >= 400 && status < 500);
+};
+
+/** Polls every 30 s so a status change (payment from week 11, expiry) shows without a reload. */
+export const useBooking = (id: string) =>
+  useQuery({
+    queryKey: bookingKeys.detail(id),
+    queryFn: () => getBooking(id),
+    retry: retryUnlessClientError,
+    staleTime: 0,
+    refetchInterval: 30_000,
+  });
 
 // ─── Errors of POST /bookings ───
 
