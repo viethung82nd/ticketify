@@ -777,6 +777,26 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
       expect(booking.total).toBe(booking.subtotal);
     });
 
+    it('carries the movie, the showtime and the room, also with no combo', async () => {
+      const { seat, showtime: st, room: r } = await scene();
+      const user = await newUser();
+      const booking = await held(user, st.id, [seat('A1')]);
+      const film = await db.prisma.movie.findUniqueOrThrow({ where: { id: st.movie.id } });
+
+      const res = await get(user, `/bookings/${booking.id}`);
+
+      expect(res.status).toBe(200);
+      expect(bodyOf<Booking>(res)).toMatchObject({
+        showtimeId: st.id,
+        movie: { id: film.id, title: film.title, slug: film.slug },
+        showtime: { id: st.id, startsAt: st.startsAt, endsAt: st.endsAt },
+        room: { id: r.id, name: r.name },
+        combos: [],
+      });
+      // The hold answers the same view.
+      expect(booking).toEqual({ ...bodyOf<Booking>(res), expired: false });
+    });
+
     it('404 BOOKING_NOT_FOUND for another user’s booking and for an unknown id; 400 for a bad id', async () => {
       const { seat, showtime: st } = await scene();
       const booking = await held(await newUser(), st.id, [seat('A1')]);
@@ -852,6 +872,47 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
 
       const pending = bodyOf<Page<Booking>>(await get(user, '/me/bookings?status=PENDING'));
       expect(pending.total).toBe(2);
+    });
+
+    it('each item carries movie, showtime and room; the query count does not grow with the page (no N+1)', async () => {
+      const user = await newUser();
+      const scenes = [];
+      for (let i = 0; i < 3; i++) {
+        const sc = await scene();
+        await held(user, sc.showtime.id, [sc.seat('A1'), sc.seat('A2')]);
+        scenes.push(sc);
+      }
+      /** SQL statements sent to Postgres while answering `path`. */
+      const statementsFor = async (path: string) => {
+        const sent = jest.spyOn(Client.prototype, 'query');
+        const res = await get(user, path);
+        const count = sent.mock.calls.length;
+        sent.mockRestore();
+        expect(res.status).toBe(200);
+        return { count, page: bodyOf<Page<Booking>>(res) };
+      };
+
+      const one = await statementsFor('/me/bookings?pageSize=1');
+      const three = await statementsFor('/me/bookings?pageSize=3');
+
+      expect(three.page.items).toHaveLength(3);
+      expect(three.count).toBe(one.count);
+      for (const item of three.page.items) {
+        const sc = scenes.find((x) => x.showtime.id === item.showtimeId)!;
+        expect(item.movie).toEqual({
+          id: sc.showtime.movie.id,
+          title: sc.showtime.movie.title,
+          slug: sc.showtime.movie.slug,
+        });
+        expect(item.showtime).toEqual({
+          id: sc.showtime.id,
+          startsAt: sc.showtime.startsAt,
+          endsAt: sc.showtime.endsAt,
+        });
+        expect(item.room).toEqual({ id: sc.room.id, name: sc.room.name });
+        expect(item.seats.map((x) => x.label)).toEqual(['A1', 'A2']);
+        expect(item.combos).toEqual([]);
+      }
     });
 
     it('400 VALIDATION_FAILED for pageSize over 50, page 0 or an unknown status', async () => {

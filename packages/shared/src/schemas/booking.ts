@@ -96,6 +96,16 @@ export const bookingComboSchema = z.object({
 });
 export type BookingCombo = z.infer<typeof bookingComboSchema>;
 
+/** What the customer needs to recognise a booking without another request. */
+export const bookingMovieSchema = z.object({ id: z.uuid(), title: z.string(), slug: z.string() });
+export const bookingShowtimeSchema = z.object({
+  id: z.uuid(),
+  startsAt: z.string(),
+  /** End of the film plus cleanup time. */
+  endsAt: z.string(),
+});
+export const bookingRoomSchema = z.object({ id: z.uuid(), name: z.string() });
+
 /**
  * `201` (new) or `200` (same `Idempotency-Key` and payload again) body of `POST /bookings`; also
  * `GET /bookings/:id` and the items of `GET /me/bookings`.
@@ -105,6 +115,9 @@ export const bookingSchema = z.object({
   /** Short code shown to the customer. */
   code: z.string(),
   showtimeId: z.uuid(),
+  movie: bookingMovieSchema,
+  showtime: bookingShowtimeSchema,
+  room: bookingRoomSchema,
   status: z.enum(BookingStatus),
   /** Countdown shown to the customer; last moment to start a payment. */
   expiresAt: z.string(),

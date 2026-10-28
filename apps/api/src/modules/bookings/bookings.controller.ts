@@ -37,6 +37,11 @@ const bookingId = new ParseUUIDPipe({
   exceptionFactory: () => validationFailed([{ field: 'id', messages: ['id must be a UUID'] }]),
 });
 
+/** What every booking response carries besides its own fields. */
+const CONTEXT_NOTE =
+  'Each booking carries movie { id, title, slug }, showtime { id, startsAt, endsAt } and ' +
+  'room { id, name }, loaded with the booking (no extra request, no per-booking query)';
+
 const EXPIRED_NOTE =
   '`expired` is true when the booking is PENDING past holdUntil (over, even if not yet marked ' +
   'EXPIRED); `status` is reported as stored';
@@ -59,7 +64,9 @@ export class BookingsController {
       `${BOOKING_LIMITS.idempotencyKeyMin}–${BOOKING_LIMITS.idempotencyKeyMax} characters ` +
       '(A–Z a–z 0–9 . _ ~ : -), new for every booking attempt; resend it when retrying',
   })
-  @ApiCreatedResponse({ description: 'Seats HELD until holdUntil; booking PENDING' })
+  @ApiCreatedResponse({
+    description: `Seats HELD until holdUntil; booking PENDING. ${CONTEXT_NOTE}`,
+  })
   @ApiOkResponse({
     description:
       'Same Idempotency-Key and same payload as an earlier request: that booking, as it is now',
@@ -102,7 +109,9 @@ export class BookingsController {
   }
 
   @Get(':id')
-  @ApiOkResponse({ description: `One of the user's bookings. ${EXPIRED_NOTE}` })
+  @ApiOkResponse({
+    description: `One of the user's bookings. ${CONTEXT_NOTE}. ${EXPIRED_NOTE}`,
+  })
   @ApiBadRequestResponse({ description: 'VALIDATION_FAILED: id is not a UUID' })
   @ApiNotFoundResponse({
     description: "BOOKING_NOT_FOUND: no such booking, or another user's (never 403)",
@@ -120,7 +129,7 @@ export class MyBookingsController {
 
   @Get()
   @ApiOkResponse({
-    description: `The user's bookings, newest first (createdAt desc). ${EXPIRED_NOTE}`,
+    description: `The user's bookings, newest first (createdAt desc). ${CONTEXT_NOTE}. ${EXPIRED_NOTE}`,
   })
   @ApiBadRequestResponse({ description: 'VALIDATION_FAILED: status, page or pageSize (1–50)' })
   list(@CurrentUser() user: AuthUser, @Query() query: MyBookingsQueryDto): Promise<Page<Booking>> {

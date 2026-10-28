@@ -17,7 +17,20 @@ import { isHoldExpired } from './booking-rules';
 const bookingNotFound = () =>
   apiException(HttpStatus.NOT_FOUND, BookingErrorCode.BOOKING_NOT_FOUND, 'Booking not found');
 
+/**
+ * Everything a booking response shows, in one query: Prisma batches each relation level into a
+ * single `IN (...)` select, so a page of bookings costs one select per relation, not one per row.
+ */
 const VIEW_INCLUDE = {
+  showtime: {
+    select: {
+      id: true,
+      startsAt: true,
+      endsAt: true,
+      movie: { select: { id: true, title: true, slug: true } },
+      room: { select: { id: true, name: true } },
+    },
+  },
   seats: {
     include: {
       showtimeSeat: { select: { seat: { select: { row: true, number: true, type: true } } } },
@@ -101,10 +114,18 @@ export class BookingViews {
       quantity: line.quantity,
       amount: line.unitPrice * line.quantity,
     }));
+    const { showtime } = booking;
     return {
       id: booking.id,
       code: booking.code,
       showtimeId: booking.showtimeId,
+      movie: showtime.movie,
+      showtime: {
+        id: showtime.id,
+        startsAt: showtime.startsAt.toISOString(),
+        endsAt: showtime.endsAt.toISOString(),
+      },
+      room: showtime.room,
       status: booking.status,
       expiresAt: booking.expiresAt.toISOString(),
       holdUntil: booking.holdUntil.toISOString(),
