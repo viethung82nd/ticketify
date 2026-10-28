@@ -26,6 +26,7 @@ import { createTestDatabase, type TestDatabase } from '../support/database';
 import { createFixtures, type Fixtures } from '../support/fixtures';
 import { bodyOf, errorOf } from '../support/http';
 import { createTestRedis, type TestRedis } from '../support/redis';
+import { captureServerErrors, formatServerErrors } from '../support/server-errors';
 
 type Method = 'get' | 'post' | 'put' | 'patch';
 
@@ -70,6 +71,8 @@ describe('Showtimes, schedule and seat map (real Postgres + Redis)', () => {
   let adminToken: string;
   let userToken: string;
   const clock = new FakeClock(NOW);
+  // Every 5xx with its Prisma code, SQLSTATE and stack (the app runs with logger: false).
+  const serverErrors = captureServerErrors();
 
   beforeAll(async () => {
     [db, redis] = await Promise.all([createTestDatabase(), createTestRedis()]);
@@ -96,11 +99,13 @@ describe('Showtimes, schedule and seat map (real Postgres + Redis)', () => {
   });
 
   afterAll(async () => {
+    serverErrors.restore();
     await app?.close();
     await Promise.all([db?.drop(), redis?.close()]);
   });
 
   beforeEach(async () => {
+    serverErrors.clear();
     clock.set(NOW);
     await db.prisma.seatPrice.deleteMany();
     await db.prisma.seatPrice.createMany({
@@ -852,7 +857,10 @@ describe('Showtimes, schedule and seat map (real Postgres + Redis)', () => {
 
       const responses = await Promise.all(bodies.map((body) => postShowtime(body)));
 
+      // A 5xx fails here first, with the cause of each one (not just the count).
+      expect(formatServerErrors(serverErrors.errors)).toBe('');
       const statuses = responses.map((res) => res.status).sort();
+      console.info(`[1.13] 10 simultaneous overlapping creates: ${JSON.stringify(statuses)}`);
       expect(statuses).toEqual([201, ...Array<number>(9).fill(409)]);
       for (const res of responses.filter((r) => r.status === 409)) {
         expect(errorOf(res).code).toBe('SHOWTIME_OVERLAP');
@@ -903,6 +911,7 @@ describe('Showtimes, schedule and seat map (real Postgres + Redis)', () => {
 
         const results = await Promise.all(work.map((start) => start()));
 
+        expect(formatServerErrors(serverErrors.errors)).toBe('');
         for (const { kind, res } of results) {
           count(`${kind} ${res.status}`);
           expect(res.status).toBeLessThan(500);
