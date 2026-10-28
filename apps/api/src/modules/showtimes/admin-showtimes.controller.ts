@@ -17,6 +17,7 @@ import {
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
@@ -51,6 +52,15 @@ export class AdminShowtimesController {
   }
 
   @Get('preview')
+  @ApiOperation({
+    summary: 'Preview a showtime before creating it',
+    description:
+      'Same query fields and validation as POST /admin/showtimes (movieId, roomId, startsAt as ' +
+      'ISO 8601 with offset). Returns startsAt, endsAt = startsAt + duration + ' +
+      'SHOWTIME_CLEANUP_MINUTES, cleanupMinutes, the day type the prices would use, and the ' +
+      'non-cancelled showtimes of the room that overlap [startsAt, endsAt) right now. Nothing is ' +
+      'written; advisory only, the exclusion constraint decides at creation time.',
+  })
   @ApiOkResponse({ description: 'endsAt, day type and current overlaps; nothing is written' })
   @ApiBadRequestResponse({
     description: 'VALIDATION_FAILED (including startsAt not in the future)',

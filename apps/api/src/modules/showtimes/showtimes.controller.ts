@@ -1,5 +1,5 @@
 import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
-import { ApiNotFoundResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { ShowtimeDates, ShowtimeListItem, ShowtimeSeatMap } from '@ticketify/shared';
 import { Public } from '../../common/decorators/public.decorator';
 import { ListShowtimesQueryDto, MovieDatesQueryDto } from './dto/showtime.dto';
@@ -23,6 +23,13 @@ export class ShowtimesController {
   }
 
   @Get('dates')
+  @ApiOperation({
+    summary: 'Days with upcoming showtimes of a movie',
+    description:
+      'Cinema-time-zone days (YYYY-MM-DD, ascending, no duplicates) that have at least one ' +
+      'SCHEDULED showtime of the movie starting after now. The movie page uses it to point to ' +
+      'the nearest day with showtimes. An unknown movieId gives { dates: [] }.',
+  })
   @ApiOkResponse({ description: 'Days (YYYY-MM-DD, cinema time zone) with upcoming showtimes' })
   dates(@Query() query: MovieDatesQueryDto): Promise<ShowtimeDates> {
     return this.schedule.datesForMovie(query.movieId);

@@ -63,7 +63,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **1.12** FE admin: trình sửa sơ đồ ghế dạng lưới, bảng giá, ngày lễ
 
 ### Tuần 6: Suất chiếu & combo
-- [x] **1.13** Tạo suất chiếu: `endsAt = startsAt + thời lượng + thời gian dọn phòng`. Trong cùng transaction tạo `Showtime` + sinh `ShowtimeSeat`, chốt giá từng ghế (`PricingService.dayType(startsAt, tx)` + `priceFor`). Lỗi exclusion constraint trả về `409`. **Khóa dòng phòng bằng `SELECT … FROM rooms WHERE id = $1 FOR SHARE` trước khi đọc danh sách ghế**, để không chạy đồng thời với một lần sửa ghế (`PATCH /admin/rooms/:id/seats` giữ `FOR UPDATE` trên cùng dòng)
+- [x] **1.13** Tạo suất chiếu: `endsAt = startsAt + thời lượng + thời gian dọn phòng`. Trong cùng transaction tạo `Showtime` + sinh `ShowtimeSeat`, chốt giá từng ghế (`PricingService.dayType(startsAt, tx)` + `priceFor`). Lỗi exclusion constraint trả về `409`. **Khóa dòng phòng bằng `SELECT … FROM rooms WHERE id = $1 FOR SHARE` trước khi đọc danh sách ghế**, để không chạy đồng thời với một lần sửa ghế (`PATCH /admin/rooms/:id/seats` giữ `FOR UPDATE` trên cùng dòng). Thứ tự khóa đã chốt (28/10/2026): **tạo suất** khóa `rooms` rồi `movies` bằng `FOR SHARE`; **sửa ghế** khóa `rooms` `FOR UPDATE`; **hủy suất** khóa `showtimes` `FOR NO KEY UPDATE` rồi mọi `showtime_seats` của suất `FOR UPDATE ORDER BY seat_id`
 - [x] **1.14** Hủy suất chiếu: chỉ cho phép khi chưa có ghế `HELD/SOLD` (vì không có hoàn tiền)
 - [x] **1.15** API public: lịch chiếu theo phim/ngày; `GET /showtimes/:id/seats` trả **mọi ghế của phòng** (left join với `ShowtimeSeat` của suất): ghế có dòng trả `AVAILABLE` / `HELD` còn hạn / `SOLD` kèm giá đã chốt, `HELD` hết hạn trả `AVAILABLE` (hết hạn lười, không ghi DB); ghế không có dòng (tắt lúc tạo suất) trả `UNAVAILABLE`, `price: null`
 - [x] **1.16** CRUD combo
@@ -78,11 +78,11 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 ## Giai đoạn 2 — Giữ ghế ⭐ (tuần 7–10)
 
 ### Tuần 7: Luồng giữ ghế
-- [ ] **2.1** `BookingService.hold()`: interactive transaction + raw SQL theo mục 4 của PLAN; `FOR UPDATE NOWAIT`, map lỗi `55P03` thành `409`; kiểm tra `rowCount`. **Sau khi khóa ghế, đọc lại `showtimes.status`** và từ chối nếu `CANCELLED`: hủy suất (1.14) khóa `showtimes` `FOR NO KEY UPDATE` rồi mọi `showtime_seats` của suất `FOR UPDATE ORDER BY seat_id`, nên hai luồng tuần tự hóa trên ghế; INSERT booking chỉ cần khóa key-share trên dòng suất nên không deadlock với lần hủy
+- [ ] **2.1** `BookingService.hold()`: interactive transaction + raw SQL theo mục 4 của PLAN; `FOR UPDATE NOWAIT`, map lỗi `55P03` thành `409`; kiểm tra `rowCount`. **Sau khi khóa ghế, đọc lại `showtimes.status`** và từ chối nếu `CANCELLED`: hủy suất (1.14) khóa `showtimes` `FOR NO KEY UPDATE` rồi mọi `showtime_seats` của suất `FOR UPDATE ORDER BY seat_id`, nên hai luồng tuần tự hóa trên ghế; INSERT booking chỉ cần khóa key-share trên dòng suất nên không deadlock với lần hủy. Thứ tự khóa đã chốt (28/10/2026): **tạo suất** khóa `rooms` rồi `movies` bằng `FOR SHARE`; **sửa ghế** khóa `rooms` `FOR UPDATE`; **hủy suất** khóa `showtimes` `FOR NO KEY UPDATE` rồi mọi `showtime_seats` của suất `FOR UPDATE ORDER BY seat_id`
 - [ ] **2.2** Validate:
   - tối đa 6 ghế
   - ghế đôi phải chọn theo cặp
-  - suất chiếu chưa bắt đầu
+  - suất chiếu chưa bắt đầu: kiểm tra `startsAt > now` (`ClockService`) **trước khi giữ ghế**. `GET /showtimes/:id/seats` vẫn trả sơ đồ của suất đã bắt đầu (chỉ suất `CANCELLED` mới 404), nên không được dựa vào endpoint đó để chặn
   - mỗi user tối đa 1 đơn `PENDING` cho mỗi suất chiếu
 - [ ] **2.3** Tính giá ở server; tạo `BookingSeat`; tạo `BookingCombo` kèm snapshot giá
 - [ ] **2.4** Idempotency: header `Idempotency-Key` + `requestHash` (cùng key cùng hash → trả đơn cũ; cùng key khác hash → `422`)
@@ -214,11 +214,20 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 
 ---
 
+## Đã chốt
+
+| Hạng mục | Quyết định |
+|---|---|
+| Thời gian dọn phòng `SHOWTIME_CLEANUP_MINUTES` | **15 phút** (env, số nguyên ≥ 0), chủ dự án xác nhận 28/10/2026. `endsAt = startsAt + thời lượng + dọn phòng`; đổi giá trị chỉ áp dụng cho suất tạo sau đó |
+| Khóa `FOR SHARE` trên phim khi tạo suất | Giữ (28/10/2026): phim không thể chuyển `ENDED` hay đổi thời lượng giữa lúc tạo suất. Thứ tự khóa đầy đủ ở ghi chú 1.13 và 2.1 |
+| Sơ đồ ghế của suất đã bắt đầu | Vẫn trả về (28/10/2026); luồng giữ ghế tự kiểm tra `startsAt > now` (2.2) |
+| `GET /showtimes?movieId=<không tồn tại>` | Trả `200 []`, không 404 (28/10/2026) |
+| `CINEMA_TZ` của web | Hằng `DEFAULT_CINEMA_TIME_ZONE` trong `packages/shared`; test bắt khi lệch với env schema (28/10/2026) |
+
 ## Quyết định chờ
 
 | Hạng mục | Ghi chú |
 |---|---|
-| Thời gian dọn phòng `SHOWTIME_CLEANUP_MINUTES` | Mặc định **15 phút** (env, số nguyên ≥ 0), dùng cho `endsAt = startsAt + thời lượng + dọn phòng` từ 1.13. Chờ chủ dự án xác nhận giá trị. Đổi giá trị chỉ áp dụng cho suất tạo sau đó |
 | Tên ngày lễ (`Holiday.name`, nullable) | Chưa thêm cột. Khi cần, gom vào **một** migration chỉ thêm cột nullable (expand-only, như migration `movie_synopsis`), không đổi dữ liệu cũ |
 
 ---

@@ -83,6 +83,20 @@ pnpm test:integration
   - quét tuần tự, không dùng index. Đủ cho danh mục vài trăm phim của một rạp; nếu cần nhanh hơn thì thêm `unaccent` + index `pg_trgm` bằng migration.
 - Poster cũ bị xóa khi đổi poster hoặc xóa phim, sau khi transaction đã commit. Xóa lỗi chỉ ghi log cảnh báo, nên có thể còn object mồ côi trên storage (chưa có job dọn).
 
+## Suất chiếu và lịch chiếu (API)
+
+Đặc tả đầy đủ có trong Swagger (`/docs`). Mọi ngày (`date`, `YYYY-MM-DD`) là ngày theo `CINEMA_TZ` (mặc định `Asia/Ho_Chi_Minh`), không phải ngày UTC. Mọi thời điểm gửi lên là ISO 8601 có offset, ví dụ `2026-11-02T19:30:00+07:00`.
+
+| Endpoint | Quyền | Mô tả |
+|---|---|---|
+| `POST /admin/showtimes` | ADMIN | Tạo suất `{ movieId, roomId, startsAt }`. `endsAt = startsAt + thời lượng + SHOWTIME_CLEANUP_MINUTES` (15 phút). Sinh `ShowtimeSeat` cho mọi ghế đang bật, chốt giá theo loại ngày của `startsAt`. Chồng giờ → `409 SHOWTIME_OVERLAP` |
+| `GET /admin/showtimes/preview?movieId=&roomId=&startsAt=` | ADMIN | Xem trước, **không ghi gì**: trả `startsAt`, `endsAt`, `cleanupMinutes`, `dayType` và `conflicts` (các suất chưa hủy trong phòng đang trùng khoảng `[startsAt, endsAt)`). Cùng validation và mã lỗi với `POST`. Chỉ để tham khảo: exclusion constraint vẫn là nơi quyết định khi tạo thật |
+| `GET /admin/showtimes?date=` | ADMIN | Suất (mọi trạng thái) bắt đầu trong ngày đó, kèm số ghế đã bán / đang giữ |
+| `POST /admin/showtimes/:id/cancel` | ADMIN | Hủy suất chưa bắt đầu và chưa có ghế `HELD`/`SOLD`; hủy lần hai vẫn `200` |
+| `GET /showtimes?movieId=&date=` | Public | Suất `SCHEDULED` chưa bắt đầu của phim trong ngày (mặc định hôm nay), kèm số ghế còn trống. `movieId` bắt buộc; phim không tồn tại → `200 []` |
+| `GET /showtimes/dates?movieId=` | Public | Các ngày (tăng dần, không trùng) có ít nhất một suất `SCHEDULED` chưa bắt đầu của phim. Trang phim dùng để gợi ý ngày gần nhất có suất. Phim không tồn tại → `{ "dates": [] }` |
+| `GET /showtimes/:id/seats` | Public | Lưới phòng và **mọi ghế của phòng**: ghế có `ShowtimeSeat` trả giá đã chốt và trạng thái (`HELD` hết hạn hiện `AVAILABLE`); ghế tắt lúc tạo suất → `UNAVAILABLE`, `price: null`. Suất đã hủy → `404` |
+
 ## Cấu trúc
 
 ```
