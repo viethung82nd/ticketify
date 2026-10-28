@@ -14,8 +14,9 @@ export class ShowtimesController {
   @Get()
   @ApiOkResponse({
     description:
-      'Upcoming SCHEDULED showtimes of the movie on that cinema-time-zone day, by start, ' +
-      'with the number of seats that can be booked now',
+      'Upcoming SCHEDULED showtimes of the movie on that cinema-time-zone day (default: today ' +
+      'there), by start, with the number of seats that can be booked now. A movieId that does ' +
+      'not exist gives 200 with an empty list, not 404',
   })
   list(@Query() query: ListShowtimesQueryDto): Promise<ShowtimeListItem[]> {
     return this.schedule.listForMovie(query.movieId, query.date);

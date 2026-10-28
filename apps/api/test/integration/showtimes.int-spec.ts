@@ -630,6 +630,33 @@ describe('Showtimes, schedule and seat map (real Postgres + Redis)', () => {
       expect((errorOf(res).details as FieldError[]).map((d) => d.field)).toEqual(['movieId']);
     });
 
+    it('a movieId that does not exist gives 200 and an empty list, not 404', async () => {
+      const list = await anonymous(`/showtimes?movieId=${UNKNOWN_ID}&date=2026-11-02`);
+      expect(list.status).toBe(200);
+      expect(bodyOf<ShowtimeListItem[]>(list)).toEqual([]);
+
+      const dates = await anonymous(`/showtimes/dates?movieId=${UNKNOWN_ID}`);
+      expect(dates.status).toBe(200);
+      expect(bodyOf<ShowtimeDates>(dates)).toEqual({ dates: [] });
+    });
+
+    it('without `date`, lists today in Vietnam (now = 17:00 Sunday 2026-11-01)', async () => {
+      const room = await createRoom(1, 2);
+      const film = await movie();
+      const tonight = await createShowtime(film.id, room.id, vn('2026-11-01', '20:00'));
+      const lateTonight = await createShowtime(film.id, room.id, vn('2026-11-01', '23:30'));
+      // 02:00 Monday in Vietnam is 19:00Z on 2026-11-01: same UTC day, but not today in Vietnam.
+      await createShowtime(film.id, room.id, vn('2026-11-02', '02:00'));
+
+      const res = await anonymous(`/showtimes?movieId=${film.id}`);
+
+      expect(res.status).toBe(200);
+      expect(bodyOf<ShowtimeListItem[]>(res).map((item) => item.id)).toEqual([
+        tonight.id,
+        lateTonight.id,
+      ]);
+    });
+
     it('`date` is a day in Vietnam, not in UTC', async () => {
       const room = await createRoom(1, 2);
       const film = await movie();
