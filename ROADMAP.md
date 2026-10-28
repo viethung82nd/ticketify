@@ -52,9 +52,9 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **1.5** FE: trang đăng nhập/đăng ký, auth store, interceptor tự gọi refresh, route bảo vệ theo role
 
 ### Tuần 4: Phim & lưu trữ
-- [ ] **1.6** `StorageService` (S3 API — RustFS): upload, presigned URL; upload poster
-- [ ] **1.7** CRUD phim + thể loại (admin); API public: danh sách phân trang, lọc theo trạng thái/thể loại, chi tiết theo slug
-- [ ] **1.8** FE: trang chủ, danh sách phim, chi tiết phim; admin: bảng phim + form
+- [x] **1.6** `StorageService` (S3 API — RustFS): upload, presigned URL; upload poster
+- [x] **1.7** CRUD phim + thể loại (admin); API public: danh sách phân trang, lọc theo trạng thái/thể loại, chi tiết theo slug
+- [x] **1.8** FE: trang chủ, danh sách phim, chi tiết phim; admin: bảng phim + form
 
 ### Tuần 5: Phòng, ghế, giá
 - [ ] **1.9** CRUD phòng; sinh lưới ghế; sửa loại ghế, bật/tắt ghế, ghép cặp ghế đôi

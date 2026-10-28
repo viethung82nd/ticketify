@@ -12,17 +12,27 @@ interface NavItem {
   label: string;
 }
 
-const PUBLIC_NAV: NavItem[] = [
-  { to: '/#dang-chieu', label: 'Phim' },
-  { to: '/#rap', label: 'Rạp chiếu' },
-];
+const PUBLIC_NAV: NavItem[] = [{ to: '/movies', label: 'Phim' }];
 
 function useNavItems(): NavItem[] {
   const role = useAuthStore((state) => state.user?.role);
   const items = [...PUBLIC_NAV];
   if (role === Role.STAFF || role === Role.ADMIN) items.push({ to: '/staff', label: 'Soát vé' });
-  if (role === Role.ADMIN) items.push({ to: '/admin', label: 'Quản trị' });
+  if (role === Role.ADMIN) items.push({ to: '/admin/movies', label: 'Quản trị' });
   return items;
+}
+
+/** "Rạp" has no page yet: shown disabled so the nav matches the design. */
+function CinemasSoon() {
+  return (
+    <span
+      aria-disabled="true"
+      title="Sắp có"
+      className="cursor-not-allowed rounded-full px-3 py-2 text-sm text-muted-foreground/70"
+    >
+      Rạp <span className="sr-only">(sắp có)</span>
+    </span>
+  );
 }
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -108,11 +118,12 @@ export function SiteHeader() {
                 {item.label}
               </NavLink>
             ))}
+            <CinemasSoon />
           </nav>
         </div>
         <div className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-black/80 px-4 backdrop-blur">
           <Link
-            to="/#dang-chieu"
+            to="/movies"
             aria-label="Tìm phim"
             className="rounded-full p-2 text-cream transition-colors hover:text-brand"
           >
@@ -155,6 +166,7 @@ export function SiteHeader() {
                   {item.label}
                 </NavLink>
               ))}
+              <CinemasSoon />
             </nav>
             <div className="border-t border-white/10 pt-3">
               <AuthActions onNavigate={closeMenu} />

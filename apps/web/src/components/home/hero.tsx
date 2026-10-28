@@ -3,8 +3,7 @@ import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
 
 /**
- * Facts about how Ticketify works (PLAN §1), not marketing numbers: the movie and
- * customer counts will come from the API once the catalog exists (task 1.8).
+ * Facts about how Ticketify works (PLAN §1), not marketing numbers.
  */
 const FACTS = [
   { value: '10 phút', label: 'Giữ ghế trong khi thanh toán' },
@@ -34,7 +33,7 @@ export function Hero() {
         </p>
         <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
           <Button asChild className="h-11 rounded-xl px-5 text-sm font-semibold">
-            <Link to="/#dang-chieu">
+            <Link to="/movies">
               Khám phá phim
               <ArrowRight aria-hidden />
             </Link>

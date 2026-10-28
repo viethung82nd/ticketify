@@ -1,7 +1,10 @@
-import { ArrowRight, Clapperboard, MapPin } from 'lucide-react';
+import { MovieStatus } from '@ticketify/shared';
+import { ArrowRight, MapPin } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { BookingStepper } from '@/components/booking/booking-stepper';
+import { MovieGrid } from '@/components/catalog/movie-grid';
+import { useMovies } from '@/features/catalog/use-catalog';
 
 /** Thin announcement strip between the hero and the catalog. */
 export function PromoBanner() {
@@ -43,15 +46,12 @@ function SectionHeading({
   );
 }
 
-/** Titles from the dev seed (fictional); real data arrives with the movie API (task 1.8). */
-const PLACEHOLDER_MOVIES = [
-  { title: 'Mùa Hạ Cuối Cùng', meta: 'Tình cảm · 112 phút', rating: 'T13' },
-  { title: 'Biệt Đội Sao Băng', meta: 'Hành động · 128 phút', rating: 'T16' },
-  { title: 'Căn Nhà Số 13', meta: 'Kinh dị · 104 phút', rating: 'T18' },
-  { title: 'Chú Mèo Và Ngọn Hải Đăng', meta: 'Hoạt hình · 95 phút · Sắp chiếu', rating: 'P' },
-];
+/** First 8 NOW_SHOWING movies, newest release first (same order as /movies). */
+const NOW_SHOWING_QUERY = { status: MovieStatus.NOW_SHOWING, pageSize: 8 };
 
 export function NowShowing() {
+  const { data, isPending, error, refetch } = useMovies(NOW_SHOWING_QUERY);
+
   return (
     <section aria-labelledby="dang-chieu" className="mx-auto max-w-6xl scroll-mt-28 px-4 pt-20">
       <SectionHeading
@@ -59,29 +59,23 @@ export function NowShowing() {
         title="Đang chiếu"
         description="Phim mới nhất đang chiếu tại rạp — đặt vé ngay hôm nay."
         action={
-          <span className="flex items-center gap-1 text-sm text-muted-foreground">
+          <Link
+            to={`/movies?status=${MovieStatus.NOW_SHOWING}`}
+            className="flex items-center gap-1 rounded-lg text-sm font-semibold text-brand underline-offset-4 hover:underline"
+          >
             Xem tất cả <ArrowRight className="size-4" aria-hidden />
-            <span className="sr-only">(sắp có)</span>
-          </span>
+          </Link>
         }
       />
-      <ul className="mt-8 grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-4">
-        {PLACEHOLDER_MOVIES.map((movie) => (
-          <li key={movie.title} className="overflow-hidden rounded-2xl bg-surface">
-            <div className="relative flex aspect-[2/3] flex-col items-center justify-center gap-3 bg-gradient-to-b from-[#2a2a2a] to-[#1a1a1a] p-4 text-center">
-              <Clapperboard className="size-8 text-white/30" aria-hidden />
-              <span className="text-sm font-semibold text-white/70">{movie.title}</span>
-              <span className="absolute top-3 left-3 rounded-md bg-black/70 px-1.5 py-0.5 text-xs font-bold text-brand">
-                {movie.rating}
-              </span>
-            </div>
-            <div className="space-y-1 p-4">
-              <h3 className="truncate font-semibold text-cream">{movie.title}</h3>
-              <p className="text-xs text-muted-foreground">{movie.meta}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <div className="mt-8">
+        <MovieGrid
+          movies={data?.items}
+          isPending={isPending}
+          error={error}
+          onRetry={() => void refetch()}
+          empty="Hiện chưa có phim đang chiếu. Hãy quay lại sau nhé."
+        />
+      </div>
     </section>
   );
 }
