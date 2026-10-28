@@ -14,7 +14,7 @@ import { closeConnection, createQueueConnection } from './queue-connection';
 /** Longest a hold request waits for Redis to accept a job before giving up on it. */
 const ENQUEUE_TIMEOUT_MS = 1_000;
 
-const DEFAULT_JOB_OPTIONS: JobsOptions = {
+export const DEFAULT_JOB_OPTIONS: JobsOptions = {
   // A failed run (DB down...) is retried; after the last attempt the sweep is the safety net.
   attempts: 5,
   backoff: { type: 'exponential', delay: 1_000 },
