@@ -29,6 +29,8 @@ const MESSAGES: Record<string, string> = {
     'Phòng đang có suất chiếu chưa kết thúc nên sơ đồ ghế bị khóa. Bạn vẫn có thể đổi tên phòng.',
   [RoomErrorCode.SEAT_NOT_FOUND]:
     'Sơ đồ ghế đã thay đổi ở nơi khác. Hãy hủy thay đổi để tải lại rồi thử lại.',
+  [RoomErrorCode.INVALID_CHANGES]:
+    'Một ghế xuất hiện nhiều lần trong cùng một lần lưu. Hãy hủy thay đổi rồi thử lại.',
   [RoomErrorCode.INVALID_COUPLE]: 'Ghế đôi chưa hợp lệ. Xem danh sách lỗi bên dưới.',
   [RoomErrorCode.COUPLE_INCONSISTENT]:
     'Hai ghế của một cặp ghế đôi phải cùng bật hoặc cùng tắt. Xem danh sách lỗi bên dưới.',

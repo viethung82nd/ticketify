@@ -22,6 +22,6 @@ Every error body follows `ApiError` from `@ticketify/shared`, with a fixed machi
 - **Business rules → 404 / 409 / 422** with a specific code:
   - `404` — the resource does not exist (`ROOM_NOT_FOUND`, `PRICE_NOT_FOUND`…).
   - `409` — conflict with current state (`ROOM_NAME_TAKEN`, `ROOM_IN_USE`, `ROOM_HAS_SHOWTIMES`, `HOLIDAY_EXISTS`…).
-  - `422` — well-formed but breaks a rule that needs the database to check (`INVALID_COUPLE`, `COUPLE_INCONSISTENT`, `SEAT_NOT_FOUND`, `INVALID_GENRES`).
+  - `422` — well-formed but breaks a rule that needs the database to check (`INVALID_COUPLE`, `COUPLE_INCONSISTENT`, `SEAT_NOT_FOUND`, `INVALID_GENRES`), or a batch that is ambiguous as a whole: `INVALID_CHANGES` when one `seatId` appears more than once in `PATCH /admin/rooms/:id/seats` (`details.seatIds` lists them; nothing is written). (A repeated seat used to be a `400 VALIDATION_FAILED`.)
 
 Known exception kept from week 4: `422 POSTER_NOT_UPLOADED` (and the content-type mismatch on the stored poster) — the key is well-formed but the object is missing or wrong in storage.

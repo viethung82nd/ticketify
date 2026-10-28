@@ -4,7 +4,6 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
-  ArrayUnique,
   IsArray,
   IsBoolean,
   IsIn,
@@ -75,15 +74,15 @@ export class SeatChangeDto {
   coupleWith?: string | null;
 }
 
-/** Mirrors `updateSeatsRequestSchema`. Applied all-or-nothing. */
+/**
+ * Mirrors `updateSeatsRequestSchema`. Applied all-or-nothing. A seat listed twice is a
+ * business error (`422 INVALID_CHANGES`, from `planSeatChanges`), not a format one.
+ */
 export class UpdateSeatsDto {
   @ApiProperty({ type: [SeatChangeDto], minItems: 1, maxItems: ROOM_LIMITS.seatChangesMax })
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(ROOM_LIMITS.seatChangesMax)
-  @ArrayUnique((change: SeatChangeDto | null | undefined) => change?.seatId, {
-    message: 'each seatId may appear only once',
-  })
   @ValidateNested({ each: true })
   @Type(() => SeatChangeDto)
   changes: SeatChangeDto[];

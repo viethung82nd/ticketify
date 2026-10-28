@@ -72,6 +72,8 @@ export type SeatPlan =
       /** Only seats whose type, isActive or coupleGroup changed. */
       changed: LayoutSeat[];
     }
+  /** A seat listed more than once: the batch is ambiguous, so it is refused as a whole. */
+  | { ok: false; code: 'INVALID_CHANGES'; seatIds: string[] }
   | { ok: false; code: 'SEAT_NOT_FOUND'; seatIds: string[] }
   | { ok: false; code: CoupleViolationCode; violations: CoupleViolation[] };
 
@@ -96,10 +98,13 @@ function groupsOf(seats: Iterable<LayoutSeat>): Map<number, LayoutSeat[]> {
  * Applies `changes` to `seats` (all seats of one room) and checks the couple rules on the
  * whole resulting room. All-or-nothing: either the full new layout or every problem found.
  *
+ * Each seat may appear at most once in `changes` (INVALID_CHANGES otherwise).
+ *
  * Pair handling:
  * - `coupleWith: X` pairs the seat with X (declaring it from one side is enough). Both seats
  *   leave their previous pairs; a former partner that is not re-paired or changed to another
- *   type is reported as MISSING_PARTNER.
+ *   type is reported as MISSING_PARTNER. So re-pairing a seat in one batch means: the new pair,
+ *   plus each former partner changed to another type.
  * - `coupleWith: null`, or a type other than COUPLE, removes the seat's pair from both seats.
  * - Group numbers are derived: new pairs get the next free number in the room.
  */
@@ -108,6 +113,14 @@ export function planSeatChanges(
   changes: readonly LayoutChange[],
 ): SeatPlan {
   const original = new Map(seats.map((seat) => [seat.id, seat]));
+
+  const listed = new Set<string>();
+  const repeated = new Set<string>();
+  for (const change of changes) {
+    if (listed.has(change.seatId)) repeated.add(change.seatId);
+    listed.add(change.seatId);
+  }
+  if (repeated.size > 0) return { ok: false, code: 'INVALID_CHANGES', seatIds: [...repeated] };
 
   const unknown = new Set<string>();
   for (const change of changes) {

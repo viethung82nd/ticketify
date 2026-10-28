@@ -44,7 +44,7 @@ function applied(plan: SeatPlan): Map<string, LayoutSeat> {
 }
 
 function violationsOf(plan: SeatPlan): { code: string; reason: string; seats: string[] }[] {
-  if (plan.ok || plan.code === 'SEAT_NOT_FOUND') {
+  if (plan.ok || !('violations' in plan)) {
     throw new Error(`Expected couple violations, got ${JSON.stringify(plan)}`);
   }
   return plan.violations.map(({ code, reason, seats }: CoupleViolation) => ({
@@ -186,6 +186,75 @@ describe('planSeatChanges: creating pairs', () => {
   });
 });
 
+describe('planSeatChanges: re-pairing in one batch', () => {
+  /** Both seats of the new pair point at each other; each former partner becomes STANDARD. */
+  const repair = (a: string, b: string, formerPartners: string[]): LayoutChange[] => [
+    couple(a, b),
+    couple(b, a),
+    ...formerPartners.map((seatId) => ({ seatId, type: SeatType.STANDARD })),
+  ];
+
+  it('moves a seat to a new partner; the old partner becomes STANDARD', () => {
+    const plan = planSeatChanges(room('A', 4, [['A1', 'A2']]), repair('A2', 'A3', ['A1']));
+
+    const seats = applied(plan);
+    expect(seats.get('A1')).toMatchObject({ type: 'STANDARD', coupleGroup: null });
+    expect(seats.get('A2')?.type).toBe('COUPLE');
+    expect(seats.get('A3')?.type).toBe('COUPLE');
+    expect(seats.get('A2')?.coupleGroup).toBe(seats.get('A3')?.coupleGroup);
+    expect(seats.get('A2')?.coupleGroup).not.toBeNull();
+    // The freed group number is reused, so A2 itself needs no write.
+    expect(plan.ok && plan.changed.map((seat) => seat.id)).toEqual(['A1', 'A3']);
+  });
+
+  it('pairs two seats taken from two different pairs; both old partners become STANDARD', () => {
+    const before = room('A', 6, [
+      ['A1', 'A2'],
+      ['A3', 'A4'],
+    ]);
+    const plan = planSeatChanges(before, repair('A2', 'A3', ['A1', 'A4']));
+
+    const seats = applied(plan);
+    expect(seats.get('A1')).toMatchObject({ type: 'STANDARD', coupleGroup: null });
+    expect(seats.get('A4')).toMatchObject({ type: 'STANDARD', coupleGroup: null });
+    expect(seats.get('A2')?.coupleGroup).toBe(seats.get('A3')?.coupleGroup);
+    expect(seats.get('A2')?.coupleGroup).not.toBeNull();
+    const couples = [...seats.values()].filter((seat) => seat.type === SeatType.COUPLE);
+    expect(couples.map((seat) => seat.id)).toEqual(['A2', 'A3']);
+  });
+
+  it('accepts the payload the web editor sends (old partner also gets coupleWith null)', () => {
+    const plan = planSeatChanges(room('B', 4, [['B1', 'B2']]), [
+      { seatId: 'B1', type: SeatType.STANDARD, coupleWith: null },
+      { seatId: 'B2', coupleWith: 'B3' },
+      { seatId: 'B3', type: SeatType.COUPLE, coupleWith: 'B2' },
+    ]);
+
+    const seats = applied(plan);
+    expect(seats.get('B1')).toMatchObject({ type: 'STANDARD', coupleGroup: null });
+    expect(seats.get('B2')?.coupleGroup).toBe(seats.get('B3')?.coupleGroup);
+  });
+
+  it('rejects a re-pair that leaves the old partner a COUPLE seat without a pair', () => {
+    const plan = planSeatChanges(room('A', 4, [['A1', 'A2']]), repair('A2', 'A3', []));
+
+    expect(violationsOf(plan)).toEqual([
+      { code: 'INVALID_COUPLE', reason: 'MISSING_PARTNER', seats: ['A1', 'A2'] },
+    ]);
+  });
+
+  it('rejects a re-pair declared from one side only, the new partner left untouched', () => {
+    const plan = planSeatChanges(room('A', 4, [['A1', 'A2']]), [
+      { seatId: 'A2', coupleWith: 'A3' },
+      { seatId: 'A1', type: SeatType.STANDARD },
+    ]);
+
+    expect(violationsOf(plan)).toEqual([
+      { code: 'INVALID_COUPLE', reason: 'NOT_COUPLE_TYPE', seats: ['A2', 'A3'] },
+    ]);
+  });
+});
+
 describe('planSeatChanges: leaving pairs', () => {
   const paired = () => room('A', 4, [['A1', 'A2']]);
 
@@ -283,7 +352,20 @@ describe('planSeatChanges: switching seats on and off', () => {
 });
 
 describe('planSeatChanges: whole-room checks', () => {
-  it('reports unknown seat ids (seat or partner) as SEAT_NOT_FOUND, before anything else', () => {
+  it('refuses a seat listed twice as INVALID_CHANGES, before anything else', () => {
+    const plan = planSeatChanges(room('A', 3), [
+      { seatId: 'A1', type: SeatType.VIP },
+      { seatId: 'Z9', type: SeatType.VIP },
+      { seatId: 'A2', isActive: false },
+      { seatId: 'A1', type: SeatType.STANDARD },
+      { seatId: 'A2', isActive: true },
+      { seatId: 'A1' },
+    ]);
+
+    expect(plan).toEqual({ ok: false, code: 'INVALID_CHANGES', seatIds: ['A1', 'A2'] });
+  });
+
+  it('reports unknown seat ids (seat or partner) as SEAT_NOT_FOUND, before couple rules', () => {
     const plan = planSeatChanges(room('A', 2), [
       { seatId: 'Z9', type: SeatType.VIP },
       { seatId: 'A1', coupleWith: 'Q1' },

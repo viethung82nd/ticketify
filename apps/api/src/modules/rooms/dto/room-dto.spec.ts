@@ -64,7 +64,6 @@ describe('UpdateSeatsDto (and the web schema)', () => {
   it.each([
     ['no changes', []],
     [`${ROOM_LIMITS.seatChangesMax + 1} changes`, changes(ROOM_LIMITS.seatChangesMax + 1)],
-    ['a duplicated seat', [{ seatId: SEAT(1) }, { seatId: SEAT(1), type: 'VIP' }]],
   ])('rejects %s', (_case, list) => {
     expect(check(UpdateSeatsDto, { changes: list }).invalid).toEqual(['changes']);
     expect(updateSeatsRequestSchema.safeParse({ changes: list }).success).toBe(false);
@@ -79,6 +78,13 @@ describe('UpdateSeatsDto (and the web schema)', () => {
   ])('rejects %s', (_case, change) => {
     expect(check(UpdateSeatsDto, { changes: [change] }).invalid).toEqual(['changes']);
     expect(updateSeatsRequestSchema.safeParse({ changes: [change] }).success).toBe(false);
+  });
+
+  it('leaves a repeated seat to the business check (422 INVALID_CHANGES)', () => {
+    const list = [{ seatId: SEAT(1) }, { seatId: SEAT(1), type: 'VIP' }];
+
+    expect(check(UpdateSeatsDto, { changes: list }).invalid).toEqual([]);
+    expect(updateSeatsRequestSchema.safeParse({ changes: list }).success).toBe(true);
   });
 
   it('rejects unknown fields and non-object items without throwing', () => {
