@@ -17,6 +17,10 @@ const describeSignal = signalTestsEnabled ? describe : describe.skip;
 
 A plain `pnpm test:integration` (and the `ci` job) skips these suites. They run in their own workflow on `ubuntu-latest`, which sets `RUN_SIGNAL_TESTS=1` at job level and runs only that suite (see `.github/workflows/worker-shutdown.yml`). Never set the variable in `ci.yml`.
 
+## Concurrency scenarios
+
+Scenarios A and B (PLAN §10) live in `apps/api/test/scenarios/` with their own Jest config (`jest.scenarios.config.js`, one suite at a time) and run only when `RUN_SCENARIO_TESTS=1`: suites use `describeScenario` from `test/scenarios/support/scenario-app.ts`, and without the variable global setup starts no container. `pnpm --filter @ticketify/api test:scenarios` without it reports every suite as skipped. Only the `booking-scenarios` workflow sets it. Never relax an assertion of a scenario to make it pass: a failure is a finding (cause and log first).
+
 ## Code rules
 
 - No `any`, no disabling lint rules to make CI green.
@@ -39,6 +43,8 @@ Every error body follows `ApiError` from `@ticketify/shared`, with a fixed machi
 Seat holds (`POST /bookings`, phase 2) follow the same tiers: seat count (1–6), repeated seats and a missing or malformed `Idempotency-Key` header are `400 VALIDATION_FAILED`; `409 SEAT_LOCKED` (another hold has the seat locked right now — Postgres `55P03` from `FOR UPDATE NOWAIT`), `409 SEAT_UNAVAILABLE` (`details.seatIds`), `409 SHOWTIME_CANCELLED`, `409 BOOKING_ALREADY_PENDING` (a PENDING booking of the same user and showtime whose `expiresAt` has not passed; `details.existingBookingId` and `details.expiresAt`, plus the older `details.bookingId`); `422 SEAT_NOT_FOUND`, `422 COUPLE_INCOMPLETE` (`details.missingSeatIds`), `422 COMBO_NOT_AVAILABLE` (`details.comboIds`), `422 IDEMPOTENCY_KEY_REUSED` (same key, different payload; the same key with the same payload answers `200` with the existing booking instead of `201`) and `422 SHOWTIME_STARTED`. The same code `SHOWTIME_STARTED` is a `409` when an admin cancels a started showtime (a state conflict on the admin's own action) and a `422` when a customer tries to hold seats of it.
 
 Booking reads and limits (week 8): `GET /bookings/:id` answers `404 BOOKING_NOT_FOUND` both for an unknown id and for another user's booking — never `403`, which would confirm that the booking exists; a malformed id is `400 VALIDATION_FAILED`, like `GET /me/bookings` with an unknown `status` or a `pageSize` outside 1–50. `POST /bookings` beyond `BOOKING_RATE_LIMIT_MAX` requests per user per window is `429 TOO_MANY_ATTEMPTS` with `details.retryAfterSeconds` (the same code as the login limit).
+
+Booking cancel (week 10): `DELETE /bookings/:id` answers `204` for the user's own `PENDING` booking (now `EXPIRED`, seats released) and also for one already `EXPIRED` (nothing changes: the call is idempotent); `409 BOOKING_NOT_CANCELLABLE` for a `CONFIRMED` or `NEEDS_REVIEW` booking; `404 BOOKING_NOT_FOUND` for an unknown id and for another user's booking alike; `400 VALIDATION_FAILED` for a malformed id.
 
 Database pressure (week 8): a request whose interactive transaction cannot get a pool connection within its `maxWait`, or runs past its `timeout` and is rolled back by Prisma (both Prisma `P2028`), answers `503 DATABASE_BUSY` (`CommonErrorCode` in `@ticketify/shared`), never `500`: nothing was written and the client may retry. Other `P2028` errors (a query on a committed, rolled-back or unknown transaction) are bugs and stay `500`, as do deadlocks (`P2034` / `40P01`), which mean a lock order is wrong. A transaction that can wait on locks or on a busy pool sets `maxWait` and `timeout` explicitly in a named constant with the reason next to it (`HOLD_TX`, `EXPIRE_TX`, `SHOWTIME_TX`) rather than relying on Prisma's implicit defaults (2 s / 5 s), which the other transactions still use. Do not raise `DATABASE_POOL_MAX` (default 10) to hide a 5xx: find what holds the connections.
 

@@ -58,6 +58,7 @@ API **không khởi động** nếu biến môi trường thiếu hoặc sai: l�
 | `pnpm typecheck` | `tsc --noEmit` cho mọi package |
 | `pnpm test:unit` | Unit test (không cần Docker) |
 | `pnpm test:integration` | Integration test với Postgres + Redis thật (Testcontainers) |
+| `RUN_SCENARIO_TESTS=1 pnpm --filter @ticketify/api test:scenarios` | Kịch bản A và B (500 request giữ một ghế; nhóm ghế giao nhau), xem mục "Giữ ghế (API)" |
 | `pnpm build` | Build shared, API, web |
 | `pnpm db:migrate` | `prisma migrate dev` (tạo migration mới khi đổi schema) |
 | `pnpm db:deploy` / `pnpm db:seed` | Áp dụng migration / seed dữ liệu mẫu |
@@ -116,6 +117,30 @@ pnpm test:integration
 - `GET /bookings/:id`: đơn kèm `seats`, `combos`, `status`, `expiresAt`, `holdUntil`, `subtotal`, `total`. Đơn của người khác hoặc không tồn tại → `404 BOOKING_NOT_FOUND` (không dùng `403` để không lộ đơn có tồn tại); id sai định dạng → `400 VALIDATION_FAILED`.
 - `GET /me/bookings?status=&page=&pageSize=`: đơn của user hiện tại, mới nhất trước (`createdAt` giảm dần). `pageSize` mặc định 10, tối đa 50.
 - **`expired: boolean`** (cả trong `POST /bookings`) = `status == PENDING && holdUntil <= now`: đơn đã hết hạn dù job chưa kịp đánh dấu. `status` vẫn trả đúng giá trị đang lưu (`PENDING`), client dựa vào `expired` để hiện "đã hết hạn".
+
+**Hủy giữ ghế** `DELETE /bookings/:id` (đăng nhập, chỉ chủ đơn):
+
+- Đơn `PENDING` → `204`: đơn thành `EXPIRED`, các ghế còn `HELD` của đơn trở lại `AVAILABLE` ngay (không chờ `holdUntil`), phát `seat:released` **sau khi commit**. Ghế mà đơn khác đã lấy (hết hạn lười) và ghế `SOLD` không bị đụng tới.
+- Đơn đã `EXPIRED` (hủy rồi, hoặc worker đã đánh dấu) → `204`, không đổi gì, không phát sự kiện: gọi lại bao nhiêu lần cũng vậy.
+- Đơn `CONFIRMED` hoặc `NEEDS_REVIEW` → `409 BOOKING_NOT_CANCELLABLE`. Đơn không tồn tại hoặc của người khác → `404 BOOKING_NOT_FOUND`, không phân biệt hai trường hợp; id sai định dạng → `400 VALIDATION_FAILED`.
+- Đơn bị hủy được lưu là `EXPIRED` (không đổi schema), nên hiện chưa phân biệt được "người dùng hủy" với "hết giờ". Muốn phân biệt cần thêm giá trị mới cho enum `BookingStatus`; đang chờ quyết định (ROADMAP "Quyết định chờ").
+- Thứ tự khóa giống `expireBooking`: dòng `bookings` `FOR UPDATE`, rồi các `showtime_seats` `HELD` của đơn `FOR UPDATE ORDER BY seat_id`. Job hết hạn đến sau gặp `SKIP LOCKED` → `skipped`; job `expire-booking` của đơn đã hủy vẫn chạy ở `holdUntil` và kết thúc `noop`.
+- Sequence diagram của giữ ghế, hết hạn và hủy: [docs/sequence-hold.md](docs/sequence-hold.md).
+
+**Kịch bản A và B** (PLAN §10, `apps/api/test/scenarios/`): chỉ chạy khi đặt `RUN_SCENARIO_TESTS=1`; không đặt thì mọi suite bị bỏ qua và không khởi động container nào.
+
+```bash
+RUN_SCENARIO_TESTS=1 pnpm --filter @ticketify/api test:scenarios
+# Chỉ một kịch bản, ít lần hơn, hoặc phát lại một vòng của B:
+RUN_SCENARIO_TESTS=1 SCENARIO_A_RUNS=3 pnpm --filter @ticketify/api test:scenarios -- scenario-a
+RUN_SCENARIO_TESTS=1 SCENARIO_B_ONLY=17 pnpm --filter @ticketify/api test:scenarios -- scenario-b
+```
+
+- **A**: 500 user khác nhau cùng giữ một ghế, `SCENARIO_A_RUNS` lần (mặc định 10), mỗi lần một suất mới. Mỗi lần phải có đúng 1 `201`, 499 `409` (`SEAT_LOCKED`/`SEAT_UNAVAILABLE`), 0 `5xx`, 0 lỗi kết nối, đúng một `BookingSeat` cho ghế, và `pg_stat_activity` (lấy mẫu mỗi 50 ms) không lần nào thấy cả 40 connection của pool đều bận.
+- **B**: mỗi vòng 40–60 request cùng lúc, mỗi request 1–6 ghế lấy từ cùng 24 ghế (A5–A12, B5–B12, C5–C12 của phòng 10×12, có 3 cặp ghế đôi chọn đủ cặp), seed cố định theo vòng; `SCENARIO_B_ROUNDS` vòng (mặc định 50). Sau mỗi vòng kiểm bằng SQL: không ghế nào thuộc hai đơn còn hiệu lực, mỗi `201` có đúng tập ghế đã yêu cầu trong `booking_seats` và đúng các ghế `HELD` với `held_until = holdUntil`, request `409` không để lại đơn nào và không đổi ghế nào, 0 `5xx`.
+- Cấu hình: `DATABASE_POOL_MAX` = 40; client `node:http` một agent keep-alive, `maxSockets` 500 trên Linux, 200 trên Windows (backlog của Windows khoảng 200; đổi bằng `SCENARIO_MAX_SOCKETS`); từng suite chạy riêng (`maxWorkers: 1`); `FakeClock` cố định.
+- Số liệu từng lần/vòng in ra console và ghi vào `artifacts/scenarios/scenario-a.json`, `scenario-b.json` (không commit). Workflow `Booking scenarios` chạy cho PR đụng `modules/bookings`, `rooms`, `showtimes`, `realtime`, `infra/queue`, `packages/shared/src`, `test/scenarios`; cho push lên `main` và khi chạy tay. Số `deadlock detected` trong log Postgres là số liệu chính (job fail nếu khác 0); `pg_stat_database.deadlocks` trong báo cáo chỉ để tham khảo.
+- **Chạy trên Windows**: Node trên host và Postgres trong Docker Desktop. Ở đây kiểm tra pool của A không đạt: 40/40 connection bận, nhưng chỉ ≤ 6 connection `active`, còn lại `idle in transaction` (chờ API gửi câu lệnh tiếp theo); trên Linux pool bận tối đa 11/40 (container cục bộ) và 13/40 (CI). Kết quả nghiệm thu lấy trên Linux (CI), xem ROADMAP 2.14.
 
 **Hết hạn** (worker, `pnpm --filter @ticketify/api start:worker`): `holdUntil` trong DB là mốc chuẩn; job và cron chỉ dọn dẹp. Trong lúc chờ, luồng giữ ghế đã coi ghế `HELD` quá `held_until` là ghế trống (hết hạn lười).
 
