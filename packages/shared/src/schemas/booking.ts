@@ -178,6 +178,8 @@ export const BookingErrorCode = {
   BOOKING_ALREADY_PENDING: 'BOOKING_ALREADY_PENDING',
   /** 404: no such booking, or it belongs to another user (never 403: that would confirm it exists). */
   BOOKING_NOT_FOUND: 'BOOKING_NOT_FOUND',
+  /** 409: `DELETE /bookings/:id` on a booking that is CONFIRMED or NEEDS_REVIEW. */
+  BOOKING_NOT_CANCELLABLE: 'BOOKING_NOT_CANCELLABLE',
   /** 429: too many `POST /bookings` from this user; `details.retryAfterSeconds`. Same code as login. */
   TOO_MANY_ATTEMPTS: 'TOO_MANY_ATTEMPTS',
 } as const;

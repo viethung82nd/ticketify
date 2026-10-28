@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
@@ -15,6 +17,7 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiHeader,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiTags,
@@ -118,6 +121,22 @@ export class BookingsController {
   })
   get(@CurrentUser() user: AuthUser, @Param('id', bookingId) id: string): Promise<Booking> {
     return this.views.ofUser(user.id, id);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiNoContentResponse({
+    description:
+      'PENDING → EXPIRED, its HELD seats AVAILABLE again and seat:released sent after commit. ' +
+      'An EXPIRED booking (cancelled before, or expired) also answers 204 and changes nothing',
+  })
+  @ApiBadRequestResponse({ description: 'VALIDATION_FAILED: id is not a UUID' })
+  @ApiNotFoundResponse({
+    description: "BOOKING_NOT_FOUND: no such booking, or another user's (never 403)",
+  })
+  @ApiConflictResponse({ description: 'BOOKING_NOT_CANCELLABLE: CONFIRMED or NEEDS_REVIEW' })
+  cancel(@CurrentUser() user: AuthUser, @Param('id', bookingId) id: string): Promise<void> {
+    return this.bookings.cancel(user.id, id);
   }
 }
 
