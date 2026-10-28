@@ -96,9 +96,9 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **2.10** Test hết hạn bằng `ClockService`: job chạy 2 lần, cron và job chạy song song, ghế đã bị booking khác lấy (lazy expiry). `booking-expiry.int-spec.ts`: thêm ghế `SOLD`, cron 150 đơn, enqueue lỗi sau commit, worker thật và tắt worker giữa job, đọc đơn, rate limit
 
 ### Tuần 9: Realtime & UI chọn ghế
-- [ ] **2.11** Socket.IO gateway: xác thực JWT khi handshake, join/leave room `showtime:{id}`, Redis adapter; worker phát sự kiện qua redis-emitter; chỉ emit sau khi commit
-- [ ] **2.12** FE sơ đồ ghế: màu theo loại và trạng thái ghế, chọn tối đa 6 ghế, ghế đôi, cập nhật realtime, tải lại khi reconnect hoặc khi nhận `409`
-- [ ] **2.13** FE: chọn combo, tóm tắt đơn, đếm ngược theo `expiresAt`, màn hình báo hết hạn
+- [x] **2.11** Socket.IO gateway: xác thực JWT khi handshake, join/leave room `showtime:{id}`, Redis adapter; worker phát sự kiện qua redis-emitter; chỉ emit sau khi commit. `modules/realtime`: `RealtimeGateway` (handshake `auth.token` → `UNAUTHORIZED`/`TOKEN_EXPIRED`/`TOKEN_INVALID`; tối đa 5 room mỗi socket; 30 lần join mỗi phút mỗi user), `RealtimeIoAdapter` (`setupRealtime(app)` trong `main.ts`: chỉ WebSocket, origin từ `CORS_ORIGINS`, Redis adapter trên hai kết nối riêng). `SeatEvents` phát sau commit: API qua gateway, worker qua `@socket.io/redis-emitter`; `expireBooking` trả thêm `showtimeId` và `releasedSeatIds` (`UPDATE … RETURNING seat_id`). Lỗi phát chỉ ghi `warn` (adapter/emitter không bắt lỗi `publish()` nên kết nối publisher được bọc lại để không sinh unhandled rejection). `JwtAuthGuard` (global) cho qua message WebSocket vì socket đã xác thực lúc handshake. `realtime.int-spec.ts`: handshake, room, sự kiện sau commit/không có khi 409 hoặc rollback, worker, hai instance API chung Redis, Redis lỗi
+- [x] **2.12** FE sơ đồ ghế: màu theo loại và trạng thái ghế, chọn tối đa 6 ghế, ghế đôi, cập nhật realtime, tải lại khi reconnect hoặc khi nhận `409`. `features/seats` (`useSeatMap`, `SeatMap`, quy tắc thuần trong `seat-selection.ts`); tải lại cả sơ đồ sau mỗi lần join room (kể cả lần đầu), khi `409`, và khi sự kiện không khớp; bàn phím một tab stop + `aria-live`. Thẻ suất chiếu trên trang phim dẫn tới `/showtimes/:id/book`
+- [x] **2.13** FE: chọn combo, tóm tắt đơn, đếm ngược theo `expiresAt`, màn hình báo hết hạn. Đồng hồ theo giờ máy chủ: `serverOffsetMs` từ header `Date` (API thêm `exposedHeaders: ['Date']` vào CORS), không đọc được → độ lệch 0 + cảnh báo. Playwright 2 trình duyệt (realtime, xung đột, mất kết nối, đồng hồ lệch 10 phút, hết hạn, bàn phím, giới hạn 6 ghế/ghế đôi) chạy tay trên `localhost`; đưa vào CI ở 5.8
 
 ### Tuần 10: Kịch bản A, B
 - [ ] **2.14** Kịch bản A: 500 request song song giữ 1 ghế (pool đủ lớn, dùng client riêng). Kỳ vọng đúng 1 thành công, không có 5xx
@@ -235,6 +235,8 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 | Hạng mục | Ghi chú |
 |---|---|
 | Tên ngày lễ (`Holiday.name`, nullable) | Chưa thêm cột. Khi cần, gom vào **một** migration chỉ thêm cột nullable (expand-only, như migration `movie_synopsis`), không đổi dữ liệu cũ |
+| Hủy giữ ghế `DELETE /bookings/:id` | Giai đoạn 2 chưa có (28/10/2026, tuần 9): đóng trang thì ghế vẫn bị giữ tới hết hạn. Cần quyết định có thêm API hủy đơn `PENDING` của chính user (nhả ghế ngay, phát `seat:released`) hay không. Nếu có, phải chặn khi đã có `Payment` `PENDING` (giai đoạn 3) và giữ thứ tự khóa `Payment → Booking → Seats` |
+| Đặt lại cùng suất trong thời gian chờ thanh toán | Sau `expiresAt`, đơn vẫn chặn đơn mới cùng suất (`BOOKING_ALREADY_PENDING`, vì kiểm `hold_until > now`) và ghế cũ vẫn `HELD` thêm `PAYMENT_GRACE_SECONDS` (5 phút). Nút "Chọn lại ghế" của màn hình hết hạn vì vậy có thể bị từ chối tới 5 phút. Chờ quyết định: giữ nguyên (an toàn với IPN trễ), hay đổi kiểm tra sang `expires_at`, hay giải quyết cùng API hủy giữ ghế ở trên |
 
 ---
 

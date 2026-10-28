@@ -131,6 +131,32 @@ pnpm test:integration
   - Câu lệnh treo (không phải chờ khóa): hạn cứng, thoát mã `1` sau 10,0 giây, đơn `PENDING`, ghế `HELD` (đã rollback); phục hồi mất khoảng 30–40 giây do khóa job mồ côi trong BullMQ.
 - **Chạy suite shutdown**: chỉ chạy khi đặt `RUN_SIGNAL_TESTS=1`, trên Linux/macOS (Windows không gửi được `SIGTERM` tới process khác nên luôn bỏ qua). `pnpm test:integration` thường bỏ qua suite này; workflow `Worker shutdown (Linux)` bật biến cho PR đụng `modules/bookings`, `infra/queue`, `main.worker.ts`, cho push lên `main`, hằng tuần và khi chạy tay. Chạy tay: `RUN_SIGNAL_TESTS=1 pnpm --filter @ticketify/api test:integration -- worker-shutdown`; log từng kịch bản nằm ở `artifacts/worker-shutdown/` (không commit).
 
+## Realtime và chọn ghế
+
+Socket.IO chạy chung HTTP server với API (`ws://<API>/socket.io`, namespace gốc), **chỉ WebSocket** (không long-polling: nhiều instance API sau proxy thì long-polling cần sticky session). Origin trình duyệt phải nằm trong `CORS_ORIGINS` (không dùng `*`): CORS áp cho HTTP, còn WebSocket bị chặn bằng `allowRequest` khi `Origin` lạ.
+
+- **Xác thực khi handshake**: client gửi access token trong `handshake.auth.token`, API kiểm bằng `AccessTokenVerifier` (cùng bộ kiểm với HTTP). Không có token → `connect_error` với `message = "UNAUTHORIZED"`; hết hạn → `TOKEN_EXPIRED` (web gọi `refreshSession()` rồi kết nối lại); token sai → `TOKEN_INVALID`. `err.data = { code, message }`. Token chỉ được kiểm lúc handshake; các sự kiện trong room không chứa dữ liệu cá nhân.
+- **Khách chưa đăng nhập không xem sơ đồ realtime**: đặt vé bắt buộc đăng nhập (PLAN §1), nên trang chọn ghế nằm sau đăng nhập. Khách vẫn xem được số ghế trống trên lịch chiếu (`GET /showtimes`).
+- **Room**: `showtime:join` / `showtime:leave` với `{ showtimeId }`, có ack. Thành công → ack `{ joined: true }` và socket vào room `showtime:{id}`. Lỗi trả trong ack `{ joined: false, error }` **và** sự kiện `error` `{ event, code, message, details? }`: `VALIDATION_FAILED` (id không phải UUID), `SHOWTIME_NOT_FOUND` (không tồn tại hoặc đã hủy), `TOO_MANY_SUBSCRIPTIONS` (quá 5 suất trên một kết nối), `TOO_MANY_ATTEMPTS` (quá 30 lần join mỗi phút mỗi user, `details.retryAfterSeconds`; key `rl:ws-join:user:{userId}`, fail-open như các giới hạn khác).
+- **Sự kiện** (schema zod trong `packages/shared/src/schemas/realtime.ts`): `seat:held` `{ showtimeId, seatIds, heldUntil }` do API phát sau khi `POST /bookings` commit; `seat:released` `{ showtimeId, seatIds }` do worker phát sau khi `expireBooking` commit và thực sự nhả ghế (không phát khi `noop`, `skipped`, `early`, hoặc khi mọi ghế đã thuộc đơn khác); `seat:sold` đã khai báo, dùng từ tuần 12. Chỉ chứa các ghế vừa đổi, không có `userId`. Gửi lại cùng `Idempotency-Key` (`200`) không phát gì vì không ghế nào đổi.
+- **Chỉ phát sau commit**: `SeatEvents` được gọi sau `$transaction(...)`, không bao giờ bên trong. Transaction rollback (409, lỗi bất kỳ) thì không có sự kiện nào.
+- **Nhiều instance**: Redis adapter (`@socket.io/redis-adapter`) trên hai kết nối riêng (pub/sub), không dùng client `REDIS` chung. Worker không có server Socket.IO nên phát qua `@socket.io/redis-emitter` trên cùng kênh (`ticketify:socket.io#/#showtime:{id}#`). Integration test chạy hai app NestJS chung Redis và Postgres: client ở A nhận sự kiện của đơn tạo qua B.
+- **Best-effort**: realtime chỉ là gợi ý; nguồn sự thật là `GET /showtimes/:id/seats`. Redis lỗi khi phát → log `warn`, request vẫn `201`, job vẫn xong (adapter và emitter không bắt lỗi `publish()` nên kết nối publisher được bọc lại, nếu không unhandled rejection sẽ làm sập process). Web tải lại toàn bộ sơ đồ khi (1) vào lại room sau mỗi lần kết nối, (2) nhận `409` từ `POST /bookings`, (3) nhận sự kiện không khớp với trạng thái đang biết (ghế lạ, giữ ghế đang giữ hoặc đã bán…).
+
+**Web** (`/showtimes/:id/book`, `/bookings/:id`, cần đăng nhập):
+
+- Sơ đồ ghế: tối đa 6 ghế, ghế đôi chọn và bỏ theo cặp; mỗi trạng thái có màu **và** ký hiệu riêng (VIP `V`, Đôi `Đ`, đang giữ ⏱ viền nét đứt, đã bán 🔒, không bán gạch chéo, đang chọn viền vàng dày). Bàn phím: lưới một tab stop, mũi tên/Home/End để di chuyển, Enter/Space để chọn; `aria-label` dạng "Hàng B, ghế 5, VIP, còn trống, chưa chọn", thay đổi được đọc qua vùng `aria-live`.
+- Ghế đang chọn bị người khác giữ (sự kiện) hoặc `409 SEAT_UNAVAILABLE` / `SEAT_LOCKED` → bỏ đúng các ghế đó, tải lại sơ đồ, báo "Ghế B5 vừa có người chọn". Mất kết nối → dải "Đang kết nối lại…", ghế giữ trạng thái cuối cùng đã biết, nút "Tiếp tục" khóa cho tới khi kết nối lại và sơ đồ được làm mới.
+- "Tiếp tục" gửi `Idempotency-Key` (UUID v4) giữ nguyên khi thử lại cùng lựa chọn, đổi khi lựa chọn đổi. Tổng tiền tính tại chỗ để hiển thị; trang đơn báo nếu tổng của máy chủ khác.
+- **Đếm ngược theo giờ máy chủ**: mỗi lần gọi `GET /bookings/:id`, web đọc header `Date` (API mở bằng `Access-Control-Expose-Headers: Date`) và tính `serverOffsetMs = Date − giờ máy lúc nhận`; đồng hồ hiển thị `expiresAt − (giờ máy + serverOffsetMs)`. Kiểm chứng bằng Playwright với đồng hồ trình duyệt lệch +10 phút.
+
+**Giới hạn đã biết**
+
+- **Chưa có hủy giữ ghế**: giai đoạn 2 không có API hủy đơn của người dùng. Đóng trang thì ghế vẫn bị giữ tới hết hạn (ROADMAP "Quyết định chờ").
+- **Sau `expiresAt` còn thời gian chờ thanh toán**: ghế vẫn `HELD` thêm `PAYMENT_GRACE_SECONDS` (5 phút) để đón IPN trễ, nên trong khoảng đó người dùng thấy ghế cũ của mình là "Đang giữ", và đặt lại cùng suất bị `409 BOOKING_ALREADY_PENDING` (trang chọn ghế báo rõ và dẫn tới đơn đang chờ).
+- **Realtime best-effort**: sự kiện có thể mất (Redis lỗi, mất kết nối); sơ đồ tự đúng lại ở lần tải lại kế tiếp.
+- **Độ lệch giờ**: header `Date` chỉ có độ phân giải giây, nên đồng hồ lệch tối đa khoảng 1 giây cộng nửa thời gian khứ hồi. Nếu không đọc được header (proxy bỏ header hoặc không expose), web dùng độ lệch 0 và hiện "Thời gian có thể không chính xác".
+
 ## Cấu trúc
 
 ```
@@ -139,7 +165,8 @@ apps/api/            NestJS API (main.ts) + worker BullMQ (main.worker.ts)
   src/config         env schema (zod) + AppConfig
   src/common         exception filter, định dạng lỗi
   src/infra          prisma, redis, clock, storage (S3), queue (BullMQ)
-  src/modules        health, auth, users, movies (phim, thể loại, upload poster)
+  src/modules        health, auth, users, movies, rooms, pricing, showtimes, combos, bookings,
+                     realtime (gateway Socket.IO, Redis adapter, emitter của worker)
   test/              integration test + helper Testcontainers
 apps/web/            React app
 packages/shared/     enum + zod schema dùng chung
