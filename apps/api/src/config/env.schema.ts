@@ -111,6 +111,9 @@ export const envSchema = z.object({
   /** Login attempts allowed per email inside one window (the per-IP limit is a multiple). */
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
   LOGIN_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(900),
+  /** `POST /bookings` requests allowed per user inside one fixed window (ROADMAP 2.9). */
+  BOOKING_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+  BOOKING_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
 
   /** S3-compatible object storage (RustFS in dev). */
   S3_ENDPOINT: z.url({ protocol: /^https?$/ }),

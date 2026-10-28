@@ -33,6 +33,7 @@ pnpm install                  # build packages/shared + sinh Prisma Client
 pnpm db:deploy                # áp dụng migration (gồm ràng buộc SQL viết tay)
 pnpm db:seed                  # dữ liệu mẫu, chạy lại bao nhiêu lần cũng được
 pnpm dev                      # API + web + shared (watch)
+pnpm --filter @ticketify/api dev:worker   # worker BullMQ: hết hạn giữ ghế (terminal riêng)
 ```
 
 | Địa chỉ | Nội dung |
@@ -52,6 +53,7 @@ API **không khởi động** nếu biến môi trường thiếu hoặc sai: l�
 | Lệnh | Việc |
 |---|---|
 | `pnpm dev` | Chạy API (`nest start --watch`), web (Vite), shared (`tsc --watch`) song song |
+| `pnpm --filter @ticketify/api dev:worker` | Worker BullMQ (`main.worker.ts`, watch). Bản build: `start:worker` (`node dist/main.worker.js`) |
 | `pnpm lint` | ESLint (typed) + Prettier check |
 | `pnpm typecheck` | `tsc --noEmit` cho mọi package |
 | `pnpm test:unit` | Unit test (không cần Docker) |
@@ -106,15 +108,31 @@ pnpm test:integration
 - Gửi lại cùng key và cùng nội dung → `200` với đơn cũ; cùng key khác nội dung → `422 IDEMPOTENCY_KEY_REUSED`.
 - Ghế đang bị request khác khóa → `409 SEAT_LOCKED`; ghế đã bán hoặc đang được giữ → `409 SEAT_UNAVAILABLE` (`details.seatIds`). Client tải lại sơ đồ ghế khi nhận `409`.
 - Suất đã hủy → `409 SHOWTIME_CANCELLED`; suất đã bắt đầu → `422 SHOWTIME_STARTED`; đã có đơn `PENDING` còn hạn cho suất này → `409 BOOKING_ALREADY_PENDING`.
+- Rate limit theo user: `BOOKING_RATE_LIMIT_MAX` (10) request mỗi cửa sổ cố định `BOOKING_RATE_LIMIT_WINDOW_SECONDS` (60 giây), key Redis `rl:booking:user:{userId}`. Vượt → `429 TOO_MANY_ATTEMPTS` với `details.retryAfterSeconds`. Đếm trước transaction giữ ghế và trước khi tra `Idempotency-Key` (request bị chặn không chạm DB); gửi lại cùng key cũng bị đếm. Redis lỗi thì bỏ qua giới hạn (fail-open, như giới hạn đăng nhập).
+
+**Đọc đơn** (đăng nhập, mọi vai trò):
+
+- `GET /bookings/:id`: đơn kèm `seats`, `combos`, `status`, `expiresAt`, `holdUntil`, `subtotal`, `total`. Đơn của người khác hoặc không tồn tại → `404 BOOKING_NOT_FOUND` (không dùng `403` để không lộ đơn có tồn tại); id sai định dạng → `400 VALIDATION_FAILED`.
+- `GET /me/bookings?status=&page=&pageSize=`: đơn của user hiện tại, mới nhất trước (`createdAt` giảm dần). `pageSize` mặc định 10, tối đa 50.
+- **`expired: boolean`** (cả trong `POST /bookings`) = `status == PENDING && holdUntil <= now`: đơn đã hết hạn dù job chưa kịp đánh dấu. `status` vẫn trả đúng giá trị đang lưu (`PENDING`), client dựa vào `expired` để hiện "đã hết hạn".
+
+**Hết hạn** (worker, `pnpm --filter @ticketify/api start:worker`): `holdUntil` trong DB là mốc chuẩn; job và cron chỉ dọn dẹp. Trong lúc chờ, luồng giữ ghế đã coi ghế `HELD` quá `held_until` là ghế trống (hết hạn lười).
+
+- Sau khi transaction giữ ghế commit, API thêm job BullMQ `expire-booking` (queue `bookings`, `jobId = expire-booking-{bookingId}` nên thêm hai lần vẫn một job) với `delay = max(0, holdUntil − now)` tính bằng `ClockService`.
+- **Đánh đổi khi enqueue lỗi**: nếu Redis không nhận job (lỗi hoặc không trả lời trong 1 giây) **sau khi** đơn đã commit, API ghi log `error` và vẫn trả `201`. Ghế đã được giữ thật; báo lỗi lúc này là nói "không" với một đơn đang tồn tại. Cái giá: đơn có thể bị đánh dấu `EXPIRED` trễ tới khoảng một phút, do cron mỗi phút bắt được. Trong khoảng đó không ai bị chặn: ghế quá hạn đã trống với người sau, và `expired` đã là `true`.
+- `expireBooking(bookingId)` chạy trong một transaction riêng cho mỗi đơn: khóa đơn `FOR UPDATE SKIP LOCKED` (đang bị job/cron khác giữ → `skipped`); không còn `PENDING` → `noop`; chưa tới `holdUntil` → `early` (job tự hẹn lại đúng `holdUntil`); còn lại → đơn `EXPIRED`, nhả ghế bằng `UPDATE … WHERE booking_id = $1 AND status = 'HELD'`. Điều kiện `booking_id` giữ nguyên ghế mà đơn khác đã lấy (hết hạn lười), và không bao giờ đụng ghế `SOLD`.
+- **Thứ tự khóa khi giải phóng ghế**: `bookings` (`FOR UPDATE SKIP LOCKED`) rồi các `showtime_seats` `HELD` của đơn (`FOR UPDATE ORDER BY seat_id`). Không có vòng chờ: luồng giữ ghế không chờ khóa nào (`NOWAIT`); hủy suất khóa `showtimes` rồi `showtime_seats` (`ORDER BY seat_id`) và không bao giờ khóa `bookings`.
+- **Cron mỗi phút** (job lặp của BullMQ, chỉ chạy trong worker): `SELECT id FROM bookings WHERE status = 'PENDING' AND hold_until <= now ORDER BY hold_until LIMIT 100` (không khóa), rồi `expireBooking` từng đơn. Lỗi ở một đơn được log và không chặn các đơn khác. Đủ 100 đơn thì quét tiếp ngay trong cùng job, tối đa 10 vòng. Chọn job lặp của BullMQ thay vì `@nestjs/schedule` vì lịch nằm trong Redis: nhiều process worker thì mỗi phút vẫn chỉ một job do một worker chạy, lịch còn nguyên sau khi khởi động lại, và không thêm dependency.
+- Worker: concurrency 5. Nhận `SIGTERM`/`SIGINT` → ngừng nhận job, chờ job đang chạy tối đa 10 giây, rồi đóng Postgres và Redis. Job chưa xong sau 10 giây: transaction của nó chưa commit nên bị rollback (không bao giờ có đơn `EXPIRED` mà ghế còn `HELD`); job còn khóa trong Redis tới khi hết hạn khóa rồi được trả lại hàng đợi, và cron cũng sẽ xử lý đơn đó.
 
 ## Cấu trúc
 
 ```
-apps/api/            NestJS API (sau này thêm worker)
+apps/api/            NestJS API (main.ts) + worker BullMQ (main.worker.ts)
   prisma/            schema, migrations (kèm SQL viết tay), seed
   src/config         env schema (zod) + AppConfig
   src/common         exception filter, định dạng lỗi
-  src/infra          prisma, redis, clock, storage (S3)
+  src/infra          prisma, redis, clock, storage (S3), queue (BullMQ)
   src/modules        health, auth, users, movies (phim, thể loại, upload poster)
   test/              integration test + helper Testcontainers
 apps/web/            React app

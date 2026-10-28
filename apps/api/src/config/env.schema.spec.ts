@@ -30,6 +30,8 @@ describe('validateEnv', () => {
     expect(env.REFRESH_TOKEN_TTL_SECONDS).toBe(604_800);
     expect(env.LOGIN_RATE_LIMIT_MAX).toBe(5);
     expect(env.LOGIN_RATE_LIMIT_WINDOW_SECONDS).toBe(900);
+    expect(env.BOOKING_RATE_LIMIT_MAX).toBe(10);
+    expect(env.BOOKING_RATE_LIMIT_WINDOW_SECONDS).toBe(60);
   });
 
   it.each([
@@ -104,6 +106,8 @@ describe('validateEnv', () => {
     ['JWT_ACCESS_SECRET', 'too-short'],
     ['ACCESS_TOKEN_TTL_SECONDS', '0'],
     ['LOGIN_RATE_LIMIT_MAX', '-1'],
+    ['BOOKING_RATE_LIMIT_MAX', '0'],
+    ['BOOKING_RATE_LIMIT_WINDOW_SECONDS', '1.5'],
     ['TRUST_PROXY', 'true'],
     ['TRUST_PROXY', 'caddy'],
     ['TRUST_PROXY', '10.0.0.0/33'],

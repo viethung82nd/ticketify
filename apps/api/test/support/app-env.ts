@@ -22,6 +22,8 @@ export function appTestEnv(
     SMTP_PORT: '1025',
     SMTP_FROM: 'test@ticketify.local',
     JWT_ACCESS_SECRET: 'integration-test-access-secret-0123456789',
+    BOOKING_RATE_LIMIT_MAX: '10',
+    BOOKING_RATE_LIMIT_WINDOW_SECONDS: '60',
     ...overrides,
   };
 }

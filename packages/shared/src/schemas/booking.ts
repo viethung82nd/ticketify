@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BookingStatus, SeatType } from '../enums.js';
+import { pageSchema } from './movie.js';
 
 /** Limits shared by the API DTOs and the web so both validate the same way. */
 export const BOOKING_LIMITS = {
@@ -11,6 +12,9 @@ export const BOOKING_LIMITS = {
   /** `Idempotency-Key` header length. */
   idempotencyKeyMin: 8,
   idempotencyKeyMax: 128,
+  /** `GET /me/bookings` page size. */
+  listPageSizeDefault: 10,
+  listPageSizeMax: 50,
 } as const;
 
 /**
@@ -92,7 +96,10 @@ export const bookingComboSchema = z.object({
 });
 export type BookingCombo = z.infer<typeof bookingComboSchema>;
 
-/** `201` (new) or `200` (same `Idempotency-Key` and payload again) body of `POST /bookings`. */
+/**
+ * `201` (new) or `200` (same `Idempotency-Key` and payload again) body of `POST /bookings`; also
+ * `GET /bookings/:id` and the items of `GET /me/bookings`.
+ */
 export const bookingSchema = z.object({
   id: z.uuid(),
   /** Short code shown to the customer. */
@@ -103,6 +110,11 @@ export const bookingSchema = z.object({
   expiresAt: z.string(),
   /** expiresAt + payment grace: the seats stay HELD until then. */
   holdUntil: z.string(),
+  /**
+   * `status` is PENDING but holdUntil has passed: the booking is over even if the expiry job has
+   * not marked it EXPIRED yet. `status` itself is reported as stored.
+   */
+  expired: z.boolean(),
   seats: z.array(bookingSeatSchema),
   combos: z.array(bookingComboSchema),
   /** Seats + combos. */
@@ -112,6 +124,9 @@ export const bookingSchema = z.object({
   createdAt: z.string(),
 });
 export type Booking = z.infer<typeof bookingSchema>;
+
+/** `GET /me/bookings`: the user's bookings, newest first. */
+export const bookingPageSchema = pageSchema(bookingSchema);
 
 /** Machine-readable `code` values of booking API errors (also SHOWTIME_NOT_FOUND). */
 export const BookingErrorCode = {
@@ -133,5 +148,9 @@ export const BookingErrorCode = {
   IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
   /** 409: the user already has a live PENDING booking for this showtime; `details.bookingId`. */
   BOOKING_ALREADY_PENDING: 'BOOKING_ALREADY_PENDING',
+  /** 404: no such booking, or it belongs to another user (never 403: that would confirm it exists). */
+  BOOKING_NOT_FOUND: 'BOOKING_NOT_FOUND',
+  /** 429: too many `POST /bookings` from this user; `details.retryAfterSeconds`. Same code as login. */
+  TOO_MANY_ATTEMPTS: 'TOO_MANY_ATTEMPTS',
 } as const;
 export type BookingErrorCode = (typeof BookingErrorCode)[keyof typeof BookingErrorCode];

@@ -15,6 +15,8 @@ const BASE_ENV: Record<string, string> = {
   SMTP_PORT: '1025',
   SMTP_FROM: 'test@ticketify.local',
   JWT_ACCESS_SECRET: 'unit-test-access-secret-0123456789abcdef',
+  BOOKING_RATE_LIMIT_MAX: '10',
+  BOOKING_RATE_LIMIT_WINDOW_SECONDS: '60',
 };
 
 /** A validated `AppConfig` for unit tests, without loading any .env file. */

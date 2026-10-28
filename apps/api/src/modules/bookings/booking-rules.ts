@@ -1,5 +1,10 @@
 import { randomInt } from 'node:crypto';
-import { BookingErrorCode, ShowtimeSeatStatus, ShowtimeStatus } from '@ticketify/shared';
+import {
+  BookingErrorCode,
+  BookingStatus,
+  ShowtimeSeatStatus,
+  ShowtimeStatus,
+} from '@ticketify/shared';
 
 const SECOND_MS = 1_000;
 
@@ -109,4 +114,15 @@ export function bookingCode(): string {
   let code = '';
   for (let i = 0; i < CODE_LENGTH; i++) code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
   return code;
+}
+
+/**
+ * The booking is over although still stored PENDING: holdUntil has passed and the expiry job (or
+ * the sweep) has not marked it yet. Clients get this as `expired`; `status` is left as stored.
+ */
+export function isHoldExpired(
+  booking: { status: BookingStatus; holdUntil: Date },
+  now: Date,
+): boolean {
+  return booking.status === BookingStatus.PENDING && booking.holdUntil.getTime() <= now.getTime();
 }

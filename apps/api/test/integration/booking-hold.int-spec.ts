@@ -85,6 +85,8 @@ describe('Seat hold — POST /bookings (real Postgres + Redis)', () => {
           HOLD_TTL_SECONDS: String(HOLD_TTL_SECONDS),
           PAYMENT_GRACE_SECONDS: String(PAYMENT_GRACE_SECONDS),
           DATABASE_POOL_MAX: String(POOL_MAX),
+          // Many holds per user here; the limit itself is covered in booking-expiry.int-spec.
+          BOOKING_RATE_LIMIT_MAX: '1000',
         },
       ),
     );
