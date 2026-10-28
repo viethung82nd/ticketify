@@ -121,6 +121,33 @@ export class RefreshTokenService {
     });
   }
 
+  /**
+   * Deletes tokens whose `expiresAt` has passed, `batchSize` rows per statement so no single
+   * DELETE holds locks for long. Returns how many rows were removed.
+   *
+   * Revoked and rotated tokens are kept until they expire: a rotated token must stay in the
+   * table, or presenting it again would read as "unknown" instead of triggering reuse
+   * detection. Once expired it can no longer be exchanged anyway.
+   *
+   * Not scheduled yet: it will run from the worker's cron (ROADMAP 2.6–2.8).
+   */
+  async purgeExpired(batchSize = 1_000): Promise<number> {
+    const now = this.clock.now();
+    let total = 0;
+    for (;;) {
+      const deleted = await this.prisma.$executeRaw`
+        DELETE FROM refresh_tokens
+        WHERE id IN (
+          SELECT id FROM refresh_tokens
+          WHERE expires_at <= ${now}
+          ORDER BY expires_at
+          LIMIT ${batchSize}
+        )`;
+      total += deleted;
+      if (deleted < batchSize) return total;
+    }
+  }
+
   async revokeAllForUser(userId: string): Promise<number> {
     const { count } = await this.prisma.refreshToken.updateMany({
       where: { userId, revokedAt: null },

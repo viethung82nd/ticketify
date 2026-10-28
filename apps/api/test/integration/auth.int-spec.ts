@@ -9,6 +9,8 @@ import { type AuthUser, CurrentUser } from '../../src/common/decorators/current-
 import { Roles } from '../../src/common/decorators/roles.decorator';
 import { ClockService } from '../../src/infra/clock/clock.service';
 import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
+import { RefreshTokenService } from '../../src/modules/auth/tokens/refresh-token.service';
+import { appTestEnv } from '../support/app-env';
 import { createTestDatabase, type TestDatabase } from '../support/database';
 import { bodyOf, cookieValue, errorOf, setCookieLine } from '../support/http';
 import { createTestRedis, type TestRedis } from '../support/redis';
@@ -75,23 +77,13 @@ describe('Auth (real Postgres + Redis)', () => {
   beforeAll(async () => {
     [db, redis] = await Promise.all([createTestDatabase(), createTestRedis()]);
     // ConfigModule reads process.env when the module graph is first imported.
-    Object.assign(process.env, {
-      NODE_ENV: 'test',
-      LOG_LEVEL: 'silent',
-      CORS_ORIGINS: 'http://localhost:5173',
-      DATABASE_URL: db.url,
-      REDIS_URL: redis.url,
-      S3_ENDPOINT: 'http://localhost:9000',
-      S3_ACCESS_KEY: 'test',
-      S3_SECRET_KEY: 'test-secret',
-      S3_BUCKET: 'test-bucket',
-      SMTP_HOST: 'localhost',
-      SMTP_PORT: '1025',
-      SMTP_FROM: 'test@ticketify.local',
-      JWT_ACCESS_SECRET: 'integration-test-access-secret-0123456789',
-      LOGIN_RATE_LIMIT_MAX: String(LOGIN_MAX),
-      LOGIN_RATE_LIMIT_WINDOW_SECONDS: '900',
-    });
+    Object.assign(
+      process.env,
+      appTestEnv(
+        { databaseUrl: db.url, redisUrl: redis.url },
+        { LOGIN_RATE_LIMIT_MAX: String(LOGIN_MAX), LOGIN_RATE_LIMIT_WINDOW_SECONDS: '900' },
+      ),
+    );
     ({ AppModule } = await import('../../src/app.module.js'));
     ({ REDIS } = await import('../../src/infra/redis/redis.module.js'));
     clock = new FakeClock(START);
@@ -468,6 +460,59 @@ describe('Auth (real Postgres + Redis)', () => {
     });
   });
 
+  describe('purgeExpired', () => {
+    it('deletes only expired tokens, in batches, and keeps rotated ones for reuse detection', async () => {
+      const service = app.get(RefreshTokenService);
+      const { email, session, refreshToken: rotated } = await signUp(); // expires START + 7d
+      const loggedOut = refreshTokenOf(await login(email)); // expires START + 7d
+      await logout(loggedOut);
+      clock.advance({ hours: 24 });
+      const current = refreshTokenOf(await refresh(rotated)); // expires START + 8d
+      await db.prisma.refreshToken.createMany({
+        data: Array.from({ length: 5 }, (_, i) => ({
+          userId: session.user.id,
+          tokenHash: sha256(`expired-${i}-${email}`),
+          expiresAt: new Date(Date.parse(START) - (i + 1) * 3_600_000),
+        })),
+      });
+      const tokenCount = () => db.prisma.refreshToken.count({ where: { userId: session.user.id } });
+      await expect(tokenCount()).resolves.toBe(8);
+
+      // Batch size 2 → three DELETE statements (2 + 2 + 1).
+      await expect(service.purgeExpired(2)).resolves.toBe(5);
+      const kept = await db.prisma.refreshToken.findMany({ where: { userId: session.user.id } });
+      expect(kept.map((token) => token.tokenHash).sort()).toEqual(
+        [rotated, loggedOut, current].map(sha256).sort(),
+      );
+      // The rotated token is still there, so presenting it again is still caught as reuse.
+      const reuse = await refresh(rotated);
+      expect(errorOf(reuse).code).toBe('REFRESH_TOKEN_REUSED');
+    });
+
+    it('removes a rotated predecessor once expired; its successor keeps working', async () => {
+      const service = app.get(RefreshTokenService);
+      const { session, refreshToken: first } = await signUp(); // expires START + 7d
+      clock.advance({ hours: 24 });
+      const second = refreshTokenOf(await refresh(first)); // expires START + 8d
+
+      clock.advance({ hours: 6 * 24 }); // START + 7d: `first` has just expired
+      // Tokens from earlier tests in this suite expire then too, so only a lower bound here.
+      await expect(service.purgeExpired()).resolves.toBeGreaterThanOrEqual(1);
+
+      const remaining = await db.prisma.refreshToken.findMany({
+        where: { userId: session.user.id },
+      });
+      expect(remaining.map((token) => token.tokenHash)).toEqual([sha256(second)]);
+      expect((await refresh(second)).status).toBe(200);
+    });
+
+    it('returns 0 when nothing has expired', async () => {
+      await signUp();
+
+      await expect(app.get(RefreshTokenService).purgeExpired()).resolves.toBe(0);
+    });
+  });
+
   // ─── 1.3 Login rate limit ───
 
   describe('login rate limit', () => {
@@ -502,6 +547,22 @@ describe('Auth (real Postgres + Redis)', () => {
       expect(responses.every((res) => res.status === 401)).toBe(true);
 
       expectTooMany(await login(uniqueEmail(), 'wrong password!'));
+    });
+
+    it('per IP: a spoofed X-Forwarded-For is ignored by default (TRUST_PROXY=false)', async () => {
+      const responses = await Promise.all(
+        Array.from({ length: IP_MAX }, (_, i) =>
+          login(uniqueEmail(), 'wrong password!').set('X-Forwarded-For', `203.0.113.${i + 1}`),
+        ),
+      );
+      expect(responses.every((res) => res.status === 401)).toBe(true);
+
+      expectTooMany(
+        await login(uniqueEmail(), 'wrong password!').set('X-Forwarded-For', '198.51.100.7'),
+      );
+      const keys = await redis.client.keys('rl:login:ip:*');
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).toMatch(/127\.0\.0\.1$/);
     });
 
     it('a successful login resets the email counter', async () => {

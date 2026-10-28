@@ -38,6 +38,28 @@ describe('validateEnv', () => {
     expect(env.S3_FORCE_PATH_STYLE).toBe(false);
   });
 
+  it.each([
+    [undefined, false],
+    ['', false],
+    ['false', false],
+    ['0', false],
+    ['1', 1],
+    ['2', 2],
+    ['loopback', ['loopback']],
+    ['loopback, 172.16.0.0/12 ,10.0.0.5', ['loopback', '172.16.0.0/12', '10.0.0.5']],
+    ['uniquelocal,::1,fd00::/8', ['uniquelocal', '::1', 'fd00::/8']],
+  ])('parses TRUST_PROXY=%p as %p', (raw, expected) => {
+    const env = validateEnv(raw === undefined ? validEnv() : { ...validEnv(), TRUST_PROXY: raw });
+
+    expect(env.TRUST_PROXY).toEqual(expected);
+  });
+
+  it('explains why TRUST_PROXY=true is refused', () => {
+    expect(() => validateEnv({ ...validEnv(), TRUST_PROXY: 'true' })).toThrow(
+      /trust any client-supplied X-Forwarded-For/,
+    );
+  });
+
   it('treats blank optional VNPay values as unset', () => {
     const env = validateEnv({ ...validEnv(), VNPAY_TMN_CODE: '', VNPAY_HASH_SECRET: '' });
 
@@ -65,6 +87,10 @@ describe('validateEnv', () => {
     ['JWT_ACCESS_SECRET', 'too-short'],
     ['ACCESS_TOKEN_TTL_SECONDS', '0'],
     ['LOGIN_RATE_LIMIT_MAX', '-1'],
+    ['TRUST_PROXY', 'true'],
+    ['TRUST_PROXY', 'caddy'],
+    ['TRUST_PROXY', '10.0.0.0/33'],
+    ['TRUST_PROXY', '-1'],
   ])('rejects invalid %s=%s', (key, value) => {
     expect(() => validateEnv({ ...validEnv(), [key]: value })).toThrow(new RegExp(key));
   });

@@ -8,6 +8,7 @@ import { validationExceptionFactory } from './common/errors/api-error';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { AppConfigModule } from './config/app-config.module';
 import { AppConfig } from './config/app-config.service';
+import { TrustProxySetup } from './config/trust-proxy';
 import { ClockModule } from './infra/clock/clock.module';
 import { PrismaModule } from './infra/prisma/prisma.module';
 import { RedisModule } from './infra/redis/redis.module';
@@ -57,6 +58,7 @@ const requestIdFrom = (req: IncomingMessage): string => {
       }),
     },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    TrustProxySetup,
   ],
 })
 export class AppModule implements NestModule {
