@@ -1,0 +1,57 @@
+name: Worker shutdown (Linux)
+
+# Real SIGTERM against the real worker process (worker-shutdown.int-spec.ts, ROADMAP 2.6).
+# Only for changes that can affect how the worker stops, and on main.
+on:
+  pull_request:
+    paths:
+      - 'apps/api/src/modules/bookings/**'
+      - 'apps/api/src/infra/queue/**'
+      - 'apps/api/src/main.worker.ts'
+      - 'apps/api/test/integration/worker-shutdown.int-spec.ts'
+      - 'apps/api/test/support/worker-preload/**'
+      - '.github/workflows/worker-shutdown.yml'
+  push:
+    branches: [main]
+
+concurrency:
+  group: worker-shutdown-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  worker-shutdown:
+    name: worker shutdown on SIGTERM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Version comes from "packageManager" in package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Also builds packages/shared (prepare) and generates the Prisma client (postinstall).
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Postgres + Redis via Testcontainers; the suite compiles the worker itself.
+      - name: Worker shutdown test
+        run: pnpm --filter @ticketify/api test:integration worker-shutdown --verbose
+
+      - name: Upload worker logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-shutdown-logs
+          path: artifacts/worker-shutdown/
+          if-no-files-found: ignore
