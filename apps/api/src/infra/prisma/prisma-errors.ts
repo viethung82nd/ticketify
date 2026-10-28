@@ -12,11 +12,13 @@ export function isPrismaError(error: unknown, code: PrismaErrorCode): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
 }
 
-/** Postgres SQLSTATE codes for constraint violations. */
+/** Postgres SQLSTATE codes the services react to. */
 export const SQLSTATE = {
   uniqueViolation: '23505',
   checkViolation: '23514',
   exclusionViolation: '23P01',
+  /** `lock_not_available`: a `FOR UPDATE NOWAIT` row is locked by another transaction. */
+  lockNotAvailable: '55P03',
 } as const;
 
 export interface ConstraintViolation {
@@ -26,6 +28,15 @@ export interface ConstraintViolation {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
+
+/** Postgres SQLSTATE of a Prisma 7 driver-adapter error (`meta.driverAdapterError.cause`). */
+export function sqlStateOf(error: unknown): string | undefined {
+  if (!isRecord(error) || !isRecord(error.meta)) return undefined;
+  const adapterError = error.meta.driverAdapterError;
+  if (!isRecord(adapterError) || !isRecord(adapterError.cause)) return undefined;
+  const code = adapterError.cause.originalCode;
+  return typeof code === 'string' ? code : undefined;
+}
 
 /**
  * SQLSTATE and constraint name of a Prisma 7 driver-adapter error, for the rules Prisma has no

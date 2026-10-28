@@ -97,6 +97,16 @@ pnpm test:integration
 | `GET /showtimes/dates?movieId=` | Public | Các ngày (tăng dần, không trùng) có ít nhất một suất `SCHEDULED` chưa bắt đầu của phim. Trang phim dùng để gợi ý ngày gần nhất có suất. Phim không tồn tại → `{ "dates": [] }` |
 | `GET /showtimes/:id/seats` | Public | Lưới phòng và **mọi ghế của phòng**: ghế có `ShowtimeSeat` trả giá đã chốt và trạng thái (`HELD` hết hạn hiện `AVAILABLE`); ghế tắt lúc tạo suất → `UNAVAILABLE`, `price: null`. Suất đã hủy → `404` |
 
+## Giữ ghế (API)
+
+`POST /bookings` (đăng nhập, header `Idempotency-Key` bắt buộc, 8–128 ký tự `A–Z a–z 0–9 . _ ~ : -`), body `{ showtimeId, seatIds, comboItems? }`:
+
+- 1–6 ghế, không trùng; ghế đôi phải chọn đủ cặp (`422 COUPLE_INCOMPLETE`). `comboItems: [{ comboId, quantity }]` chỉ nhận combo đang bật (`422 COMBO_NOT_AVAILABLE`).
+- Thành công → `201`, đơn `PENDING`: ghế `HELD` tới `holdUntil = expiresAt + PAYMENT_GRACE_SECONDS`, `expiresAt = lúc tạo + HOLD_TTL_SECONDS`. Giá ghế lấy từ giá đã chốt của suất, combo lưu snapshot tên và giá.
+- Gửi lại cùng key và cùng nội dung → `200` với đơn cũ; cùng key khác nội dung → `422 IDEMPOTENCY_KEY_REUSED`.
+- Ghế đang bị request khác khóa → `409 SEAT_LOCKED`; ghế đã bán hoặc đang được giữ → `409 SEAT_UNAVAILABLE` (`details.seatIds`). Client tải lại sơ đồ ghế khi nhận `409`.
+- Suất đã hủy → `409 SHOWTIME_CANCELLED`; suất đã bắt đầu → `422 SHOWTIME_STARTED`; đã có đơn `PENDING` còn hạn cho suất này → `409 BOOKING_ALREADY_PENDING`.
+
 ## Cấu trúc
 
 ```

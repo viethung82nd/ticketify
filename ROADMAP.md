@@ -78,19 +78,19 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 ## Giai đoạn 2 — Giữ ghế ⭐ (tuần 7–10)
 
 ### Tuần 7: Luồng giữ ghế
-- [ ] **2.1** `BookingService.hold()`: interactive transaction + raw SQL theo mục 4 của PLAN; `FOR UPDATE NOWAIT`, map lỗi `55P03` thành `409`; kiểm tra `rowCount`. **Sau khi khóa ghế, đọc lại `showtimes.status`** và từ chối nếu `CANCELLED`: hủy suất (1.14) khóa `showtimes` `FOR NO KEY UPDATE` rồi mọi `showtime_seats` của suất `FOR UPDATE ORDER BY seat_id`, nên hai luồng tuần tự hóa trên ghế; INSERT booking chỉ cần khóa key-share trên dòng suất nên không deadlock với lần hủy. Thứ tự khóa đã chốt (28/10/2026): **tạo suất** khóa `rooms` rồi `movies` bằng `FOR SHARE`; **sửa ghế** khóa `rooms` `FOR UPDATE`; **hủy suất** khóa `showtimes` `FOR NO KEY UPDATE` rồi mọi `showtime_seats` của suất `FOR UPDATE ORDER BY seat_id`
-- [ ] **2.2** Validate:
+- [x] **2.1** `BookingService.hold()`: interactive transaction + raw SQL theo mục 4 của PLAN; `FOR UPDATE NOWAIT`, map lỗi `55P03` thành `409`; kiểm tra `rowCount`. **Sau khi khóa ghế, đọc lại `showtimes.status`** và từ chối nếu `CANCELLED`: hủy suất (1.14) khóa `showtimes` `FOR NO KEY UPDATE` rồi mọi `showtime_seats` của suất `FOR UPDATE ORDER BY seat_id`, nên hai luồng tuần tự hóa trên ghế; INSERT booking chỉ cần khóa key-share trên dòng suất nên không deadlock với lần hủy. Thứ tự khóa đã chốt (28/10/2026): **tạo suất** khóa `rooms` rồi `movies` bằng `FOR SHARE`; **sửa ghế** khóa `rooms` `FOR UPDATE`; **hủy suất** khóa `showtimes` `FOR NO KEY UPDATE` rồi mọi `showtime_seats` của suất `FOR UPDATE ORDER BY seat_id`
+- [x] **2.2** Validate:
   - tối đa 6 ghế
   - ghế đôi phải chọn theo cặp
   - suất chiếu chưa bắt đầu: kiểm tra `startsAt > now` (`ClockService`) **trước khi giữ ghế**. `GET /showtimes/:id/seats` vẫn trả sơ đồ của suất đã bắt đầu (chỉ suất `CANCELLED` mới 404), nên không được dựa vào endpoint đó để chặn
   - mỗi user tối đa 1 đơn `PENDING` cho mỗi suất chiếu
-- [ ] **2.3** Tính giá ở server; tạo `BookingSeat`; tạo `BookingCombo` kèm snapshot giá
-- [ ] **2.4** Idempotency: header `Idempotency-Key` + `requestHash` (cùng key cùng hash → trả đơn cũ; cùng key khác hash → `422`)
-- [ ] **2.5** Unit + integration test cho các nhánh validate và idempotency
+- [x] **2.3** Tính giá ở server; tạo `BookingSeat`; tạo `BookingCombo` kèm snapshot giá
+- [x] **2.4** Idempotency: header `Idempotency-Key` + `requestHash` (cùng key cùng hash → trả đơn cũ; cùng key khác hash → `422`)
+- [x] **2.5** Unit + integration test cho các nhánh validate và idempotency
 
 ### Tuần 8: Hết hạn & worker
 - [ ] **2.6** Entry point `main.worker.ts`; module BullMQ dùng chung cho API và worker
-- [ ] **2.7** Delayed job `expire-booking` và hàm `expireBooking()` (chưa có querydr, sẽ thêm ở 3.10)
+- [ ] **2.7** Delayed job `expire-booking` và hàm `expireBooking()` (chưa có querydr, sẽ thêm ở 3.10). Gắn job vào `ExpirationScheduler.schedule(bookingId, holdUntil)`: hook rỗng từ tuần 7, được gọi sau khi transaction giữ ghế commit
 - [ ] **2.8** Cron quét mỗi phút với `SKIP LOCKED`
 - [ ] **2.9** `GET /bookings/:id`, `GET /me/bookings`; rate limit `POST /bookings`
 - [ ] **2.10** Test hết hạn bằng `ClockService`: job chạy 2 lần, cron và job chạy song song, ghế đã bị booking khác lấy (lazy expiry)
