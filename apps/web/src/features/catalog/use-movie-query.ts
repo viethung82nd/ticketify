@@ -1,5 +1,5 @@
 import { type MovieListQuery, movieListQuerySchema } from '@ticketify/shared';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 
 /** Changes to apply to the URL; `undefined` removes the parameter. */
@@ -15,16 +15,6 @@ export function useMovieQuery(): [
 ] {
   const [params, setParams] = useSearchParams();
 
-  /**
-   * The newest params, including ones not rendered yet. React Router's functional
-   * `setSearchParams` passes the params of the last render, so a debounced search firing
-   * right after a tab click would otherwise undo the tab change.
-   */
-  const latest = useRef(params);
-  useEffect(() => {
-    latest.current = params;
-  }, [params]);
-
   const query = useMemo(
     () => movieListQuerySchema.parse(Object.fromEntries(params.entries())),
     [params],
@@ -32,7 +22,11 @@ export function useMovieQuery(): [
 
   const update = useCallback(
     (patch: QueryPatch, { replace = false }: { replace?: boolean } = {}) => {
-      const next = new URLSearchParams(latest.current);
+      // Start from the browser's current URL, not from `params`: React Router hands both
+      // `params` and the functional `setSearchParams` the values of the last render, so a
+      // debounced search firing right after a tab or genre change would undo that change.
+      // Each user event or timer runs as its own task, by which time the URL is up to date.
+      const next = new URLSearchParams(window.location.search);
       for (const [key, value] of Object.entries(patch)) {
         if (value === undefined || value === '' || (key === 'page' && value === 1)) {
           next.delete(key);
@@ -40,7 +34,6 @@ export function useMovieQuery(): [
           next.set(key, String(value));
         }
       }
-      latest.current = next;
       // Tabs and pages add history entries; typing in the search box replaces.
       setParams(next, { replace });
     },
