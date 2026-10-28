@@ -4,6 +4,7 @@ import {
   type BookingAlreadyPendingDetails,
   BookingErrorCode,
   BookingStatus,
+  PaymentStatus,
   type SeatType,
   ShowtimeErrorCode,
   ShowtimeSeatStatus,
@@ -139,6 +140,12 @@ const notCancellable = () =>
     HttpStatus.CONFLICT,
     BookingErrorCode.BOOKING_NOT_CANCELLABLE,
     'This booking has been paid or is under review and can no longer be cancelled',
+  );
+const paymentInProgress = () =>
+  apiException(
+    HttpStatus.CONFLICT,
+    BookingErrorCode.BOOKING_HAS_PAYMENT_IN_PROGRESS,
+    'A payment for this booking is in progress; wait for its result before cancelling',
   );
 const keyReused = () =>
   apiException(
@@ -367,6 +374,8 @@ export class BookingService {
    * EXPIRED and its HELD seats go back to AVAILABLE at once instead of at holdUntil. An EXPIRED
    * booking is already over and is left as it is (idempotent). CONFIRMED and NEEDS_REVIEW are
    * `409 BOOKING_NOT_CANCELLABLE`; an unknown booking and another user's get the same `404`.
+   * A PENDING booking with a SUCCESS payment is `409 BOOKING_NOT_CANCELLABLE` too, one with a
+   * PENDING payment `409 BOOKING_HAS_PAYMENT_IN_PROGRESS`; FAILED and EXPIRED payments do not block.
    *
    * A cancelled booking is stored as EXPIRED: telling "cancelled by the user" from "ran out of
    * time" needs a new BookingStatus value, which waits for the owner (ROADMAP "Quyết định chờ").
@@ -389,20 +398,26 @@ export class BookingService {
       // 2. Already over (cancelled before, or expired by the worker): nothing to do.
       if (booking.status === BookingStatus.EXPIRED) return null;
       if (booking.status !== BookingStatus.PENDING) throw notCancellable();
-      // TODO(3.x): once payments exist (week 11), lock the booking's PENDING Payment first
-      // (PLAN order Payment → Booking → Seats) and refuse while a payment is in progress.
+      // 3. A paid booking is never cancelled; one with a payment still open at VNPay waits for its
+      //    result. Read inside the transaction but without a lock: no flow locks payments yet. When
+      //    the IPN (3.4) starts locking Payment → Booking → Seats, a cancel that needs the payment
+      //    locked must take it in that order too, before the booking row (PLAN §4).
+      const payments = await tx.$queryRaw<{ status: PaymentStatus }[]>`
+        SELECT status::text AS status FROM payments WHERE booking_id = ${bookingId}::uuid`;
+      if (payments.some((p) => p.status === PaymentStatus.SUCCESS)) throw notCancellable();
+      if (payments.some((p) => p.status === PaymentStatus.PENDING)) throw paymentInProgress();
 
-      // 3. The booking is over.
+      // 4. The booking is over.
       await tx.$executeRaw`
         UPDATE bookings SET status = 'EXPIRED', updated_at = ${this.clock.now()}
         WHERE id = ${bookingId}::uuid AND status = 'PENDING'`;
-      // 4. Its seats, in seat_id order like every other flow that locks seats.
+      // 5. Its seats, in seat_id order like every other flow that locks seats.
       await tx.$queryRaw`
         SELECT seat_id FROM showtime_seats
         WHERE booking_id = ${bookingId}::uuid AND status = 'HELD'
         ORDER BY seat_id
         FOR UPDATE`;
-      // 5. Only seats still HELD by this booking: past holdUntil another booking may already have
+      // 6. Only seats still HELD by this booking: past holdUntil another booking may already have
       //    taken one (lazy expiry), and a SOLD seat is never touched.
       const rows = await tx.$queryRaw<{ seat_id: string }[]>`
         UPDATE showtime_seats
@@ -412,7 +427,7 @@ export class BookingService {
       return { showtimeId: booking.showtime_id, seatIds: rows.map((row) => row.seat_id).sort() };
     }, CANCEL_TX);
 
-    // 6. Only after the commit, and only when seats changed (SeatEvents skips an empty list).
+    // 7. Only after the commit, and only when seats changed (SeatEvents skips an empty list).
     if (released) this.seatEvents.released(released.showtimeId, released.seatIds);
   }
 

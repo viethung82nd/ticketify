@@ -134,7 +134,11 @@ export class BookingsController {
   @ApiNotFoundResponse({
     description: "BOOKING_NOT_FOUND: no such booking, or another user's (never 403)",
   })
-  @ApiConflictResponse({ description: 'BOOKING_NOT_CANCELLABLE: CONFIRMED or NEEDS_REVIEW' })
+  @ApiConflictResponse({
+    description:
+      'BOOKING_NOT_CANCELLABLE: CONFIRMED, NEEDS_REVIEW, or a SUCCESS payment; ' +
+      'BOOKING_HAS_PAYMENT_IN_PROGRESS: a PENDING payment (wait for its result)',
+  })
   cancel(@CurrentUser() user: AuthUser, @Param('id', bookingId) id: string): Promise<void> {
     return this.bookings.cancel(user.id, id);
   }

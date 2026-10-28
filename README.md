@@ -122,7 +122,7 @@ pnpm test:integration
 
 - Đơn `PENDING` → `204`: đơn thành `EXPIRED`, các ghế còn `HELD` của đơn trở lại `AVAILABLE` ngay (không chờ `holdUntil`), phát `seat:released` **sau khi commit**. Ghế mà đơn khác đã lấy (hết hạn lười) và ghế `SOLD` không bị đụng tới.
 - Đơn đã `EXPIRED` (hủy rồi, hoặc worker đã đánh dấu) → `204`, không đổi gì, không phát sự kiện: gọi lại bao nhiêu lần cũng vậy.
-- Đơn `CONFIRMED` hoặc `NEEDS_REVIEW` → `409 BOOKING_NOT_CANCELLABLE`. Đơn không tồn tại hoặc của người khác → `404 BOOKING_NOT_FOUND`, không phân biệt hai trường hợp; id sai định dạng → `400 VALIDATION_FAILED`.
+- Đơn `CONFIRMED` hoặc `NEEDS_REVIEW` → `409 BOOKING_NOT_CANCELLABLE`. Đơn `PENDING` đã có `Payment` `SUCCESS` → `409 BOOKING_NOT_CANCELLABLE`; có `Payment` `PENDING` (đang thanh toán ở VNPay) → `409 BOOKING_HAS_PAYMENT_IN_PROGRESS`, chờ kết quả rồi thử lại. `Payment` `FAILED`/`EXPIRED` không chặn. Cả hai trường hợp `409` không đổi gì. Đơn không tồn tại hoặc của người khác → `404 BOOKING_NOT_FOUND`, không phân biệt hai trường hợp; id sai định dạng → `400 VALIDATION_FAILED`.
 - Đơn bị hủy được lưu là `EXPIRED` (không đổi schema), nên hiện chưa phân biệt được "người dùng hủy" với "hết giờ". Muốn phân biệt cần thêm giá trị mới cho enum `BookingStatus`; đang chờ quyết định (ROADMAP "Quyết định chờ").
 - Thứ tự khóa giống `expireBooking`: dòng `bookings` `FOR UPDATE`, rồi các `showtime_seats` `HELD` của đơn `FOR UPDATE ORDER BY seat_id`. Job hết hạn đến sau gặp `SKIP LOCKED` → `skipped`; job `expire-booking` của đơn đã hủy vẫn chạy ở `holdUntil` và kết thúc `noop`.
 - Sequence diagram của giữ ghế, hết hạn và hủy: [docs/sequence-hold.md](docs/sequence-hold.md).

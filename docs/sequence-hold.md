@@ -9,7 +9,7 @@ Lock order shared by every flow that touches seats (no flow waits on another in 
 |---|---|
 | Hold `POST /bookings` | advisory lock (user, showtime) → `showtime_seats` `FOR UPDATE NOWAIT ORDER BY seat_id` |
 | Expiry `expireBooking` | `bookings` `FOR UPDATE SKIP LOCKED` → its `HELD` `showtime_seats` `FOR UPDATE ORDER BY seat_id` |
-| Cancel `DELETE /bookings/:id` | `bookings` `FOR UPDATE` → its `HELD` `showtime_seats` `FOR UPDATE ORDER BY seat_id` |
+| Cancel `DELETE /bookings/:id` | `bookings` `FOR UPDATE` → (reads `payments`, no lock yet) → its `HELD` `showtime_seats` `FOR UPDATE ORDER BY seat_id` |
 | Showtime cancel (admin) | `showtimes` `FOR NO KEY UPDATE` → every `showtime_seats` of it `FOR UPDATE ORDER BY seat_id` |
 | Showtime create (admin) | `rooms` `FOR NO KEY UPDATE` → `movies` `FOR SHARE` |
 
@@ -128,6 +128,12 @@ sequenceDiagram
     else CONFIRMED or NEEDS_REVIEW
         API-->>C: 409 BOOKING_NOT_CANCELLABLE (ROLLBACK)
     else PENDING
+        API->>DB: SELECT status FROM payments WHERE booking_id = $1 (no lock)
+        alt a SUCCESS payment
+            API-->>C: 409 BOOKING_NOT_CANCELLABLE (ROLLBACK)
+        else a PENDING payment
+            API-->>C: 409 BOOKING_HAS_PAYMENT_IN_PROGRESS (ROLLBACK)
+        end
         API->>DB: UPDATE bookings SET status = EXPIRED WHERE id = $1 AND status = PENDING
         API->>DB: SELECT showtime_seats WHERE booking_id = $1 AND HELD<br/>ORDER BY seat_id FOR UPDATE
         API->>DB: UPDATE showtime_seats SET AVAILABLE, booking_id NULL, held_until NULL<br/>WHERE booking_id = $1 AND HELD RETURNING seat_id

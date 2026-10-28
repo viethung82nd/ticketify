@@ -231,6 +231,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 | Outbox `seats.released` | Hoãn sang 4.1 (28/10/2026); `expireBooking` hiện chưa ghi outbox |
 | Đặt lại cùng suất trong thời gian chờ thanh toán | Kiểm "một đơn `PENDING` mỗi user mỗi suất" theo `expiresAt`, không theo `holdUntil` (chủ dự án chốt 29/10/2026). Hết `expiresAt` là đặt lại được ngay (ghế khác); ghế của đơn cũ vẫn giữ tới `holdUntil`. Chi tiết ở 2.2 |
 | Hủy giữ ghế `DELETE /bookings/:id` | Có (chủ dự án duyệt 29/10/2026, tuần 10). Chỉ chủ đơn; `PENDING` → `EXPIRED`, nhả ghế, phát `seat:released` sau commit, `204`; `EXPIRED` → `204`, không đổi gì; `CONFIRMED`/`NEEDS_REVIEW` → `409 BOOKING_NOT_CANCELLABLE`; không tồn tại hoặc của người khác → `404 BOOKING_NOT_FOUND`. Không đổi schema. Khóa `bookings` `FOR UPDATE` rồi ghế của đơn `ORDER BY seat_id`, như `expireBooking` |
+| Hủy khi đơn đã có `Payment` | Chủ dự án chốt 29/10/2026: đơn `PENDING` có `Payment` `PENDING` → `409 BOOKING_HAS_PAYMENT_IN_PROGRESS`; có `Payment` `SUCCESS` → `409 BOOKING_NOT_CANCELLABLE`; `FAILED`/`EXPIRED` không chặn; không đổi gì khi bị từ chối. `cancel()` đọc `SELECT status FROM payments WHERE booking_id = $1` trong cùng transaction, sau khi khóa `bookings` và trước khi khóa ghế, chưa khóa `Payment` vì chưa luồng nào khóa nó. Khi IPN (3.4) khóa `Payment → Booking → Seats`, `cancel()` cần khóa `Payment` thì phải khóa theo đúng thứ tự đó |
 
 ## Quyết định chờ
 
@@ -238,7 +239,6 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 |---|---|
 | Tên ngày lễ (`Holiday.name`, nullable) | Chưa thêm cột. Khi cần, gom vào **một** migration chỉ thêm cột nullable (expand-only, như migration `movie_synopsis`), không đổi dữ liệu cũ |
 | Phân biệt "người dùng hủy" với "hết hạn" | `DELETE /bookings/:id` (tuần 10) lưu đơn bị hủy là `EXPIRED`, không đổi schema, nên hiện không phân biệt được đơn người dùng tự hủy với đơn hết giờ. Muốn phân biệt cần thêm giá trị mới vào enum `BookingStatus` (ví dụ `CANCELLED`, migration chỉ thêm giá trị) và cập nhật enum dùng chung. Chờ chủ dự án quyết định |
-| Hủy giữ ghế khi đã có `Payment` | Từ tuần 11: `cancel()` phải khóa `Payment` `PENDING` của đơn trước (thứ tự `Payment → Booking → Seats`) và từ chối khi đang thanh toán. Mã lỗi và hành vi cụ thể chờ quyết định khi làm 3.1 (điểm chèn `TODO(3.x)` trong `BookingService.cancel`) |
 
 ---
 

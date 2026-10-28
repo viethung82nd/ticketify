@@ -431,6 +431,50 @@ describe('Booking cancel — DELETE /bookings/:id (real Postgres + Redis)', () =
         expect(released).not.toHaveBeenCalled();
       },
     );
+
+    /** A payment row the way week 11 will create it, written directly. */
+    const payment = (bookingId: string, status: string) =>
+      db.prisma.$executeRaw`
+        INSERT INTO payments (id, booking_id, txn_ref, amount, status, updated_at)
+        VALUES (gen_random_uuid(), ${bookingId}::uuid, ${randomUUID()}, 90000,
+                ${status}::payment_status, ${clock.now()})`;
+
+    it.each([
+      [['PENDING'], 'BOOKING_HAS_PAYMENT_IN_PROGRESS'],
+      [['FAILED', 'PENDING'], 'BOOKING_HAS_PAYMENT_IN_PROGRESS'],
+      [['SUCCESS'], 'BOOKING_NOT_CANCELLABLE'],
+      [['EXPIRED', 'SUCCESS'], 'BOOKING_NOT_CANCELLABLE'],
+    ] as const)(
+      'a PENDING booking with payments %j → 409 %s; nothing changes',
+      async (statuses, code) => {
+        const { showtime, seat } = await scene();
+        const user = await newUser();
+        const booking = await held(user, showtime.id, [seat('A1'), seat('A2')]);
+        for (const status of statuses) await payment(booking.id, status);
+        const before = await seatRows(showtime.id);
+        const released = jest.spyOn(app.get(SeatEvents), 'released');
+
+        const res = await cancel(user, booking.id);
+
+        expect(res.status).toBe(409);
+        expect(errorOf(res).code).toBe(code);
+        expect(await bookingStatus(booking.id)).toBe('PENDING');
+        expect(await seatRows(showtime.id)).toEqual(before);
+        expect(released).not.toHaveBeenCalled();
+      },
+    );
+
+    it('FAILED and EXPIRED payments do not block: 204, seats released', async () => {
+      const { showtime, seat } = await scene();
+      const user = await newUser();
+      const booking = await held(user, showtime.id, [seat('A1')]);
+      await payment(booking.id, 'FAILED');
+      await payment(booking.id, 'EXPIRED');
+
+      expect((await cancel(user, booking.id)).status).toBe(204);
+      expect(await bookingStatus(booking.id)).toBe('EXPIRED');
+      expect((await seatRows(showtime.id)).filter((row) => row.status !== 'AVAILABLE')).toEqual([]);
+    });
   });
 
   // ─── Concurrency ───
