@@ -107,6 +107,12 @@ export const envSchema = z.object({
 
   /** S3-compatible object storage (RustFS in dev). */
   S3_ENDPOINT: z.url({ protocol: /^https?$/ }),
+  /**
+   * Origin browsers use to reach the same store, when it differs from S3_ENDPOINT (e.g. the
+   * API talks to http://s3:9000 inside Docker while browsers go through https://files.example.com).
+   * Presigned upload/download URLs are signed for this host; HEAD/DELETE still use S3_ENDPOINT.
+   */
+  S3_PUBLIC_ENDPOINT: z.preprocess(blankAsUndefined, z.url({ protocol: /^https?$/ }).optional()),
   S3_REGION: z.string().min(1).default('us-east-1'),
   S3_ACCESS_KEY: z.string().min(1),
   S3_SECRET_KEY: z.string().min(8),

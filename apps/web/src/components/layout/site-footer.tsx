@@ -11,8 +11,8 @@ const COLUMNS: FooterColumn[] = [
   {
     title: 'Phim',
     items: [
-      { label: 'Đang chiếu', to: '/#dang-chieu' },
-      { label: 'Sắp chiếu' },
+      { label: 'Đang chiếu', to: '/movies?status=NOW_SHOWING' },
+      { label: 'Sắp chiếu', to: '/movies?status=COMING_SOON' },
       { label: 'Lịch chiếu' },
     ],
   },

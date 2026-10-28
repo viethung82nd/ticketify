@@ -1,4 +1,4 @@
-import { ScanLine, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { ScanLine, ShieldAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
@@ -28,18 +28,6 @@ export function ForbiddenPage() {
       <Button asChild variant="outline" className="rounded-xl">
         <Link to="/">Về trang chủ</Link>
       </Button>
-    </Panel>
-  );
-}
-
-/** ADMIN only. CRUD screens arrive with tasks 1.8–1.17. */
-export function AdminPage() {
-  const user = useAuthStore((state) => state.user);
-  return (
-    <Panel icon={<ShieldCheck className="size-7 text-brand" aria-hidden />} title="Trang quản trị">
-      <p>
-        Xin chào {user?.fullName}. Quản lý phim, phòng chiếu, suất chiếu và bảng giá sẽ có ở đây.
-      </p>
     </Panel>
   );
 }

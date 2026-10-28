@@ -54,8 +54,9 @@ services:
       retries: 20
       start_period: 10s
 
-  # One-shot job: creates the bucket if missing, then exits 0.
+  # One-shot job: creates the bucket if missing and sets its CORS rule, then exits 0.
   # Its exit code is its health signal (no long-running healthcheck needed).
+  # CORS lets the browser PUT posters straight to presigned URLs (task 1.6).
   s3-init:
     image: rustfs/rustfs:1.0.4
     depends_on:
@@ -66,6 +67,7 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY:-ticketify-secret}
       S3_BUCKET: ${S3_BUCKET:-ticketify}
       S3_REGION: ${S3_REGION:-us-east-1}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     entrypoint: ['sh', '-ec']
     command:
       - |
@@ -77,6 +79,15 @@ services:
           curl -fsS --aws-sigv4 "$$sign" --user "$$S3_ACCESS_KEY:$$S3_SECRET_KEY" -X PUT "$$url"
           echo "bucket $${S3_BUCKET} created"
         fi
+        origins=""
+        for origin in $$(echo "$$CORS_ORIGINS" | tr ',' ' '); do
+          origins="$$origins<AllowedOrigin>$$origin</AllowedOrigin>"
+        done
+        cors="<CORSConfiguration><CORSRule>$$origins<AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedHeader>*</AllowedHeader><MaxAgeSeconds>600</MaxAgeSeconds></CORSRule></CORSConfiguration>"
+        md5=$$(printf '%s' "$$cors" | md5sum | cut -d' ' -f1 | xxd -r -p | base64)
+        curl -fsS --aws-sigv4 "$$sign" --user "$$S3_ACCESS_KEY:$$S3_SECRET_KEY" -X PUT \
+          -H "Content-MD5: $$md5" -H 'Content-Type: application/xml' --data "$$cors" "$$url?cors"
+        echo "bucket $${S3_BUCKET} CORS allows $$CORS_ORIGINS"
     restart: 'no'
 
   mailpit:

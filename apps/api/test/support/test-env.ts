@@ -33,3 +33,16 @@ export function withDatabase(url: string, database: string): string {
   parsed.pathname = `/${database}`;
   return parsed.toString();
 }
+
+/** Object storage image from docker-compose.yml (started only by suites that need it). */
+export const RUSTFS_IMAGE = 'rustfs/rustfs:1.0.4';
+
+/**
+ * Optional S3-compatible server for storage.int-spec instead of a RustFS container.
+ * Credentials default to the docker-compose ones; each run uses its own bucket.
+ */
+export const EXTERNAL_S3_ENV = {
+  endpoint: 'TEST_S3_ENDPOINT',
+  accessKey: 'TEST_S3_ACCESS_KEY',
+  secretKey: 'TEST_S3_SECRET_KEY',
+} as const;

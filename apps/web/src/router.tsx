@@ -1,12 +1,17 @@
 import { Role } from '@ticketify/shared';
-import { createBrowserRouter } from 'react-router';
+import { createBrowserRouter, Navigate } from 'react-router';
 import { AppLayout } from '@/components/layout/app-layout';
 import { GuestOnly, RequireAuth } from '@/features/auth/route-guards';
+import { AdminGenresPage } from '@/pages/admin/admin-genres-page';
+import { AdminMoviesPage } from '@/pages/admin/admin-movies-page';
+import { EditMoviePage, NewMoviePage } from '@/pages/admin/movie-form-page';
 import { HomePage } from '@/pages/home-page';
 import { LoginPage } from '@/pages/login-page';
+import { MovieDetailPage } from '@/pages/movie-detail-page';
+import { MoviesPage } from '@/pages/movies-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { RegisterPage } from '@/pages/register-page';
-import { AdminPage, ForbiddenPage, StaffPage } from '@/pages/role-pages';
+import { ForbiddenPage, StaffPage } from '@/pages/role-pages';
 import { StatusPage } from '@/pages/status-page';
 
 export const router = createBrowserRouter([
@@ -14,6 +19,8 @@ export const router = createBrowserRouter([
     element: <AppLayout />,
     children: [
       { index: true, element: <HomePage /> },
+      { path: 'movies', element: <MoviesPage /> },
+      { path: 'movies/:slug', element: <MovieDetailPage /> },
       { path: 'status', element: <StatusPage /> },
       { path: 'forbidden', element: <ForbiddenPage /> },
       {
@@ -25,7 +32,13 @@ export const router = createBrowserRouter([
       },
       {
         element: <RequireAuth roles={[Role.ADMIN]} />,
-        children: [{ path: 'admin', element: <AdminPage /> }],
+        children: [
+          { path: 'admin', element: <Navigate to="/admin/movies" replace /> },
+          { path: 'admin/movies', element: <AdminMoviesPage /> },
+          { path: 'admin/movies/new', element: <NewMoviePage /> },
+          { path: 'admin/movies/:id/edit', element: <EditMoviePage /> },
+          { path: 'admin/genres', element: <AdminGenresPage /> },
+        ],
       },
       {
         element: <RequireAuth roles={[Role.STAFF, Role.ADMIN]} />,
