@@ -14,7 +14,8 @@ const BEARER = /^Bearer\s+(\S+)$/i;
 
 /**
  * Global guard (APP_GUARD): every route needs a valid access token unless marked `@Public()`.
- * Errors: `UNAUTHORIZED` (no token), `TOKEN_EXPIRED`, `TOKEN_INVALID`.
+ * Errors: `UNAUTHORIZED` (no token), `TOKEN_EXPIRED`, `TOKEN_INVALID`. WebSocket messages are
+ * let through: their socket was authenticated at the handshake.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -29,6 +30,9 @@ export class JwtAuthGuard implements CanActivate {
       context.getClass(),
     ]);
     if (isPublic) return true;
+    // Socket.IO messages: the gateway authenticated the socket once, at the handshake, with the
+    // same verifier (RealtimeGateway.authenticate). A message carries no Authorization header.
+    if (context.getType() !== 'http') return true;
 
     const request = context.switchToHttp().getRequest<RequestWithHeaders>();
     const token = BEARER.exec(request.headers.authorization ?? '')?.[1];

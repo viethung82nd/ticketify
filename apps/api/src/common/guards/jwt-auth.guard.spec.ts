@@ -54,6 +54,12 @@ describe('JwtAuthGuard', () => {
     expect(request.user).toBeUndefined();
   });
 
+  it('lets a WebSocket message through: its socket was authenticated at the handshake', () => {
+    const socket = {};
+
+    expect(guard.canActivate(httpContext(socket, ProtectedController, 'handler', 'ws'))).toBe(true);
+  });
+
   it.each([
     ['no header', undefined],
     ['an empty bearer', 'Bearer '],

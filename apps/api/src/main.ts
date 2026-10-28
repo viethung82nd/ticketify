@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AppConfig } from './config/app-config.service';
+import { setupRealtime } from './modules/realtime/realtime-io.adapter';
 import { setupSwagger } from './swagger';
 
 async function bootstrap(): Promise<void> {
@@ -11,6 +12,8 @@ async function bootstrap(): Promise<void> {
 
   const config = app.get(AppConfig);
   app.enableCors({ origin: config.get('CORS_ORIGINS'), credentials: true });
+  // Socket.IO on the same HTTP server: Redis adapter, CORS_ORIGINS (ROADMAP 2.11).
+  await setupRealtime(app);
   app.enableShutdownHooks();
   setupSwagger(app);
 
