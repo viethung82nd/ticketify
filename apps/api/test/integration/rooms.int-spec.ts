@@ -149,6 +149,62 @@ describe('Rooms & seat layout (real Postgres + Redis)', () => {
       seats: v.seats,
     }));
 
+  /** A room whose seats `pairs` (labels) are already couple pairs. */
+  async function roomWithPairs(rows: number, cols: number, pairs: [string, string][]) {
+    const room = await createRoom(rows, cols);
+    const id = idsOf(room);
+    const res = await patchSeats(
+      room.id,
+      pairs.flatMap(([a, b]) => [
+        { seatId: id.get(a)!, type: 'COUPLE' as const, coupleWith: id.get(b)! },
+        { seatId: id.get(b)!, type: 'COUPLE' as const, coupleWith: id.get(a)! },
+      ]),
+    );
+    expect(res.status).toBe(200);
+    return { room, id };
+  }
+
+  /**
+   * The batch the editor sends to re-pair `a` with `b`: both seats point at each other, and
+   * every former partner of either seat becomes STANDARD.
+   */
+  function repairBatch(seats: readonly AdminSeat[], a: AdminSeat, b: AdminSeat): SeatChange[] {
+    const formerPartners = [a, b]
+      .map((seat) =>
+        seat.coupleGroup === null
+          ? undefined
+          : seats.find((s) => s.coupleGroup === seat.coupleGroup && s.id !== seat.id),
+      )
+      .filter((seat) => seat !== undefined && seat.id !== a.id && seat.id !== b.id);
+    return [
+      { seatId: a.id, type: 'COUPLE', coupleWith: b.id },
+      { seatId: b.id, type: 'COUPLE', coupleWith: a.id },
+      ...formerPartners.map((seat) => ({ seatId: seat!.id, type: 'STANDARD' as const })),
+    ];
+  }
+
+  /** `[label, type, has a pair]` for the given seats, read from the database. */
+  async function stateOf(roomId: string, labels: string[]) {
+    const rows = await seatRows(roomId);
+    return labels.map((label) => {
+      const row = rows.find((r) => `${r.row}${r.number}` === label)!;
+      return [label, row.type, row.couple_group !== null];
+    });
+  }
+
+  /** Couple pairs of the room as label pairs (`['A2', 'A3']`), read from the database. */
+  async function pairsOf(roomId: string): Promise<string[][]> {
+    const groups = new Map<number, string[]>();
+    for (const row of await seatRows(roomId)) {
+      if (row.couple_group === null) continue;
+      groups.set(row.couple_group, [
+        ...(groups.get(row.couple_group) ?? []),
+        `${row.row}${row.number}`,
+      ]);
+    }
+    return [...groups.values()].sort();
+  }
+
   // ─── Access control ───
 
   describe('role access', () => {
@@ -427,18 +483,144 @@ describe('Rooms & seat layout (real Postgres + Redis)', () => {
       expect(await layoutViolations(room.id)).toEqual([]);
     });
 
-    it('400 for more than 500 changes or a repeated seat', async () => {
+    it('400 for more than 500 changes', async () => {
       const room = await createRoom(1, 2);
       const tooMany = Array.from({ length: 501 }, (_, i) => ({
         seatId: `01a17e75-0000-7000-8000-${String(i).padStart(12, '0')}`,
       }));
 
       expect((await patchSeats(room.id, tooMany)).status).toBe(400);
-      const repeated = await patchSeats(room.id, [
-        { seatId: room.seats[0]!.id, type: 'VIP' },
-        { seatId: room.seats[0]!.id, type: 'STANDARD' },
+    });
+
+    it('422 INVALID_CHANGES for a seat listed twice; nothing is written', async () => {
+      const room = await createRoom(1, 3);
+      const [first, second] = room.seats as [AdminSeat, AdminSeat];
+      const before = await seatRows(room.id);
+
+      const res = await patchSeats(room.id, [
+        { seatId: first.id, type: 'VIP' },
+        { seatId: second.id, type: 'VIP' },
+        { seatId: first.id, type: 'STANDARD' },
       ]);
-      expect(repeated.status).toBe(400);
+
+      expect(res.status).toBe(422);
+      expect(errorOf(res)).toMatchObject({
+        code: 'INVALID_CHANGES',
+        details: { seatIds: [first.id] },
+      });
+      expect(await seatRows(room.id)).toEqual(before);
+    });
+  });
+
+  describe('re-pairing seats in one batch', () => {
+    it('moves a seat to a new partner; the old partner becomes STANDARD, no orphan', async () => {
+      // A1–A2 is a pair; A2 moves to A3 (STANDARD so far), A1 becomes STANDARD.
+      const { room, id } = await roomWithPairs(2, 6, [['A1', 'A2']]);
+
+      const res = await patchSeats(room.id, [
+        { seatId: id.get('A2')!, coupleWith: id.get('A3')! },
+        { seatId: id.get('A3')!, type: 'COUPLE', coupleWith: id.get('A2')! },
+        { seatId: id.get('A1')!, type: 'STANDARD' },
+      ]);
+
+      expect(res.status).toBe(200);
+      expect(await pairsOf(room.id)).toEqual([['A2', 'A3']]);
+      expect(await stateOf(room.id, ['A1', 'A2', 'A3'])).toEqual([
+        ['A1', 'STANDARD', false],
+        ['A2', 'COUPLE', true],
+        ['A3', 'COUPLE', true],
+      ]);
+      expect(await layoutViolations(room.id)).toEqual([]);
+    });
+
+    it('pairs two seats taken from two different pairs; both old partners become STANDARD', async () => {
+      const { room, id } = await roomWithPairs(2, 6, [
+        ['A1', 'A2'],
+        ['A3', 'A4'],
+        ['B1', 'B2'],
+      ]);
+
+      const res = await patchSeats(room.id, [
+        { seatId: id.get('A2')!, coupleWith: id.get('A3')! },
+        { seatId: id.get('A3')!, coupleWith: id.get('A2')! },
+        { seatId: id.get('A1')!, type: 'STANDARD' },
+        { seatId: id.get('A4')!, type: 'STANDARD' },
+      ]);
+
+      expect(res.status).toBe(200);
+      expect(await pairsOf(room.id)).toEqual([
+        ['A2', 'A3'],
+        ['B1', 'B2'],
+      ]);
+      expect(await stateOf(room.id, ['A1', 'A4'])).toEqual([
+        ['A1', 'STANDARD', false],
+        ['A4', 'STANDARD', false],
+      ]);
+      expect(await layoutViolations(room.id)).toEqual([]);
+    });
+
+    it('422 INVALID_COUPLE for a one-sided coupleWith (new partner untouched); nothing is written', async () => {
+      const { room, id } = await roomWithPairs(1, 4, [['A1', 'A2']]);
+      const before = await seatRows(room.id);
+
+      const res = await patchSeats(room.id, [
+        { seatId: id.get('A2')!, coupleWith: id.get('A3')! },
+        { seatId: id.get('A1')!, type: 'STANDARD' },
+      ]);
+
+      expect(res.status).toBe(422);
+      expect(errorOf(res).code).toBe('INVALID_COUPLE');
+      expect(violationsOf(res)).toEqual([{ reason: 'NOT_COUPLE_TYPE', seats: ['A2', 'A3'] }]);
+      expect(await seatRows(room.id)).toEqual(before);
+    });
+
+    it('422 INVALID_COUPLE when the old partner is left a COUPLE seat; nothing is written', async () => {
+      const { room, id } = await roomWithPairs(1, 4, [['A1', 'A2']]);
+      const before = await seatRows(room.id);
+
+      const res = await patchSeats(room.id, [
+        { seatId: id.get('A2')!, coupleWith: id.get('A3')! },
+        { seatId: id.get('A3')!, type: 'COUPLE', coupleWith: id.get('A2')! },
+      ]);
+
+      expect(res.status).toBe(422);
+      expect(violationsOf(res)).toEqual([{ reason: 'MISSING_PARTNER', seats: ['A1', 'A2'] }]);
+      expect(await seatRows(room.id)).toEqual(before);
+    });
+
+    it('422 INVALID_CHANGES for a re-pair batch listing a seat twice; nothing is written', async () => {
+      const { room, id } = await roomWithPairs(1, 4, [['A1', 'A2']]);
+      const before = await seatRows(room.id);
+
+      const res = await patchSeats(room.id, [
+        { seatId: id.get('A2')!, coupleWith: id.get('A3')! },
+        { seatId: id.get('A3')!, type: 'COUPLE', coupleWith: id.get('A2')! },
+        { seatId: id.get('A1')!, type: 'STANDARD' },
+        { seatId: id.get('A1')!, type: 'VIP' },
+      ]);
+
+      expect(res.status).toBe(422);
+      expect(errorOf(res)).toMatchObject({
+        code: 'INVALID_CHANGES',
+        details: { seatIds: [id.get('A1')] },
+      });
+      expect(await seatRows(room.id)).toEqual(before);
+    });
+
+    it('409 ROOM_IN_USE: a locked room cannot be re-paired', async () => {
+      const { room, id } = await roomWithPairs(1, 4, [['A1', 'A2']]);
+      await showtimeIn(room.id, '2026-11-02T10:00:00Z', '2026-11-02T12:00:00Z');
+      const before = await seatRows(room.id);
+
+      const res = await patchSeats(room.id, [
+        { seatId: id.get('A2')!, coupleWith: id.get('A3')! },
+        { seatId: id.get('A3')!, type: 'COUPLE', coupleWith: id.get('A2')! },
+        { seatId: id.get('A1')!, type: 'STANDARD' },
+      ]);
+
+      expect(res.status).toBe(409);
+      expect(errorOf(res).code).toBe('ROOM_IN_USE');
+      expect(await seatRows(room.id)).toEqual(before);
     });
   });
 
@@ -562,6 +744,41 @@ describe('Rooms & seat layout (real Postgres + Redis)', () => {
       // Sanity: the rounds really mixed successes and refusals.
       expect(statuses.get(200) ?? 0).toBeGreaterThan(0);
       expect(statuses.get(422) ?? 0).toBeGreaterThan(0);
+    });
+
+    it('10 simultaneous re-pair batches: no 5xx, and every round ends in a valid layout', async () => {
+      const { room } = await roomWithPairs(
+        ROWS.length,
+        COLS,
+        [...ROWS].flatMap((row): [string, string][] => [
+          [`${row}1`, `${row}2`],
+          [`${row}4`, `${row}5`],
+          [`${row}7`, `${row}8`],
+        ]),
+      );
+      const next = random(20_261_028);
+      const statuses = new Map<number, number>();
+
+      for (let round = 0; round < 8; round++) {
+        const snapshot = bodyOf<AdminRoom>(await admin('get', `/admin/rooms/${room.id}`)).seats;
+        const at = (row: string, number: number) =>
+          snapshot.find((s) => s.row === row && s.number === number)!;
+        // Each batch re-pairs two neighbours from the same (soon stale) snapshot.
+        const batches = Array.from({ length: 10 }, () => {
+          const row = ROWS[Math.floor(next() * ROWS.length)]!;
+          const number = 1 + Math.floor(next() * (COLS - 1));
+          return repairBatch(snapshot, at(row, number), at(row, number + 1));
+        });
+
+        const responses = await Promise.all(batches.map((batch) => patchSeats(room.id, batch)));
+
+        for (const res of responses) {
+          statuses.set(res.status, (statuses.get(res.status) ?? 0) + 1);
+          expect([200, 422]).toContain(res.status);
+        }
+        expect(await layoutViolations(room.id)).toEqual([]);
+      }
+      expect(statuses.get(200) ?? 0).toBeGreaterThan(0);
     });
   });
 });

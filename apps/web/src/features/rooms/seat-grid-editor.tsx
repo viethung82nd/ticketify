@@ -3,7 +3,6 @@ import {
   type AdminSeat,
   type CoupleViolation,
   CoupleViolationReason,
-  planSeatChanges,
   ROOM_LIMITS,
   RoomErrorCode,
   seatLabel,
@@ -20,12 +19,15 @@ import { apiErrorOf } from '@/lib/api-error';
 import { cn } from '@/lib/utils';
 import { updateSeats } from './rooms-api';
 import {
+  addedViolations,
   applyTool,
   diffSeats,
+  draftViolations,
   partnerOf,
   SEAT_TYPE_LABELS,
   SEAT_TYPE_MARKS,
   SeatTool,
+  type ToolResult,
   TOOL_HINTS,
   TOOL_LABELS,
   violationMessage,
@@ -113,10 +115,15 @@ function Legend() {
 
 function ViolationList({
   violations,
+  refused,
 }: {
   violations: Pick<CoupleViolation, 'reason' | 'seats'>[];
+  /** The problems come from an edit that was not applied. */
+  refused: boolean;
 }) {
   if (violations.length === 0) return null;
+  const count =
+    violations.length === 1 ? 'Có 1 lỗi ghế đôi' : `Có ${violations.length} lỗi ghế đôi`;
   return (
     <div
       role="alert"
@@ -124,7 +131,7 @@ function ViolationList({
     >
       <p className="flex items-center gap-2 font-semibold">
         <AlertTriangle className="size-4" aria-hidden />
-        {violations.length === 1 ? 'Có 1 lỗi ghế đôi' : `Có ${violations.length} lỗi ghế đôi`}
+        {refused ? `Chưa áp dụng thao tác. ${count}` : count}
       </p>
       <ul className="mt-2 list-disc space-y-1 pl-6">
         {violations.map((violation, index) => (
@@ -139,7 +146,9 @@ function ViolationList({
 
 /**
  * Grid editor for a room's seats. Edits stay in memory until "Lưu thay đổi", which sends one
- * PATCH. `planSeatChanges` (the server's own rule check) runs on every edit for early feedback.
+ * PATCH. `planSeatChanges` (the server's own rule check) runs on the draft each edit would
+ * produce: an edit that adds a problem is not applied, and an edit that splits existing pairs
+ * (re-pairing) waits for the admin to confirm.
  */
 export function SeatGridEditor({ room, locked }: { room: AdminRoom; locked: boolean }) {
   const queryClient = useQueryClient();
@@ -148,6 +157,10 @@ export function SeatGridEditor({ room, locked }: { room: AdminRoom; locked: bool
   const [pending, setPending] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [serverViolations, setServerViolations] = useState<CoupleViolation[] | null>(null);
+  /** Problems of the last edit, which was therefore not applied. */
+  const [refused, setRefused] = useState<CoupleViolation[]>([]);
+  /** An edit waiting for confirmation (`confirm` is set). */
+  const [confirming, setConfirming] = useState<ToolResult | null>(null);
   const [focus, setFocus] = useState({ row: 0, col: 0 });
   const cellRefs = useRef(new Map<string, HTMLButtonElement>());
 
@@ -159,12 +172,8 @@ export function SeatGridEditor({ room, locked }: { room: AdminRoom; locked: bool
   const original = useMemo(() => new Map(room.seats.map((s) => [s.id, s])), [room.seats]);
 
   const changes = useMemo(() => diffSeats(room.seats, draft), [room.seats, draft]);
-  const clientViolations = useMemo(() => {
-    if (changes.length === 0) return [];
-    const plan = planSeatChanges(room.seats, changes);
-    return !plan.ok && plan.code !== 'SEAT_NOT_FOUND' ? plan.violations : [];
-  }, [room.seats, changes]);
-  const violations = serverViolations ?? clientViolations;
+  const clientViolations = useMemo(() => draftViolations(room.seats, draft), [room.seats, draft]);
+  const violations = refused.length > 0 ? refused : (serverViolations ?? clientViolations);
   const flagged = useMemo(() => new Set(violations.flatMap((v) => v.seatIds)), [violations]);
   const tooMany = changes.length > ROOM_LIMITS.seatChangesMax;
 
@@ -192,13 +201,40 @@ export function SeatGridEditor({ room, locked }: { room: AdminRoom; locked: bool
     setPending(nextPending);
     setMessage(nextMessage);
     setServerViolations(null);
+    setRefused([]);
+    setConfirming(null);
     save.reset();
   };
 
   const applyAt = (seat: AdminSeat) => {
     if (locked) return;
+    // A click while a confirmation is open drops it (pending is null then) and starts afresh.
     const result = applyTool(draft, seat.id, tool, pending);
+    const added = addedViolations(room.seats, draft, result.seats);
+    if (added.length > 0) {
+      setPending(null);
+      setConfirming(null);
+      setRefused(added);
+      setMessage('Thao tác chưa được áp dụng vì vi phạm quy tắc ghế đôi.');
+      return;
+    }
+    if (result.confirm) {
+      setPending(null);
+      setRefused([]);
+      setConfirming(result);
+      setMessage(null);
+      return;
+    }
     editTo(result.seats, result.pending, result.message);
+  };
+
+  const confirmEdit = () => {
+    if (confirming && !locked) editTo(confirming.seats, null, confirming.message);
+  };
+
+  const cancelEdit = () => {
+    setConfirming(null);
+    setMessage('Đã hủy, sơ đồ ghế giữ nguyên.');
   };
 
   const discard = () => editTo(room.seats, null, 'Đã hủy mọi thay đổi chưa lưu.');
@@ -206,6 +242,8 @@ export function SeatGridEditor({ room, locked }: { room: AdminRoom; locked: bool
   const chooseTool = (next: SeatTool) => {
     setTool(next);
     setPending(null);
+    setConfirming(null);
+    setRefused([]);
     setMessage(TOOL_HINTS[next]);
   };
 
@@ -229,13 +267,16 @@ export function SeatGridEditor({ room, locked }: { room: AdminRoom; locked: bool
     if (target) {
       event.preventDefault();
       moveFocus(...target);
+    } else if (event.key === 'Escape' && confirming) {
+      cancelEdit();
     } else if (event.key === 'Escape' && pending) {
       setPending(null);
       setMessage('Đã bỏ chọn.');
     }
   };
 
-  const saveBlocked = changes.length === 0 || clientViolations.length > 0 || tooMany || locked;
+  const saveBlocked =
+    changes.length === 0 || clientViolations.length > 0 || tooMany || locked || confirming !== null;
 
   return (
     <div className="space-y-5">
@@ -286,9 +327,36 @@ export function SeatGridEditor({ room, locked }: { room: AdminRoom; locked: bool
         </div>
       </div>
 
-      <p role="status" className="min-h-5 text-sm text-cream">
-        {locked ? 'Chế độ sửa ghế đang tắt.' : (message ?? TOOL_HINTS[tool])}
-      </p>
+      {confirming?.confirm && !locked ? (
+        <div
+          role="group"
+          aria-label="Xác nhận ghép lại ghế đôi"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') cancelEdit();
+          }}
+          className="flex flex-wrap items-center gap-3 rounded-xl border border-brand/50 bg-brand/10 px-4 py-2.5 text-sm text-cream"
+        >
+          <p id="seat-confirm" role="status" className="min-w-0 flex-1 font-medium">
+            {confirming.confirm}
+          </p>
+          <Button
+            type="button"
+            className="h-8 rounded-lg font-semibold"
+            autoFocus
+            aria-describedby="seat-confirm"
+            onClick={confirmEdit}
+          >
+            Xác nhận
+          </Button>
+          <Button type="button" variant="outline" className="h-8 rounded-lg" onClick={cancelEdit}>
+            Hủy
+          </Button>
+        </div>
+      ) : (
+        <p role="status" className="min-h-5 text-sm text-cream">
+          {locked ? 'Chế độ sửa ghế đang tắt.' : (message ?? TOOL_HINTS[tool])}
+        </p>
+      )}
 
       {tooMany && (
         <FormAlert
@@ -296,7 +364,7 @@ export function SeatGridEditor({ room, locked }: { room: AdminRoom; locked: bool
         />
       )}
       {save.error && <FormAlert message={catalogErrorMessage(save.error)} />}
-      <ViolationList violations={violations} />
+      <ViolationList violations={violations} refused={refused.length > 0} />
 
       {/* Grid */}
       <div className="overflow-x-auto rounded-2xl border border-white/10 bg-surface p-5">

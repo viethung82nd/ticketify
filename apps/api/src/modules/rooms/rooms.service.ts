@@ -52,6 +52,14 @@ const roomInUse = (lock: RoomLock) =>
   );
 
 function seatPlanError(plan: Exclude<SeatPlan, { ok: true }>): HttpException {
+  if (plan.code === 'INVALID_CHANGES') {
+    return apiException(
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      RoomErrorCode.INVALID_CHANGES,
+      'Each seat may appear only once in a batch',
+      { seatIds: plan.seatIds },
+    );
+  }
   if (plan.code === 'SEAT_NOT_FOUND') {
     return apiException(
       HttpStatus.UNPROCESSABLE_ENTITY,

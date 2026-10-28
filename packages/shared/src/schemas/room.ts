@@ -33,9 +33,6 @@ export function rowIndex(label: string): number {
 export const seatLabel = (seat: { row: string; number: number }): string =>
   `${seat.row}${seat.number}`;
 
-const hasUniqueSeatIds = (changes: readonly { seatId: string }[]): boolean =>
-  new Set(changes.map((change) => change.seatId)).size === changes.length;
-
 // ─── Requests ───
 
 const roomNameSchema = z
@@ -67,6 +64,8 @@ export type RenameRoomRequest = z.infer<typeof renameRoomRequestSchema>;
  * One element of `PATCH /admin/rooms/:id/seats`. Omitted fields are left unchanged.
  * `coupleWith`: id of the seat to pair with (both must end up COUPLE), or `null` to leave the
  * current pair. Changing a seat's type away from COUPLE also leaves its pair.
+ * Each seat may appear only once per batch; that is checked with the couple rules
+ * (`planSeatChanges`, `422 INVALID_CHANGES`), not here.
  */
 export const seatChangeSchema = z.object({
   seatId: z.uuid(),
@@ -82,8 +81,7 @@ export const updateSeatsRequestSchema = z.object({
     .min(1, { error: 'Chưa có thay đổi nào' })
     .max(ROOM_LIMITS.seatChangesMax, {
       error: `Tối đa ${ROOM_LIMITS.seatChangesMax} ghế mỗi lần lưu`,
-    })
-    .refine(hasUniqueSeatIds, { error: 'Mỗi ghế chỉ xuất hiện một lần' }),
+    }),
 });
 export type UpdateSeatsRequest = z.infer<typeof updateSeatsRequestSchema>;
 
@@ -147,6 +145,8 @@ export const RoomErrorCode = {
   ROOM_HAS_SHOWTIMES: 'ROOM_HAS_SHOWTIMES',
   /** 409: seat layout frozen by upcoming showtimes; `details` is a `RoomLock`. */
   ROOM_IN_USE: 'ROOM_IN_USE',
+  /** 422: a seat appears more than once in one batch; `details.seatIds` lists them. */
+  INVALID_CHANGES: 'INVALID_CHANGES',
   /** 422: `details.seatIds` lists ids that are not seats of this room. */
   SEAT_NOT_FOUND: 'SEAT_NOT_FOUND',
   /** 422: couple pair rules broken; `details.violations` lists them. */
