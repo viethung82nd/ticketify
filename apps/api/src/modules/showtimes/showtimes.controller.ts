@@ -1,0 +1,48 @@
+import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import { ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { ShowtimeDates, ShowtimeListItem, ShowtimeSeatMap } from '@ticketify/shared';
+import { Public } from '../../common/decorators/public.decorator';
+import { ListShowtimesQueryDto, MovieDatesQueryDto } from './dto/showtime.dto';
+import { ScheduleService } from './schedule.service';
+
+@ApiTags('showtimes')
+@Public()
+@Controller('showtimes')
+export class ShowtimesController {
+  constructor(private readonly schedule: ScheduleService) {}
+
+  @Get()
+  @ApiOkResponse({
+    description:
+      'Upcoming SCHEDULED showtimes of the movie on that cinema-time-zone day (default: today ' +
+      'there), by start, with the number of seats that can be booked now. A movieId that does ' +
+      'not exist gives 200 with an empty list, not 404',
+  })
+  list(@Query() query: ListShowtimesQueryDto): Promise<ShowtimeListItem[]> {
+    return this.schedule.listForMovie(query.movieId, query.date);
+  }
+
+  @Get('dates')
+  @ApiOperation({
+    summary: 'Days with upcoming showtimes of a movie',
+    description:
+      'Cinema-time-zone days (YYYY-MM-DD, ascending, no duplicates) that have at least one ' +
+      'SCHEDULED showtime of the movie starting after now. The movie page uses it to point to ' +
+      'the nearest day with showtimes. An unknown movieId gives { dates: [] }.',
+  })
+  @ApiOkResponse({ description: 'Days (YYYY-MM-DD, cinema time zone) with upcoming showtimes' })
+  dates(@Query() query: MovieDatesQueryDto): Promise<ShowtimeDates> {
+    return this.schedule.datesForMovie(query.movieId);
+  }
+
+  @Get(':id/seats')
+  @ApiOkResponse({
+    description:
+      'Room grid and every seat of the room: locked price and status (expired holds shown ' +
+      'AVAILABLE); seats without a ShowtimeSeat row are UNAVAILABLE with price null',
+  })
+  @ApiNotFoundResponse({ description: 'SHOWTIME_NOT_FOUND (also for cancelled showtimes)' })
+  seats(@Param('id', new ParseUUIDPipe()) id: string): Promise<ShowtimeSeatMap> {
+    return this.schedule.seatMap(id);
+  }
+}

@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router';
 import { AgeBadge } from '@/components/catalog/movie-card';
 import { MoviePoster } from '@/components/catalog/movie-poster';
 import { EmptyState, ErrorState } from '@/components/catalog/query-states';
+import { MovieSchedule } from '@/components/schedule/movie-schedule';
 import { Button } from '@/components/ui/button';
 import { errorCodeOf } from '@/features/catalog/catalog-errors';
 import {
@@ -121,9 +122,7 @@ export function MovieDetailPage() {
           <h2 id="lich-chieu" className="text-2xl font-bold text-cream">
             Lịch chiếu
           </h2>
-          <p className="rounded-2xl border border-dashed border-white/15 px-6 py-10 text-center text-muted-foreground">
-            Lịch chiếu sẽ có sớm.
-          </p>
+          <MovieSchedule movieId={movie.id} />
         </section>
       </>
     );

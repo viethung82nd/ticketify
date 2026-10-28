@@ -14,10 +14,12 @@ import { PrismaModule } from './infra/prisma/prisma.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { StorageModule } from './infra/storage/storage.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CombosModule } from './modules/combos/combos.module';
 import { HealthModule } from './modules/health/health.module';
 import { MoviesModule } from './modules/movies/movies.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
+import { ShowtimesModule } from './modules/showtimes/showtimes.module';
 import { UsersModule } from './modules/users/users.module';
 
 const requestIdFrom = (req: IncomingMessage): string => {
@@ -54,6 +56,8 @@ const requestIdFrom = (req: IncomingMessage): string => {
     MoviesModule,
     RoomsModule,
     PricingModule,
+    ShowtimesModule,
+    CombosModule,
   ],
   providers: [
     {

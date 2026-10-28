@@ -7,6 +7,8 @@ const ADMIN_NAV = [
   { to: '/admin/genres', label: 'Thể loại' },
   { to: '/admin/rooms', label: 'Phòng chiếu' },
   { to: '/admin/pricing', label: 'Giá vé & ngày lễ' },
+  { to: '/admin/showtimes', label: 'Suất chiếu' },
+  { to: '/admin/combos', label: 'Combo' },
 ];
 
 /** Page frame for admin screens: section tabs, title, optional actions on the right. */
@@ -23,7 +25,7 @@ export function AdminShell({
 }) {
   return (
     <section className="mx-auto max-w-6xl px-4 pt-10">
-      <nav aria-label="Quản trị" className="mb-6 flex gap-1">
+      <nav aria-label="Quản trị" className="mb-6 flex flex-wrap gap-1">
         {ADMIN_NAV.map((item) => (
           <NavLink
             key={item.to}

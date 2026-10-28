@@ -48,11 +48,19 @@ export function apiException(
   return new HttpException({ code, message, details }, status);
 }
 
-/** `exceptionFactory` for the global ValidationPipe. */
-export function validationExceptionFactory(errors: ValidationError[]): BadRequestException {
+/**
+ * `400 VALIDATION_FAILED` listing the offending fields. Also used by services for value rules a
+ * DTO cannot check alone (e.g. "startsAt is in the future" needs `ClockService`).
+ */
+export function validationFailed(details: FieldError[]): BadRequestException {
   return new BadRequestException({
     code: 'VALIDATION_FAILED',
     message: 'Request validation failed',
-    details: flattenValidationErrors(errors),
+    details,
   });
+}
+
+/** `exceptionFactory` for the global ValidationPipe. */
+export function validationExceptionFactory(errors: ValidationError[]): BadRequestException {
+  return validationFailed(flattenValidationErrors(errors));
 }

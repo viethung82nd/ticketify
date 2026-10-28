@@ -3,6 +3,7 @@ import {
   adminGenreSchema,
   type AdminMovie,
   adminMovieSchema,
+  CATALOG_LIMITS,
   type CreateMovieRequest,
   type Genre,
   type GenreRequest,
@@ -36,6 +37,25 @@ function toParams(query: Partial<MovieListQuery>): Record<string, string | numbe
 export async function listMovies(query: Partial<MovieListQuery>): Promise<Page<Movie>> {
   const res = await apiClient.get<unknown>('/movies', { params: toParams(query) });
   return moviePageSchema.parse(res.data);
+}
+
+/** Safety stop: 100 pages × 50 is far more than one cinema ever shows. */
+const MAX_PAGES = 100;
+const byTitle = new Intl.Collator('vi', { sensitivity: 'base', numeric: true });
+
+/**
+ * Every movie the public list shows (COMING_SOON and NOW_SHOWING; ENDED is hidden by the API),
+ * page by page at the largest page size, sorted by Vietnamese title. One cinema has at most a
+ * few hundred movies, so a handful of requests.
+ */
+export async function listAllCurrentMovies(): Promise<Movie[]> {
+  const movies: Movie[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const result = await listMovies({ page, pageSize: CATALOG_LIMITS.pageSizeMax });
+    movies.push(...result.items);
+    if (result.items.length === 0 || movies.length >= result.total) break;
+  }
+  return movies.sort((a, b) => byTitle.compare(a.title, b.title));
 }
 
 export async function getMovie(slug: string): Promise<Movie> {
