@@ -23,6 +23,7 @@ import { accessTokenFor } from '../support/auth';
 import { createTestDatabase, type TestDatabase } from '../support/database';
 import { bodyOf, errorOf } from '../support/http';
 import { createTestRedis, type TestRedis } from '../support/redis';
+import { captureServerErrors } from '../support/server-errors';
 
 /** 17:00 Sunday 2026-11-01 in Vietnam. */
 const NOW = '2026-11-01T10:00:00.000Z';
@@ -518,6 +519,131 @@ describe('Seat hold — POST /bookings (real Postgres + Redis)', () => {
       expect(res.status).toBe(201);
       expect(await bookingCount(st.id)).toBe(2);
     });
+  });
+
+  // ─── Rebooking across expiresAt and holdUntil ───
+
+  describe('rebooking the same showtime across expiresAt and holdUntil', () => {
+    /** A user with one PENDING booking of A1 + A2, made at NOW. */
+    async function firstBooking() {
+      const scene_ = await scene();
+      const user = await newUser();
+      const res = await hold(user, {
+        showtimeId: scene_.showtime.id,
+        seatIds: [scene_.seat('A1'), scene_.seat('A2')],
+      });
+      expect(res.status).toBe(201);
+      return { ...scene_, user, first: bodyOf<Booking>(res) };
+    }
+
+    /** Moves the clock and signs the user in again (tokens live 15 minutes on the fake clock). */
+    function later(user: TestUser, seconds: number) {
+      clock.advance({ seconds });
+      user.token = tokenOf(user.id);
+    }
+
+    it('past expiresAt, inside the payment grace: other seats → 201; the old seats stay HELD', async () => {
+      const { seat, showtime: st, user, first } = await firstBooking();
+      later(user, HOLD_TTL_SECONDS + 60);
+
+      const res = await hold(user, { showtimeId: st.id, seatIds: [seat('A3')] });
+
+      expect(res.status).toBe(201);
+      expect(await bookingCount(st.id)).toBe(2);
+      for (const label of ['A1', 'A2']) {
+        expect(await seatRow(st.id, seat(label))).toMatchObject({
+          status: 'HELD',
+          bookingId: first.id,
+          heldUntil: instant(first.holdUntil),
+        });
+      }
+      expect(
+        await db.prisma.booking.findUniqueOrThrow({
+          where: { id: first.id },
+          select: { status: true },
+        }),
+      ).toEqual({ status: 'PENDING' });
+    });
+
+    it('same moment, the old seats → 409 SEAT_UNAVAILABLE (not BOOKING_ALREADY_PENDING), nothing written', async () => {
+      const { seat, showtime: st, user, first } = await firstBooking();
+      later(user, HOLD_TTL_SECONDS + 60);
+
+      const res = await hold(user, { showtimeId: st.id, seatIds: [seat('A2'), seat('A3')] });
+
+      expect(res.status).toBe(409);
+      expect(errorOf(res)).toMatchObject({
+        code: 'SEAT_UNAVAILABLE',
+        details: { seatIds: [seat('A2')] },
+      });
+      expect(await bookingCount(st.id)).toBe(1);
+      expect(await seatRow(st.id, seat('A2'))).toMatchObject({ bookingId: first.id });
+      expect((await seatRow(st.id, seat('A3'))).status).toBe('AVAILABLE');
+    });
+
+    it('before expiresAt → 409 BOOKING_ALREADY_PENDING naming the booking and its expiresAt', async () => {
+      const { seat, showtime: st, user, first } = await firstBooking();
+      later(user, HOLD_TTL_SECONDS - 1);
+
+      const res = await hold(user, { showtimeId: st.id, seatIds: [seat('A3')] });
+
+      expect(res.status).toBe(409);
+      expect(errorOf(res)).toMatchObject({
+        code: 'BOOKING_ALREADY_PENDING',
+        details: { existingBookingId: first.id, expiresAt: first.expiresAt, bookingId: first.id },
+      });
+      expect(await bookingCount(st.id)).toBe(1);
+    });
+
+    it('past holdUntil with no expiry job run yet: every seat, the old ones included → 201', async () => {
+      const { seat, showtime: st, user, first } = await firstBooking();
+      later(user, HOLD_TTL_SECONDS + PAYMENT_GRACE_SECONDS);
+
+      const res = await hold(user, {
+        showtimeId: st.id,
+        seatIds: [seat('A1'), seat('A2'), seat('A3')],
+      });
+
+      expect(res.status).toBe(201);
+      const second = bodyOf<Booking>(res);
+      for (const label of ['A1', 'A2', 'A3']) {
+        expect(await seatRow(st.id, seat(label))).toMatchObject({
+          status: 'HELD',
+          bookingId: second.id,
+        });
+      }
+      // The old booking is only marked EXPIRED by the job or the sweep (worker).
+      expect(
+        await db.prisma.booking.findUniqueOrThrow({
+          where: { id: first.id },
+          select: { status: true },
+        }),
+      ).toEqual({ status: 'PENDING' });
+    });
+
+    it('one user, two holds of the same showtime at once, 20 rounds: exactly one 201 each, no 5xx', async () => {
+      const errors = captureServerErrors();
+      try {
+        for (let round = 0; round < 20; round++) {
+          const { seat, showtime: st } = await scene();
+          const user = await newUser();
+          // Different seats: only the (user, showtime) advisory lock and the PENDING check decide.
+          const responses = await Promise.all([
+            hold(user, { showtimeId: st.id, seatIds: [seat('A1')] }),
+            hold(user, { showtimeId: st.id, seatIds: [seat('A2')] }),
+          ]);
+          const statuses = responses.map((res) => res.status).sort();
+
+          expect({ round, statuses }).toEqual({ round, statuses: [201, 409] });
+          const loser = responses.find((res) => res.status === 409)!;
+          expect(errorOf(loser).code).toBe('BOOKING_ALREADY_PENDING');
+          expect(await bookingCount(st.id)).toBe(1);
+        }
+        expect(errors.errors).toEqual([]);
+      } finally {
+        errors.restore();
+      }
+    }, 60_000);
   });
 
   // ─── Combos and price snapshot ───
