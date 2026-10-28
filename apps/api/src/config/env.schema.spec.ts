@@ -11,6 +11,7 @@ const validEnv = (): Record<string, string> => ({
   SMTP_HOST: 'localhost',
   SMTP_PORT: '1025',
   SMTP_FROM: 'Ticketify <no-reply@ticketify.local>',
+  JWT_ACCESS_SECRET: 'unit-test-access-secret-0123456789abcdef',
 });
 
 describe('validateEnv', () => {
@@ -24,6 +25,10 @@ describe('validateEnv', () => {
     expect(env.PAYMENT_GRACE_SECONDS).toBe(300);
     expect(env.S3_FORCE_PATH_STYLE).toBe(true);
     expect(env.CORS_ORIGINS).toEqual(['http://localhost:5173', 'http://127.0.0.1:5173']);
+    expect(env.ACCESS_TOKEN_TTL_SECONDS).toBe(900);
+    expect(env.REFRESH_TOKEN_TTL_SECONDS).toBe(604_800);
+    expect(env.LOGIN_RATE_LIMIT_MAX).toBe(5);
+    expect(env.LOGIN_RATE_LIMIT_WINDOW_SECONDS).toBe(900);
   });
 
   it('coerces numbers and booleans', () => {
@@ -41,11 +46,12 @@ describe('validateEnv', () => {
   });
 
   it('fails with a readable message naming every missing variable', () => {
-    const { DATABASE_URL: _db, REDIS_URL: _redis, ...rest } = validEnv();
+    const { DATABASE_URL: _db, REDIS_URL: _redis, JWT_ACCESS_SECRET: _jwt, ...rest } = validEnv();
 
     expect(() => validateEnv(rest)).toThrow(/Invalid environment configuration/);
     expect(() => validateEnv(rest)).toThrow(/DATABASE_URL/);
     expect(() => validateEnv(rest)).toThrow(/REDIS_URL/);
+    expect(() => validateEnv(rest)).toThrow(/JWT_ACCESS_SECRET/);
   });
 
   it.each([
@@ -56,6 +62,9 @@ describe('validateEnv', () => {
     ['S3_FORCE_PATH_STYLE', 'yes'],
     ['CORS_ORIGINS', 'not-a-url'],
     ['HOLD_TTL_SECONDS', '0'],
+    ['JWT_ACCESS_SECRET', 'too-short'],
+    ['ACCESS_TOKEN_TTL_SECONDS', '0'],
+    ['LOGIN_RATE_LIMIT_MAX', '-1'],
   ])('rejects invalid %s=%s', (key, value) => {
     expect(() => validateEnv({ ...validEnv(), [key]: value })).toThrow(new RegExp(key));
   });

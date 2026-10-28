@@ -8,6 +8,7 @@ export function setupSwagger(app: INestApplication): void {
     .setTitle('Ticketify API')
     .setDescription('Realtime movie ticket booking for a single cinema')
     .setVersion('0.0.0')
+    .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup(SWAGGER_PATH, app, document);

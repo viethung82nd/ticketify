@@ -51,6 +51,14 @@ export const envSchema = z.object({
   HOLD_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   PAYMENT_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(300),
 
+  /** HS256 signing key for access tokens. Generate with `openssl rand -base64 48`. */
+  JWT_ACCESS_SECRET: z.string().min(32, { error: 'must be at least 32 characters' }),
+  ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
+  /** Login attempts allowed per email inside one window (the per-IP limit is a multiple). */
+  LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
+  LOGIN_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(900),
+
   /** S3-compatible object storage (RustFS in dev). */
   S3_ENDPOINT: z.url({ protocol: /^https?$/ }),
   S3_REGION: z.string().min(1).default('us-east-1'),

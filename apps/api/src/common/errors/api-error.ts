@@ -1,4 +1,9 @@
-import { BadRequestException, HttpStatus, type ValidationError } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  type ValidationError,
+} from '@nestjs/common';
 import type { ApiError, FieldError } from '@ticketify/shared';
 
 /** Body of every error response returned by the API (schema lives in @ticketify/shared). */
@@ -31,6 +36,16 @@ export function flattenValidationErrors(errors: ValidationError[], parent = ''):
       : [];
     return [...own, ...flattenValidationErrors(error.children ?? [], field)];
   });
+}
+
+/** An `HttpException` whose body carries a machine-readable `code` (see AllExceptionsFilter). */
+export function apiException(
+  status: HttpStatus,
+  code: string,
+  message: string,
+  details?: unknown,
+): HttpException {
+  return new HttpException({ code, message, details }, status);
 }
 
 /** `exceptionFactory` for the global ValidationPipe. */
