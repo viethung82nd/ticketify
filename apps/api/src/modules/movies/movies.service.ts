@@ -7,6 +7,7 @@ import {
   type Movie as MovieView,
   type Page,
 } from '@ticketify/shared';
+import { parseIsoDate } from '../../common/calendar-date';
 import { apiException } from '../../common/errors/api-error';
 import type { Prisma } from '../../generated/prisma/client';
 import { isPrismaError, PrismaErrorCode } from '../../infra/prisma/prisma-errors';
@@ -18,7 +19,6 @@ import {
   MOVIE_INCLUDE,
   MOVIE_ORDER,
   type MovieWithGenres,
-  parseIsoDate,
   toAdminMovieView,
   toMovieView,
 } from './movie-view';

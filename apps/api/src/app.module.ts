@@ -16,6 +16,8 @@ import { StorageModule } from './infra/storage/storage.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { MoviesModule } from './modules/movies/movies.module';
+import { PricingModule } from './modules/pricing/pricing.module';
+import { RoomsModule } from './modules/rooms/rooms.module';
 import { UsersModule } from './modules/users/users.module';
 
 const requestIdFrom = (req: IncomingMessage): string => {
@@ -50,6 +52,8 @@ const requestIdFrom = (req: IncomingMessage): string => {
     AuthModule,
     UsersModule,
     MoviesModule,
+    RoomsModule,
+    PricingModule,
   ],
   providers: [
     {

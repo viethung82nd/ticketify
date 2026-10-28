@@ -63,7 +63,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [ ] **1.12** FE admin: trình sửa sơ đồ ghế dạng lưới, bảng giá, ngày lễ
 
 ### Tuần 6: Suất chiếu & combo
-- [ ] **1.13** Tạo suất chiếu: `endsAt = startsAt + thời lượng + thời gian dọn phòng`. Trong cùng transaction tạo `Showtime` + sinh `ShowtimeSeat`, chốt giá từng ghế. Lỗi exclusion constraint trả về `409`
+- [ ] **1.13** Tạo suất chiếu: `endsAt = startsAt + thời lượng + thời gian dọn phòng`. Trong cùng transaction tạo `Showtime` + sinh `ShowtimeSeat`, chốt giá từng ghế (`PricingService.dayType(startsAt, tx)` + `priceFor`). Lỗi exclusion constraint trả về `409`. **Khóa dòng phòng bằng `SELECT … FROM rooms WHERE id = $1 FOR SHARE` trước khi đọc danh sách ghế**, để không chạy đồng thời với một lần sửa ghế (`PATCH /admin/rooms/:id/seats` giữ `FOR UPDATE` trên cùng dòng)
 - [ ] **1.14** Hủy suất chiếu: chỉ cho phép khi chưa có ghế `HELD/SOLD` (vì không có hoàn tiền)
 - [ ] **1.15** API public: lịch chiếu theo phim/ngày; `GET /showtimes/:id/seats`
 - [ ] **1.16** CRUD combo
@@ -209,6 +209,14 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [ ] **7.8** Thời gian còn lại dùng làm dự phòng
 
 **DoD:** bản demo public chạy ổn định; README và video hoàn chỉnh.
+
+---
+
+## Quyết định chờ
+
+| Hạng mục | Ghi chú |
+|---|---|
+| Tên ngày lễ (`Holiday.name`, nullable) | Chưa thêm cột. Khi cần, gom vào **một** migration chỉ thêm cột nullable (expand-only, như migration `movie_synopsis`), không đổi dữ liệu cũ |
 
 ---
 

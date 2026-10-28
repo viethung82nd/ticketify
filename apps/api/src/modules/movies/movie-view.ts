@@ -1,4 +1,5 @@
 import type { AdminMovie, Genre as GenreView, Movie as MovieView } from '@ticketify/shared';
+import { formatIsoDate } from '../../common/calendar-date';
 import type { Genre, Prisma } from '../../generated/prisma/client';
 
 export const MOVIE_INCLUDE = {
@@ -13,12 +14,6 @@ export const MOVIE_ORDER = [
   { title: 'asc' },
   { id: 'asc' },
 ] satisfies Prisma.MovieOrderByWithRelationInput[];
-
-/** `date` columns come back as UTC midnight; the calendar date is the ISO prefix. */
-export const formatIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
-
-/** `YYYY-MM-DD` (already validated) → the `Date` Prisma writes to a `date` column. */
-export const parseIsoDate = (value: string): Date => new Date(`${value}T00:00:00.000Z`);
 
 export const toGenreView = (genre: Genre): GenreView => ({
   id: genre.id,
