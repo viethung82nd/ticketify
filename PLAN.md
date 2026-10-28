@@ -179,6 +179,7 @@ COMMIT;
 - **Vì sao dùng `NOWAIT`**: khi 500 request cùng tranh một ghế, `FOR UPDATE` thông thường bắt các request xếp hàng chờ khóa. Trong lúc chờ, mỗi request vẫn giữ một connection trong pool, dễ làm cạn pool. Với `NOWAIT`, request thua nhận `409` ngay lập tức.
 - Sau khi commit: enqueue job `expire-booking` với delay = `holdUntil − now`, rồi emit `seat:held`.
 - Rate limit `POST /bookings` theo user. Mỗi user tối đa 1 đơn `PENDING` cho mỗi suất chiếu.
+  > **Làm rõ (10/2026, không đổi thiết kế):** "đơn `PENDING`" ở đây là đơn có `expiresAt > now`. Sau `expiresAt` đơn không còn tạo được thanh toán (mục 5) nên không chặn đơn mới cùng suất; ghế của nó vẫn `HELD` tới `holdUntil` cho IPN trễ, nên đơn mới chỉ lấy được ghế khác.
 - Combo: chỉ lấy combo đang `isActive` và lưu snapshot giá. Từ đó giá combo thay đổi sau này không ảnh hưởng đơn đã tạo.
 
 ### Luồng hết hạn — `expireBooking(bookingId)` (dùng chung cho job và cron)
