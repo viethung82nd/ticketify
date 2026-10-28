@@ -17,6 +17,9 @@ import { type Latency, latencyOf, tally, writeReport } from './support/stats';
  * from a narrow block of a 10×12 room. No seat may end up in two bookings, every booking gets all
  * of its seats or none (all or nothing), and no request may fail with a 5xx or a deadlock.
  *
+ * Unlike scenario A it also runs on Windows: every assertion is about answers and rows (SQL after
+ * each round), none about pool usage or timing, so Docker Desktop changes nothing it checks.
+ *
  * `SCENARIO_B_ROUNDS` rounds (default 50), each on a fresh showtime. Round r draws its requests
  * from seed `SEED + r`, so a failing round can be replayed alone (`SCENARIO_B_ONLY=r`).
  */
