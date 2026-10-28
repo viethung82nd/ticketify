@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { type DayType, PricingErrorCode, type SeatType } from '@ticketify/shared';
+import { cinemaDayRange, type DayType, PricingErrorCode, type SeatType } from '@ticketify/shared';
 import { apiException } from '../../common/errors/api-error';
 import { AppConfig } from '../../config/app-config.service';
 import type { Prisma } from '../../generated/prisma/client';
@@ -29,6 +29,14 @@ export class PricingService {
   /** The calendar day of `at` on the cinema's wall clock. */
   cinemaDay(at: Date): CinemaDay {
     return this.calendar.dayOf(at);
+  }
+
+  /**
+   * The cinema day `date` (`YYYY-MM-DD`) as the UTC range `[from, to)` to compare instants with:
+   * 00:00 to 24:00 on the cinema's wall clock, never midnight UTC.
+   */
+  cinemaDayRange(date: string): { from: Date; to: Date } {
+    return cinemaDayRange(date, this.calendar.timeZone);
   }
 
   /**

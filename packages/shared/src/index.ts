@@ -6,3 +6,6 @@ export * from './schemas/movie.js';
 export * from './schemas/room.js';
 export * from './schemas/pricing.js';
 export * from './seat-layout.js';
+export * from './schemas/showtime.js';
+export * from './schemas/combo.js';
+export * from './cinema-time.js';

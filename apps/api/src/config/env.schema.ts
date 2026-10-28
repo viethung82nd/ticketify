@@ -96,6 +96,8 @@ export const envSchema = z.object({
     .refine(isValidTimeZone, { error: 'must be a valid IANA time zone' }),
   HOLD_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   PAYMENT_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(300),
+  /** Cleaning time after each film: a showtime ends at startsAt + duration + this (ROADMAP 1.13). */
+  SHOWTIME_CLEANUP_MINUTES: z.coerce.number().int().nonnegative().default(15),
 
   /** HS256 signing key for access tokens. Generate with `openssl rand -base64 48`. */
   JWT_ACCESS_SECRET: z.string().min(32, { error: 'must be at least 32 characters' }),
