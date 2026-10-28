@@ -18,6 +18,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
@@ -79,6 +80,10 @@ export class AdminShowtimesController {
   @ApiNotFoundResponse({ description: 'MOVIE_NOT_FOUND, ROOM_NOT_FOUND, PRICE_NOT_FOUND' })
   @ApiConflictResponse({ description: 'SHOWTIME_OVERLAP (details.conflicts)' })
   @ApiUnprocessableEntityResponse({ description: 'MOVIE_ENDED' })
+  @ApiServiceUnavailableResponse({
+    description:
+      'DATABASE_BUSY: no connection within maxWait, or past the timeout; nothing written',
+  })
   create(@Body() dto: CreateShowtimeDto): Promise<CreatedShowtime> {
     return this.showtimes.create(dto);
   }

@@ -17,6 +17,17 @@ export const apiErrorSchema = z.object({
 
 export type ApiError = z.infer<typeof apiErrorSchema>;
 
+/** Codes any endpoint may answer, whatever its module. */
+export const CommonErrorCode = {
+  /**
+   * 503: the database could not take the request in time (no pool connection within the
+   * transaction's `maxWait`, or the transaction ran past its `timeout` and was rolled back).
+   * Nothing was written; retry later.
+   */
+  DATABASE_BUSY: 'DATABASE_BUSY',
+} as const;
+export type CommonErrorCode = (typeof CommonErrorCode)[keyof typeof CommonErrorCode];
+
 /** Shape of `details` for `VALIDATION_FAILED` errors. */
 export const fieldErrorSchema = z.object({
   field: z.string(),

@@ -30,6 +30,17 @@ type Db = Tx | PrismaService;
 /** Exclusion constraint of the raw-SQL migration (prisma/README.md). */
 const NO_OVERLAP = { sqlState: SQLSTATE.exclusionViolation, constraint: 'showtimes_no_overlap' };
 
+/**
+ * Bounds of the create transaction, explicit rather than Prisma's implicit defaults.
+ * - `maxWait`: how long the request waits for a pool connection to start the transaction.
+ *   Past it the pool is saturated; the request answers `503 DATABASE_BUSY` (retry later) instead
+ *   of queueing behind others while holding an HTTP socket.
+ * - `timeout`: the whole transaction, lock waits included. Creates of one room run one at a
+ *   time (room lock below) and each takes a few milliseconds, so this only trips when the database
+ *   is stalled; Prisma then rolls back and the request also answers `503 DATABASE_BUSY`.
+ */
+export const SHOWTIME_TX = { maxWait: 2_000, timeout: 5_000 } as const;
+
 const byName = new Intl.Collator('vi', { sensitivity: 'base', numeric: true });
 
 const movieNotFound = () =>
@@ -100,7 +111,7 @@ const toAdminShowtime = (row: AdminShowtimeRow): AdminShowtime => ({
  * list by cinema day, cancel.
  *
  * Lock order used here, so it never forms a cycle with other flows:
- * - create: `rooms` FOR SHARE → `movies` FOR SHARE → insert `showtimes` / `showtime_seats`.
+ * - create: `rooms` FOR NO KEY UPDATE → `movies` FOR SHARE → insert `showtimes` / `showtime_seats`.
  * - cancel: `showtimes` FOR NO KEY UPDATE → its `showtime_seats` FOR UPDATE ORDER BY seat_id.
  * Seat edits (`RoomsService.updateSeats`) take `rooms` FOR UPDATE; holds (phase 2) take
  * `showtime_seats` FOR UPDATE NOWAIT ORDER BY seat_id, and their booking insert only needs a
@@ -184,14 +195,22 @@ export class ShowtimesService {
     let endsAt: Date | undefined;
     try {
       const created = await this.prisma.$transaction(async (tx) => {
-        // FOR SHARE on the room row: a seat edit holds FOR UPDATE on the same row
-        // (RoomsService.updateSeats), so the two never run at the same time. Either the edit
-        // commits first and the seats read below are its result, or this transaction commits
-        // first and the edit then sees the new showtime and refuses (409 ROOM_IN_USE). Without
-        // the lock an edit could commit between reading the seats and committing, leaving a
-        // showtime whose ShowtimeSeat rows disagree with the room. Concurrent creates all take
-        // FOR SHARE, so they do not wait for each other here.
-        await this.lockRoomForShare(tx, dto.roomId);
+        // FOR NO KEY UPDATE on the room row, for two reasons:
+        // 1. A seat edit holds FOR UPDATE on the same row (RoomsService.updateSeats), so the
+        //    two never run at the same time. Either the edit commits first and the seats read
+        //    below are its result, or this transaction commits first and the edit then sees
+        //    the new showtime and refuses (409 ROOM_IN_USE). Without the lock an edit could
+        //    commit between reading the seats and committing, leaving ShowtimeSeat rows that
+        //    disagree with the room.
+        // 2. Creates in the same room run one at a time. The exclusion constraint checks for
+        //    overlaps *after* inserting its own index entry, so two overlapping inserts in flight
+        //    at once each find the other's uncommitted row and wait for it: Postgres breaks the
+        //    cycle with 40P01 (deadlock detected, Prisma P2034) after deadlock_timeout (1 s), one
+        //    victim at a time. With FOR SHARE (week 6) ten simultaneous overlapping creates could
+        //    end as nine deadlocks instead of nine 409s. Serialized, each later insert sees the
+        //    earlier one committed and fails at once with 23P01 → 409 SHOWTIME_OVERLAP.
+        // FOR NO KEY UPDATE does not block the key-share locks foreign keys to rooms take.
+        await this.lockRoom(tx, dto.roomId);
         // FOR SHARE on the movie: it cannot be ENDED or change duration until we commit.
         const movie = await this.lockMovieForShare(tx, dto.movieId);
         if (movie.status === MovieStatus.ENDED) throw movieEnded();
@@ -204,8 +223,8 @@ export class ShowtimesService {
         });
 
         // The exclusion constraint `showtimes_no_overlap` rejects this insert when another
-        // non-cancelled showtime in the room overlaps [startsAt, endsAt). A concurrent
-        // overlapping insert makes this one wait for it, then fail once it commits.
+        // non-cancelled showtime in the room overlaps [startsAt, endsAt). No overlapping insert
+        // can be in flight here (room lock above), so the check never waits on another create.
         const showtime = await tx.showtime.create({
           data: {
             movieId: movie.id,
@@ -239,7 +258,7 @@ export class ShowtimesService {
           })),
         });
         return { id: showtime.id, dayType, seats: locked };
-      });
+      }, SHOWTIME_TX);
       return {
         ...(await this.getAdmin(created.id)),
         dayType: created.dayType,
@@ -322,9 +341,9 @@ export class ShowtimesService {
     return rows.map(toAdminShowtime);
   }
 
-  private async lockRoomForShare(tx: Tx, id: string): Promise<void> {
+  private async lockRoom(tx: Tx, id: string): Promise<void> {
     const rows = await tx.$queryRaw<{ id: string }[]>`
-      SELECT id FROM rooms WHERE id = ${id}::uuid FOR SHARE`;
+      SELECT id FROM rooms WHERE id = ${id}::uuid FOR NO KEY UPDATE`;
     if (rows.length === 0) throw roomNotFound();
   }
 
