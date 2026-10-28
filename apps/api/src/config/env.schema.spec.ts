@@ -23,6 +23,7 @@ describe('validateEnv', () => {
     expect(env.CINEMA_TZ).toBe('Asia/Ho_Chi_Minh');
     expect(env.HOLD_TTL_SECONDS).toBe(600);
     expect(env.PAYMENT_GRACE_SECONDS).toBe(300);
+    expect(env.SHOWTIME_CLEANUP_MINUTES).toBe(15);
     expect(env.S3_FORCE_PATH_STYLE).toBe(true);
     expect(env.CORS_ORIGINS).toEqual(['http://localhost:5173', 'http://127.0.0.1:5173']);
     expect(env.ACCESS_TOKEN_TTL_SECONDS).toBe(900);
@@ -98,6 +99,8 @@ describe('validateEnv', () => {
     ['S3_PUBLIC_ENDPOINT', 'ftp://files.example.com'],
     ['CORS_ORIGINS', 'not-a-url'],
     ['HOLD_TTL_SECONDS', '0'],
+    ['SHOWTIME_CLEANUP_MINUTES', '-1'],
+    ['SHOWTIME_CLEANUP_MINUTES', '7.5'],
     ['JWT_ACCESS_SECRET', 'too-short'],
     ['ACCESS_TOKEN_TTL_SECONDS', '0'],
     ['LOGIN_RATE_LIMIT_MAX', '-1'],
