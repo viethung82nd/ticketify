@@ -1,0 +1,115 @@
+name: Booking scenarios
+
+# Concurrency scenarios A (500 holds of one seat, 10 runs) and B (overlapping seat groups,
+# 50 random rounds) from PLAN §10 / ROADMAP 2.14–2.15. The suites are opt-in
+# (RUN_SCENARIO_TESTS=1); only this workflow turns them on.
+on:
+  pull_request:
+    paths:
+      - 'apps/api/src/modules/bookings/**'
+      - 'apps/api/src/modules/rooms/**'
+      - 'apps/api/src/modules/showtimes/**'
+      - 'apps/api/src/infra/queue/**'
+      - 'apps/api/src/modules/realtime/**'
+      - 'packages/shared/src/**'
+      - 'apps/api/test/scenarios/**'
+      - '.github/workflows/booking-scenarios.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: booking-scenarios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scenarios:
+    name: scenarios A and B
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUN_SCENARIO_TESTS: '1'
+      # Service containers below instead of Testcontainers, so the Postgres log can be read.
+      TEST_DATABASE_URL: postgresql://ticketify:ticketify@localhost:5432/ticketify
+      TEST_REDIS_URL: redis://localhost:6379
+    # Same images as docker-compose.yml and test/support/test-env.ts. Default max_connections
+    # (100) is enough: one suite at a time, the API pool is 40.
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_USER: ticketify
+          POSTGRES_PASSWORD: ticketify
+          POSTGRES_DB: ticketify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ticketify"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4.12-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Version comes from "packageManager" in package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Also builds packages/shared (prepare) and generates the Prisma client (postinstall).
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Numbers per run and per round: artifacts/scenarios/scenario-{a,b}.json and the log.
+      - name: Scenarios A and B
+        shell: bash
+        run: |
+          mkdir -p artifacts/scenarios
+          pnpm --filter @ticketify/api test:scenarios 2>&1 | tee artifacts/scenarios/jest.log
+
+      # The main deadlock figure: Postgres logs every deadlock it breaks ("deadlock detected"),
+      # whichever database or suite it happened in. pg_stat_database in the reports is a
+      # reference only (backends report it late).
+      - name: Deadlocks in the Postgres log
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/scenarios
+          docker logs "${{ job.services.postgres.id }}" > artifacts/scenarios/postgres.log 2>&1
+          count=$(grep -c 'deadlock detected' artifacts/scenarios/postgres.log || true)
+          echo "deadlock detected in the Postgres log: ${count}" | tee artifacts/scenarios/deadlocks.txt
+          {
+            echo '### Booking scenarios'
+            echo
+            echo '```'
+            grep -h '\[scenario' artifacts/scenarios/jest.log || true
+            echo "deadlock detected in the Postgres log: ${count}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "${count}" -eq 0
+
+      - name: Upload scenario logs and numbers
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: booking-scenarios
+          path: artifacts/scenarios/
+          if-no-files-found: ignore
