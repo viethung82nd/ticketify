@@ -23,8 +23,10 @@ import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.is
 import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
 import {
   BookingExpiryService,
+  isLockTimeout,
   SWEEP_BATCH_SIZE,
   type SweepReport,
+  WORKER_LOCK_TIMEOUT_MS,
 } from '../../src/modules/bookings/booking-expiry.service';
 import { bookingCode } from '../../src/modules/bookings/booking-rules';
 import type { ExpireOutcome, ExpireOutcomeKind } from '../../src/modules/bookings/expire-booking';
@@ -325,6 +327,18 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
     };
   }
 
+  /** Locks one seat row from another connection so expireBooking blocks at step 6. */
+  async function lockSeat(showtimeId: string, seatId: string): Promise<Client> {
+    const blocker = new Client({ connectionString: db.url });
+    await blocker.connect();
+    await blocker.query('BEGIN');
+    await blocker.query(
+      'SELECT 1 FROM showtime_seats WHERE showtime_id = $1 AND seat_id = $2 FOR UPDATE',
+      [showtimeId, seatId],
+    );
+    return blocker;
+  }
+
   // ─── expire-booking job ───
 
   describe('expireBooking (job)', () => {
@@ -463,6 +477,7 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
       expect(report).toEqual<SweepReport>({
         batches: [100, 50],
         outcomes: { ...emptyOutcomes(), expired: 150 },
+        busy: 0,
         failed: 0,
       });
       expect(await overduePending()).toBe(0);
@@ -499,12 +514,46 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
       expect(report).toEqual({
         batches: [3],
         outcomes: { ...emptyOutcomes(), expired: 2 },
+        busy: 0,
         failed: 1,
       });
       expect(errors).toHaveBeenCalledTimes(1);
       expect(await bookingStatus(failing)).toBe('PENDING');
       jest.restoreAllMocks();
       await expect(expiry.sweep()).resolves.toMatchObject({ outcomes: { expired: 1 } });
+    });
+
+    it(`seats locked over ${WORKER_LOCK_TIMEOUT_MS} ms: the expiry gives up (55P03, rolled back); the sweep counts it busy`, async () => {
+      await expiry.sweep();
+      const { seat, showtime: st } = await scene();
+      const user = await newUser();
+      const id = await pendingBooking(user.id, st.id, [seat('A1')], clock.now());
+      clock.advance({ seconds: 1 });
+      const blocker = await lockSeat(st.id, seat('A1'));
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        // Wall-clock time spent waiting (performance.now(): not business time, no ClockService).
+        const started = performance.now();
+        const error = await expiry.expire(id).then(
+          () => undefined,
+          (thrown: unknown) => thrown,
+        );
+        const waited = performance.now() - started;
+        expect(isLockTimeout(error)).toBe(true);
+        expect(waited).toBeGreaterThanOrEqual(WORKER_LOCK_TIMEOUT_MS - 100);
+        expect(waited).toBeLessThan(WORKER_LOCK_TIMEOUT_MS + 2_000);
+        // Rolled back: the booking UPDATE before the seat lock is gone too.
+        expect(await bookingStatus(id)).toBe('PENDING');
+        expect((await seatRow(st.id, seat('A1'))).status).toBe('HELD');
+
+        const report = await expiry.sweep();
+        expect(report).toMatchObject({ busy: 1, failed: 0, outcomes: { expired: 0 } });
+        expect(warn.mock.calls.map(([message]) => String(message)).join('\n')).toContain(id);
+      } finally {
+        await blocker.query('ROLLBACK');
+        await blocker.end();
+      }
+      await expect(expiry.expire(id)).resolves.toMatchObject({ outcome: 'expired' });
     });
 
     it('sweep and job on the same booking: exactly one expires it, the other gets skipped or noop', async () => {
@@ -699,18 +748,6 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
       if (!job) throw new Error(`No job for ${bookingId}`);
       await job.promote();
       return job;
-    }
-
-    /** Locks one seat row from another connection so expireBooking blocks at step 6. */
-    async function lockSeat(showtimeId: string, seatId: string): Promise<Client> {
-      const blocker = new Client({ connectionString: db.url });
-      await blocker.connect();
-      await blocker.query('BEGIN');
-      await blocker.query(
-        'SELECT 1 FROM showtime_seats WHERE showtime_id = $1 AND seat_id = $2 FOR UPDATE',
-        [showtimeId, seatId],
-      );
-      return blocker;
     }
 
     /** Backend pids waiting on a row lock in this database. */

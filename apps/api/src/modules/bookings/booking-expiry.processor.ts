@@ -7,7 +7,12 @@ import {
 } from '../../infra/queue/booking-queue';
 import { BookingQueueProducer } from '../../infra/queue/booking-queue.producer';
 import { QueueWorkers } from '../../infra/queue/queue-workers';
-import { BookingExpiryService, type SweepReport } from './booking-expiry.service';
+import {
+  BookingExpiryService,
+  isLockTimeout,
+  type SweepReport,
+  WORKER_LOCK_TIMEOUT_MS,
+} from './booking-expiry.service';
 import type { ExpireOutcome } from './expire-booking';
 
 /** Jobs of the `bookings` queue one worker process runs at the same time (ROADMAP 2.6). */
@@ -69,7 +74,18 @@ export class BookingExpiryProcessor implements OnApplicationBootstrap {
     token: string | undefined,
   ): Promise<ExpireOutcome> {
     const { bookingId } = job.data;
-    const result = await this.expiry.expire(bookingId);
+    let result: ExpireOutcome;
+    try {
+      result = await this.expiry.expire(bookingId);
+    } catch (error) {
+      if (!isLockTimeout(error)) throw error;
+      // Busy, not broken: the transaction rolled back. A plain Error (not UnrecoverableError) so
+      // BullMQ retries it with the queue's backoff; after the last attempt the sweep remains.
+      throw new Error(
+        `Booking ${bookingId} busy: seats locked over ${WORKER_LOCK_TIMEOUT_MS} ms, retried later`,
+        { cause: error },
+      );
+    }
     if (result.outcome === 'early') {
       // Same job, run again at holdUntil (a new job with this id would be dropped as a duplicate).
       await job.moveToDelayed(result.holdUntil.getTime(), token);

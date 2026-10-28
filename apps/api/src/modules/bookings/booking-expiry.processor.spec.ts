@@ -9,8 +9,15 @@ import type { ExpireOutcome } from './expire-booking';
 
 const BOOKING_ID = '01a17e75-7100-7679-b8b1-000000000001';
 
-function setup(outcome: ExpireOutcome) {
-  const expire = jest.fn(() => Promise.resolve(outcome));
+/** What Prisma throws when `lock_timeout` ends a wait (driver-adapter error, SQLSTATE 55P03). */
+const lockTimeout = Object.assign(new Error('canceling statement due to lock timeout'), {
+  meta: { driverAdapterError: { cause: { originalCode: '55P03' } } },
+});
+
+function setup(outcome: ExpireOutcome | Error) {
+  const expire = jest.fn(() =>
+    outcome instanceof Error ? Promise.reject(outcome) : Promise.resolve(outcome),
+  );
   const processor = new BookingExpiryProcessor(
     { expire } as unknown as BookingExpiryService,
     {} as QueueWorkers,
@@ -52,6 +59,28 @@ describe('BookingExpiryProcessor (expire-booking job)', () => {
 
     await expect(processor.process(job, 'token')).rejects.toBeInstanceOf(DelayedError);
     expect(moveToDelayed).toHaveBeenCalledWith(holdUntil.getTime(), 'token');
+  });
+
+  it('seats locked past the lock timeout: a plain Error, so BullMQ retries with its backoff', async () => {
+    const { processor, job, moveToDelayed } = setup(lockTimeout);
+
+    const error = await processor.process(job, 'token').then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(UnrecoverableError);
+    expect(error).not.toBeInstanceOf(DelayedError);
+    expect((error as Error).message).toMatch(new RegExp(`Booking ${BOOKING_ID} busy`));
+    expect(moveToDelayed).not.toHaveBeenCalled();
+  });
+
+  it('any other error is rethrown as is', async () => {
+    const boom = new Error('boom');
+    const { processor, job } = setup(boom);
+
+    await expect(processor.process(job, 'token')).rejects.toBe(boom);
   });
 
   it('an unknown job name is not retried', async () => {
