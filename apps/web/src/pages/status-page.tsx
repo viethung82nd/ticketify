@@ -11,7 +11,7 @@ export function StatusPage() {
   const { data, error, isPending, isFetching, refetch } = useHealth();
 
   return (
-    <Card className="max-w-xl">
+    <Card className="mx-auto my-16 max-w-xl">
       <CardHeader>
         <CardTitle>Trạng thái hệ thống</CardTitle>
         <CardDescription>

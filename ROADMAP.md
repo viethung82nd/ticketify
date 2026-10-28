@@ -45,11 +45,11 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 ## Giai đoạn 1 — Auth & danh mục (tuần 3–6)
 
 ### Tuần 3: Xác thực
-- [ ] **1.1** Đăng ký, đăng nhập (argon2); access token 15 phút; refresh token 7 ngày đặt trong cookie httpOnly
-- [ ] **1.2** Refresh token rotation + phát hiện token bị dùng lại (thu hồi cả chuỗi token); logout; `GET /me`
-- [ ] **1.3** `RolesGuard`, decorator `@Roles` và `@CurrentUser`; rate limit cho login (Redis storage)
-- [ ] **1.4** Test unit + e2e cho auth (token hết hạn, token dùng lại, sai role)
-- [ ] **1.5** FE: trang đăng nhập/đăng ký, auth store, interceptor tự gọi refresh, route bảo vệ theo role
+- [x] **1.1** Đăng ký, đăng nhập (argon2); access token 15 phút; refresh token 7 ngày đặt trong cookie httpOnly
+- [x] **1.2** Refresh token rotation + phát hiện token bị dùng lại (thu hồi cả chuỗi token); logout; `GET /me`
+- [x] **1.3** `RolesGuard`, decorator `@Roles` và `@CurrentUser`; rate limit cho login (Redis storage)
+- [x] **1.4** Test unit + e2e cho auth (token hết hạn, token dùng lại, sai role)
+- [x] **1.5** FE: trang đăng nhập/đăng ký, auth store, interceptor tự gọi refresh, route bảo vệ theo role
 
 ### Tuần 4: Phim & lưu trữ
 - [ ] **1.6** `StorageService` (S3 API — RustFS): upload, presigned URL; upload poster
