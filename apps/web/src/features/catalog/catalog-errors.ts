@@ -1,8 +1,10 @@
 import {
   CatalogErrorCode,
+  ComboErrorCode,
   fieldErrorSchema,
   PricingErrorCode,
   RoomErrorCode,
+  ShowtimeErrorCode,
 } from '@ticketify/shared';
 import { z } from 'zod';
 import { apiErrorOf, isNetworkError } from '@/lib/api-error';
@@ -38,6 +40,19 @@ const MESSAGES: Record<string, string> = {
   [PricingErrorCode.PRICE_NOT_FOUND]: 'Không tìm thấy ô giá này. Hãy chạy lại seed dữ liệu giá.',
   [PricingErrorCode.HOLIDAY_EXISTS]: 'Ngày này đã có trong danh sách ngày lễ.',
   [PricingErrorCode.HOLIDAY_NOT_FOUND]: 'Không tìm thấy ngày lễ. Có thể đã bị xóa.',
+  // Showtimes (admin and public).
+  [ShowtimeErrorCode.SHOWTIME_NOT_FOUND]: 'Không tìm thấy suất chiếu. Có thể suất đã bị hủy.',
+  [ShowtimeErrorCode.SHOWTIME_OVERLAP]: 'Phòng đã có suất chiếu khác trong khoảng giờ này.',
+  [ShowtimeErrorCode.SHOWTIME_STARTED]: 'Suất chiếu đã bắt đầu nên không thể hủy.',
+  [ShowtimeErrorCode.SHOWTIME_HAS_BOOKINGS]:
+    'Suất chiếu đã có ghế đang được giữ hoặc đã bán. Hệ thống không hoàn tiền nên không thể hủy suất này.',
+  [ShowtimeErrorCode.MOVIE_ENDED]: 'Phim đã kết thúc nên không thể xếp suất chiếu mới.',
+  // Combos (admin).
+  [ComboErrorCode.COMBO_NOT_FOUND]: 'Không tìm thấy combo. Có thể combo đã bị xóa.',
+  [ComboErrorCode.COMBO_NAME_TAKEN]:
+    'Đã có combo cùng tên (không phân biệt chữ hoa, chữ thường và dấu).',
+  [ComboErrorCode.COMBO_IN_USE]:
+    'Combo đã có trong đơn đặt vé nên không thể xóa. Hãy tắt combo để ẩn khỏi khách hàng.',
   FORBIDDEN: 'Bạn không có quyền thực hiện thao tác này.',
   UNAUTHORIZED: 'Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.',
   VALIDATION_FAILED: 'Thông tin chưa hợp lệ. Vui lòng kiểm tra lại các trường được đánh dấu.',

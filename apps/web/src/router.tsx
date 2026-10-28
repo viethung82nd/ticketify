@@ -2,13 +2,16 @@ import { Role } from '@ticketify/shared';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { AppLayout } from '@/components/layout/app-layout';
 import { GuestOnly, RequireAuth } from '@/features/auth/route-guards';
+import { AdminCombosPage } from '@/pages/admin/admin-combos-page';
 import { AdminGenresPage } from '@/pages/admin/admin-genres-page';
 import { AdminMoviesPage } from '@/pages/admin/admin-movies-page';
 import { AdminPricingPage } from '@/pages/admin/admin-pricing-page';
 import { AdminRoomsPage } from '@/pages/admin/admin-rooms-page';
+import { AdminShowtimesPage } from '@/pages/admin/admin-showtimes-page';
 import { EditMoviePage, NewMoviePage } from '@/pages/admin/movie-form-page';
 import { RoomEditorPage } from '@/pages/admin/room-editor-page';
 import { NewRoomPage } from '@/pages/admin/room-form-page';
+import { NewShowtimePage } from '@/pages/admin/showtime-form-page';
 import { HomePage } from '@/pages/home-page';
 import { LoginPage } from '@/pages/login-page';
 import { MovieDetailPage } from '@/pages/movie-detail-page';
@@ -46,6 +49,9 @@ export const router = createBrowserRouter([
           { path: 'admin/rooms/new', element: <NewRoomPage /> },
           { path: 'admin/rooms/:id', element: <RoomEditorPage /> },
           { path: 'admin/pricing', element: <AdminPricingPage /> },
+          { path: 'admin/showtimes', element: <AdminShowtimesPage /> },
+          { path: 'admin/showtimes/new', element: <NewShowtimePage /> },
+          { path: 'admin/combos', element: <AdminCombosPage /> },
         ],
       },
       {

@@ -37,6 +37,7 @@ import {
   useHolidays,
   useSeatPrices,
 } from '@/features/pricing/pricing-api';
+import { cinemaYear } from '@/lib/cinema-time';
 
 const SEAT_TYPE_NAMES: Record<SeatType, string> = {
   [SeatType.STANDARD]: 'Ghế thường',
@@ -262,14 +263,6 @@ function PriceTable({ prices }: { prices: SeatPrice[] }) {
 }
 
 // ─── Holidays ───
-
-/** Current year on the cinema's calendar. */
-const cinemaYear = (): number =>
-  Number(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric' }).format(
-      new Date(),
-    ),
-  );
 
 /** `2026-09-02` → `Thứ Tư`; a calendar date, so formatted in UTC to avoid any shift. */
 const weekdayOf = (isoDate: string): string =>

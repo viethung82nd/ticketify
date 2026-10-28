@@ -63,20 +63,22 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **1.12** FE admin: trình sửa sơ đồ ghế dạng lưới, bảng giá, ngày lễ
 
 ### Tuần 6: Suất chiếu & combo
-- [ ] **1.13** Tạo suất chiếu: `endsAt = startsAt + thời lượng + thời gian dọn phòng`. Trong cùng transaction tạo `Showtime` + sinh `ShowtimeSeat`, chốt giá từng ghế (`PricingService.dayType(startsAt, tx)` + `priceFor`). Lỗi exclusion constraint trả về `409`. **Khóa dòng phòng bằng `SELECT … FROM rooms WHERE id = $1 FOR SHARE` trước khi đọc danh sách ghế**, để không chạy đồng thời với một lần sửa ghế (`PATCH /admin/rooms/:id/seats` giữ `FOR UPDATE` trên cùng dòng)
-- [ ] **1.14** Hủy suất chiếu: chỉ cho phép khi chưa có ghế `HELD/SOLD` (vì không có hoàn tiền)
-- [ ] **1.15** API public: lịch chiếu theo phim/ngày; `GET /showtimes/:id/seats`
-- [ ] **1.16** CRUD combo
-- [ ] **1.17** FE: lịch chiếu trên trang chi tiết phim; admin: form suất chiếu, quản lý combo
+- [x] **1.13** Tạo suất chiếu: `endsAt = startsAt + thời lượng + thời gian dọn phòng`. Trong cùng transaction tạo `Showtime` + sinh `ShowtimeSeat`, chốt giá từng ghế (`PricingService.dayType(startsAt, tx)` + `priceFor`). Lỗi exclusion constraint trả về `409`. **Khóa dòng phòng bằng `SELECT … FROM rooms WHERE id = $1 FOR SHARE` trước khi đọc danh sách ghế**, để không chạy đồng thời với một lần sửa ghế (`PATCH /admin/rooms/:id/seats` giữ `FOR UPDATE` trên cùng dòng)
+- [x] **1.14** Hủy suất chiếu: chỉ cho phép khi chưa có ghế `HELD/SOLD` (vì không có hoàn tiền)
+- [x] **1.15** API public: lịch chiếu theo phim/ngày; `GET /showtimes/:id/seats`
+- [x] **1.16** CRUD combo
+- [x] **1.17** FE: lịch chiếu trên trang chi tiết phim; admin: form suất chiếu, quản lý combo
 
 **DoD:** admin tạo được toàn bộ dữ liệu qua UI; test chồng giờ → `409`; test tính giá pass.
+
+**Giai đoạn 1: đã đạt DoD (28/10/2026).** Admin tạo phim, thể loại, phòng + sơ đồ ghế, bảng giá, ngày lễ, suất chiếu và combo qua UI (kiểm chứng bằng Playwright); chồng giờ → `409 SHOWTIME_OVERLAP` (kể cả 10 request đồng thời); test tính giá (múi giờ, qua nửa đêm, ngày lễ, giá chốt) pass.
 
 ---
 
 ## Giai đoạn 2 — Giữ ghế ⭐ (tuần 7–10)
 
 ### Tuần 7: Luồng giữ ghế
-- [ ] **2.1** `BookingService.hold()`: interactive transaction + raw SQL theo mục 4 của PLAN; `FOR UPDATE NOWAIT`, map lỗi `55P03` thành `409`; kiểm tra `rowCount`
+- [ ] **2.1** `BookingService.hold()`: interactive transaction + raw SQL theo mục 4 của PLAN; `FOR UPDATE NOWAIT`, map lỗi `55P03` thành `409`; kiểm tra `rowCount`. **Sau khi khóa ghế, đọc lại `showtimes.status`** và từ chối nếu `CANCELLED`: hủy suất (1.14) khóa `showtimes` `FOR NO KEY UPDATE` rồi mọi `showtime_seats` của suất `FOR UPDATE ORDER BY seat_id`, nên hai luồng tuần tự hóa trên ghế; INSERT booking chỉ cần khóa key-share trên dòng suất nên không deadlock với lần hủy
 - [ ] **2.2** Validate:
   - tối đa 6 ghế
   - ghế đôi phải chọn theo cặp
@@ -216,6 +218,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 
 | Hạng mục | Ghi chú |
 |---|---|
+| Thời gian dọn phòng `SHOWTIME_CLEANUP_MINUTES` | Mặc định **15 phút** (env, số nguyên ≥ 0), dùng cho `endsAt = startsAt + thời lượng + dọn phòng` từ 1.13. Chờ chủ dự án xác nhận giá trị. Đổi giá trị chỉ áp dụng cho suất tạo sau đó |
 | Tên ngày lễ (`Holiday.name`, nullable) | Chưa thêm cột. Khi cần, gom vào **một** migration chỉ thêm cột nullable (expand-only, như migration `movie_synopsis`), không đổi dữ liệu cũ |
 
 ---
