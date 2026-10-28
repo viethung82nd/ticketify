@@ -6,6 +6,17 @@
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) and are checked by commitlint in the `commit-msg` hook.
 - The `pre-commit` hook runs ESLint + Prettier on staged files (lint-staged). Never bypass hooks with `--no-verify`.
 
+## Tests that need OS signals
+
+A suite that sends real signals (`SIGTERM`, `SIGINT`…) to a child process is opt-in: it runs only when `RUN_SIGNAL_TESTS=1` and the platform is not Windows (Node cannot deliver a signal to another process there: `process.kill()` is a hard `TerminateProcess`). Gate it with the same two lines as `worker-shutdown.int-spec.ts`:
+
+```ts
+const signalTestsEnabled = process.env.RUN_SIGNAL_TESTS === '1' && process.platform !== 'win32';
+const describeSignal = signalTestsEnabled ? describe : describe.skip;
+```
+
+A plain `pnpm test:integration` (and the `ci` job) skips these suites. They run in their own workflow on `ubuntu-latest`, which sets `RUN_SIGNAL_TESTS=1` at job level and runs only that suite (see `.github/workflows/worker-shutdown.yml`). Never set the variable in `ci.yml`.
+
 ## Code rules
 
 - No `any`, no disabling lint rules to make CI green.
