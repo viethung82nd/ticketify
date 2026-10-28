@@ -101,7 +101,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **2.13** FE: chọn combo, tóm tắt đơn, đếm ngược theo `expiresAt`, màn hình báo hết hạn. Đồng hồ theo giờ máy chủ: `serverOffsetMs` từ header `Date` (API thêm `exposedHeaders: ['Date']` vào CORS), không đọc được → độ lệch 0 + cảnh báo. Playwright 2 trình duyệt (realtime, xung đột, mất kết nối, đồng hồ lệch 10 phút, hết hạn, bàn phím, giới hạn 6 ghế/ghế đôi) chạy tay trên `localhost`; đưa vào CI ở 5.8
 
 ### Tuần 10: Kịch bản A, B
-- [x] **2.14** Kịch bản A: 500 request song song giữ 1 ghế (pool đủ lớn, dùng client riêng). Kỳ vọng đúng 1 thành công, không có 5xx. `test/scenarios/scenario-a-single-seat.spec.ts`: 500 user khác nhau, 10 lần liên tiếp, mỗi lần một suất mới; `DATABASE_POOL_MAX` 40; client `node:http` một agent keep-alive, `maxSockets` 500 (Linux) / 200 (Windows); `pg_stat_activity` lấy mẫu mỗi 50 ms. **Kết quả CI** ([run](https://github.com/viethung82nd/ticketify/actions/runs/40743857260), ubuntu-latest, Postgres 16.15, Redis 7.4.12): 10/10 lần đúng 1 × `201`, 499 × `409` (`SEAT_LOCKED` 369–372, `SEAT_UNAVAILABLE` 127–130), 0 `5xx`, 0 lỗi kết nối; mỗi lần 1,29–1,76 s, p50 0,66–1,02 s, p95 1,23–1,69 s, p99 1,28–1,74 s; pool bận tối đa 13/40 (`active` ≤ 2), không lần lấy mẫu nào chạm 40. Trên Windows (Postgres trong Docker Desktop) pool chạm 40/40, phần lớn là `idle in transaction` (`active` ≤ 6): ghi trong README, nghiệm thu lấy trên Linux
+- [x] **2.14** Kịch bản A: 500 request song song giữ 1 ghế (pool đủ lớn, dùng client riêng). Kỳ vọng đúng 1 thành công, không có 5xx. `test/scenarios/scenario-a-single-seat.spec.ts`: 500 user khác nhau, 10 lần liên tiếp, mỗi lần một suất mới; `DATABASE_POOL_MAX` 40; client `node:http` một agent keep-alive, `maxSockets` 500 (Linux) / 200 (Windows); `pg_stat_activity` lấy mẫu mỗi 50 ms. **Kết quả CI** ([run](https://github.com/viethung82nd/ticketify/actions/runs/40743857260), ubuntu-latest, Postgres 16.15, Redis 7.4.12): 10/10 lần đúng 1 × `201`, 499 × `409` (`SEAT_LOCKED` 369–372, `SEAT_UNAVAILABLE` 127–130), 0 `5xx`, 0 lỗi kết nối; mỗi lần 1,29–1,76 s, p50 0,66–1,02 s, p95 1,23–1,69 s, p99 1,28–1,74 s; pool bận tối đa 13/40 (`active` ≤ 2), không lần lấy mẫu nào chạm 40. Trên Windows (Postgres trong Docker Desktop) pool chạm 40/40, phần lớn là `idle in transaction` (`active` ≤ 6): ghi trong README, nghiệm thu lấy trên Linux. Chủ dự án chốt (29/10/2026): kịch bản A bỏ qua trên Windows (`process.platform !== 'win32'`, như suite shutdown); kịch bản B vẫn chạy trên Windows
 - [x] **2.15** Kịch bản B: các nhóm ghế giao nhau, chạy nhiều vòng ngẫu nhiên. Kỳ vọng all-or-nothing, không deadlock. `test/scenarios/scenario-b-overlapping-groups.spec.ts`: phòng 10×12, mỗi vòng 40–60 request đồng thời, mỗi request 1–6 ghế từ cùng 24 ghế (A5–A12, B5–B12, C5–C12, 3 cặp ghế đôi chọn đủ cặp), seed cố định theo vòng; kiểm bằng SQL sau mỗi vòng. **Kết quả CI** ([run](https://github.com/viethung82nd/ticketify/actions/runs/40743857260)): 50/50 vòng pass, 2512 request, 401 × `201`, 2111 × `409`, 888 ghế được giữ, 0 vi phạm, 0 `5xx`. `deadlock detected` trong log Postgres: 0 (số liệu chính); `pg_stat_database.deadlocks`: 0 (tham khảo). Thử làm hỏng code tạm thời (không commit): bỏ một ghế khỏi UPDATE → 19 vi phạm all-or-nothing; bỏ kiểm tra ghế đã bị giữ → 48 vi phạm ghế thuộc hai đơn. Workflow `Booking scenarios` chạy cho PR đụng bookings/rooms/showtimes/realtime/queue/shared/scenarios, push lên `main` và chạy tay
 - [x] **2.16** Sửa lỗi phát sinh; vẽ sequence diagram luồng giữ ghế (Mermaid) vào `docs/`. Kịch bản A và B không phát hiện lỗi nào trong code giữ ghế (không có commit sửa). `docs/sequence-hold.md`: giữ ghế, hết hạn, hủy, kèm bảng thứ tự khóa; kiểm tra bằng `mmdc` 12.0.0. Kèm `DELETE /bookings/:id` (đã duyệt, xem "Đã chốt"); test `booking-cancel.int-spec.ts` gồm 20 vòng đua với `expireBooking` và `hold()` của người khác
 
@@ -179,7 +179,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 
 ### Tuần 20: Load test
 - [ ] **6.1** Script k6 (`constant-arrival-rate`): suất chiếu hot, traffic hỗn hợp; seed dữ liệu lớn
-- [ ] **6.2** Chạy test, ghi đầy đủ cấu hình máy và DB; sau mỗi lần chạy query SQL xác nhận 0 ghế/vé trùng
+- [ ] **6.2** Chạy test, ghi đầy đủ cấu hình máy và DB; sau mỗi lần chạy query SQL xác nhận 0 ghế/vé trùng. Số liệu load test phải ghi rõ `DATABASE_POOL_MAX` đang dùng; không lấy số liệu với pool 40 (chỉ dùng cho kịch bản A, 2.14) làm kết quả production, mặc định production là 10
 - [ ] **6.3** Tối ưu: `EXPLAIN ANALYZE` các truy vấn nóng, thêm index, chỉnh pool size; cache danh sách phim (tùy chọn)
 
 ### Tuần 21: Chất lượng & bảo mật
@@ -189,7 +189,7 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
   - cấu hình cookie, CORS, helmet
   - rate limit
   - `pnpm audit`
-- [ ] **6.6** Viết `docs/LOAD_TEST.md` với số liệu đo thực tế
+- [ ] **6.6** Viết `docs/LOAD_TEST.md` với số liệu đo thực tế. Số liệu load test phải ghi rõ `DATABASE_POOL_MAX` đang dùng; không lấy số liệu với pool 40 (chỉ dùng cho kịch bản A, 2.14) làm kết quả production, mặc định production là 10
 
 **DoD:** có báo cáo load test; đạt ngưỡng coverage; không còn lỗ hổng mức cao.
 
