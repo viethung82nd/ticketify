@@ -1,7 +1,7 @@
 name: Worker shutdown (Linux)
 
 # Real SIGTERM against the real worker process (worker-shutdown.int-spec.ts, ROADMAP 2.6).
-# Only for changes that can affect how the worker stops, and on main.
+# The suite is opt-in (RUN_SIGNAL_TESTS=1); only this workflow turns it on.
 on:
   pull_request:
     paths:
@@ -13,6 +13,10 @@ on:
       - '.github/workflows/worker-shutdown.yml'
   push:
     branches: [main]
+  # Weekly, for regressions from changes outside the paths above (Monday 02:00 UTC).
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
 
 concurrency:
   group: worker-shutdown-${{ github.ref }}
@@ -26,6 +30,35 @@ jobs:
     name: worker shutdown on SIGTERM
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      RUN_SIGNAL_TESTS: '1'
+      # Service containers below instead of Testcontainers. No storage: the suite never calls S3.
+      TEST_DATABASE_URL: postgresql://ticketify:ticketify@localhost:5432/ticketify
+      TEST_REDIS_URL: redis://localhost:6379
+    # Same images as docker-compose.yml and test/support/test-env.ts.
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_USER: ticketify
+          POSTGRES_PASSWORD: ticketify
+          POSTGRES_DB: ticketify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ticketify"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4.12-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -44,13 +77,16 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Postgres + Redis via Testcontainers; the suite compiles the worker itself.
+      - name: Build
+        run: pnpm build
+
+      # The suite also compiles the worker itself (dist/.worker-shutdown) from the current sources.
       - name: Worker shutdown test
-        run: pnpm --filter @ticketify/api test:integration worker-shutdown --verbose
+        run: pnpm --filter @ticketify/api test:integration -- worker-shutdown
 
       - name: Upload worker logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: worker-shutdown-logs
           path: artifacts/worker-shutdown/

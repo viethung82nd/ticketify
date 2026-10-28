@@ -112,13 +112,15 @@ function readable(line: string): string {
  * Worker shutdown end to end: the real worker process (compiled from src/ in beforeAll), a real
  * SIGTERM, real Postgres and Redis (ROADMAP 2.6).
  *
- * Skipped on Windows: Node cannot deliver SIGTERM to another process there (`process.kill()`
- * ends it with TerminateProcess, a hard kill no handler ever sees), so the shutdown path cannot
- * run. CI runs it on ubuntu-latest.
+ * Opt-in with RUN_SIGNAL_TESTS=1, on Linux/macOS only. The suite sends a real SIGTERM to a
+ * child process, which Windows cannot do (`process.kill()` ends it with TerminateProcess, a hard
+ * kill no handler ever sees). Only the worker-shutdown workflow sets the variable, so a plain
+ * `pnpm test:integration` skips it everywhere.
  */
-const describeWithSignals = process.platform === 'win32' ? describe.skip : describe;
+const signalTestsEnabled = process.env.RUN_SIGNAL_TESTS === '1' && process.platform !== 'win32';
+const describeSignal = signalTestsEnabled ? describe : describe.skip;
 
-describeWithSignals('Worker shutdown on SIGTERM (real process, Linux)', () => {
+describeSignal('Worker shutdown on SIGTERM (real process, Linux)', () => {
   let db: TestDatabase;
   let redis: TestRedis;
   let queue: Queue;
