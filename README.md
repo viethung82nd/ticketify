@@ -61,6 +61,7 @@ API **không khởi động** nếu biến môi trường thiếu hoặc sai: l�
 | `pnpm build` | Build shared, API, web |
 | `pnpm db:migrate` | `prisma migrate dev` (tạo migration mới khi đổi schema) |
 | `pnpm db:deploy` / `pnpm db:seed` | Áp dụng migration / seed dữ liệu mẫu |
+| `pnpm --filter @ticketify/api db:cleanup-test-data -- [--prefix "<tên phòng>"] [--apply]` | Xóa phòng có tên bắt đầu bằng tiền tố (mặc định `Phòng W8 Expiry`) cùng ghế, suất, ghế của suất và đơn của các suất đó, chỉ trên DB local. Không có `--apply` thì chỉ in số bản ghi sẽ xóa; dừng, không xóa gì nếu đơn nào đã có payment hoặc vé |
 
 ### Integration test
 
