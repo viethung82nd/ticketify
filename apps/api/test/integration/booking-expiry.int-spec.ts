@@ -349,7 +349,8 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
 
       await expect(expiry.expire(booking.id)).resolves.toEqual({
         outcome: 'expired',
-        releasedSeats: 2,
+        showtimeId: st.id,
+        releasedSeatIds: [seat('A1'), seat('A2')].sort(),
       });
       await expect(expiry.expire(booking.id)).resolves.toEqual({ outcome: 'noop' });
 
@@ -415,7 +416,11 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
       expect(await bookingStatus(a.id)).toBe('PENDING');
       const b = await held(await newUser(), st.id, [seat('A1')]);
 
-      await expect(expiry.expire(a.id)).resolves.toEqual({ outcome: 'expired', releasedSeats: 1 });
+      await expect(expiry.expire(a.id)).resolves.toEqual({
+        outcome: 'expired',
+        showtimeId: st.id,
+        releasedSeatIds: [seat('A2')],
+      });
 
       expect(await bookingStatus(a.id)).toBe('EXPIRED');
       expect(await seatRow(st.id, seat('A1'))).toEqual({
@@ -441,7 +446,11 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
       });
       clock.advance({ minutes: HOLD_MINUTES });
 
-      await expect(expiry.expire(a.id)).resolves.toEqual({ outcome: 'expired', releasedSeats: 1 });
+      await expect(expiry.expire(a.id)).resolves.toEqual({
+        outcome: 'expired',
+        showtimeId: st.id,
+        releasedSeatIds: [seat('A2')],
+      });
 
       expect(await seatRow(st.id, seat('A1'))).toEqual({
         status: 'SOLD',

@@ -8,6 +8,13 @@ import type { BookingExpiryService } from './booking-expiry.service';
 import type { ExpireOutcome } from './expire-booking';
 
 const BOOKING_ID = '01a17e75-7100-7679-b8b1-000000000001';
+const SHOWTIME_ID = '01a17e75-7100-7679-b8b1-0000000000a1';
+const SEAT_ID = '01a17e75-7100-7679-b8b1-0000000000c1';
+const EXPIRED: ExpireOutcome = {
+  outcome: 'expired',
+  showtimeId: SHOWTIME_ID,
+  releasedSeatIds: [SEAT_ID],
+};
 
 /** What Prisma throws when `lock_timeout` ends a wait (driver-adapter error, SQLSTATE 55P03). */
 const lockTimeout = Object.assign(new Error('canceling statement due to lock timeout'), {
@@ -34,11 +41,12 @@ describe('BookingExpiryProcessor (expire-booking job)', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('returns the outcome of expireBooking for the booking of the job', async () => {
-    const { processor, expire, job } = setup({ outcome: 'expired', releasedSeats: 2 });
+    const { processor, expire, job } = setup(EXPIRED);
 
     await expect(processor.process(job, 'token')).resolves.toEqual({
       outcome: 'expired',
-      releasedSeats: 2,
+      showtimeId: SHOWTIME_ID,
+      releasedSeatIds: [SEAT_ID],
     });
     expect(expire).toHaveBeenCalledWith(BOOKING_ID);
   });

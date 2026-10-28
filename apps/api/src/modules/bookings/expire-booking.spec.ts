@@ -6,6 +6,9 @@ import { expireBooking } from './expire-booking';
 const at = (iso: string): Date => new FakeClock(iso).now();
 const BOOKING_ID = '01a17e75-7100-7679-b8b1-000000000001';
 const HOLD_UNTIL = at('2026-11-01T10:15:00.000Z');
+const SHOWTIME_ID = '01a17e75-7100-7679-b8b1-0000000000a1';
+const SEAT_A = '01a17e75-7100-7679-b8b1-0000000000c1';
+const SEAT_B = '01a17e75-7100-7679-b8b1-0000000000c2';
 
 /** One SQL statement the mock transaction received: the text (whitespace squeezed) and values. */
 interface Statement {
@@ -34,7 +37,9 @@ function mockTx(rows: unknown[][], affected: number[] = []) {
   return { tx: tx as unknown as Prisma.TransactionClient, statements };
 }
 
-const lockedBooking = (status: BookingStatus) => [{ status, hold_until: HOLD_UNTIL }];
+const lockedBooking = (status: BookingStatus) => [
+  { status, hold_until: HOLD_UNTIL, showtime_id: SHOWTIME_ID },
+];
 const writes = (statements: Statement[]) =>
   statements.filter((s) => s.sql.startsWith('UPDATE') || s.sql.startsWith('INSERT'));
 
@@ -89,11 +94,15 @@ describe('expireBooking', () => {
 
   it('expired from holdUntil on: booking EXPIRED, then its own HELD seats locked and released', async () => {
     const now = HOLD_UNTIL;
-    const { tx, statements } = mockTx([lockedBooking(BookingStatus.PENDING), []], [1, 2]);
+    const { tx, statements } = mockTx(
+      [lockedBooking(BookingStatus.PENDING), [], [{ seat_id: SEAT_B }, { seat_id: SEAT_A }]],
+      [1],
+    );
 
     await expect(expireBooking(tx, BOOKING_ID, now)).resolves.toEqual({
       outcome: 'expired',
-      releasedSeats: 2,
+      showtimeId: SHOWTIME_ID,
+      releasedSeatIds: [SEAT_A, SEAT_B],
     });
 
     const [, expire, lockSeats, release] = statements;
@@ -109,18 +118,19 @@ describe('expireBooking', () => {
     // Conditional release: only seats still HELD by this booking (lazy expiry, SOLD seats).
     expect(release?.sql).toBe(
       "UPDATE showtime_seats SET status = 'AVAILABLE', booking_id = NULL, held_until = NULL " +
-        "WHERE booking_id = $::uuid AND status = 'HELD'",
+        "WHERE booking_id = $::uuid AND status = 'HELD' RETURNING seat_id",
     );
     expect(release?.values).toEqual([BOOKING_ID]);
     expect(statements).toHaveLength(4);
   });
 
   it('expired with 0 released seats when another booking already took them all', async () => {
-    const { tx } = mockTx([lockedBooking(BookingStatus.PENDING), []], [1, 0]);
+    const { tx } = mockTx([lockedBooking(BookingStatus.PENDING), [], []], [1]);
 
     await expect(expireBooking(tx, BOOKING_ID, HOLD_UNTIL)).resolves.toEqual({
       outcome: 'expired',
-      releasedSeats: 0,
+      showtimeId: SHOWTIME_ID,
+      releasedSeatIds: [],
     });
   });
 });

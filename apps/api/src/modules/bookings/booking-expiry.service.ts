@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ClockService } from '../../infra/clock/clock.service';
 import { SQLSTATE, sqlStateOf } from '../../infra/prisma/prisma-errors';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { SeatEvents } from '../realtime/seat-events';
 import { expireBooking, type ExpireOutcome, type ExpireOutcomeKind } from './expire-booking';
 
 /** Bookings one sweep round looks at (ROADMAP 2.8). */
@@ -51,16 +52,26 @@ export class BookingExpiryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
+    private readonly seatEvents: SeatEvents,
   ) {}
 
-  expire(bookingId: string): Promise<ExpireOutcome> {
+  /**
+   * Expires one booking in its own transaction. Once that has committed, and only when the
+   * booking really expired and gave seats back, announces them (`seat:released`, best-effort):
+   * `noop`, `skipped`, `early` and a rolled-back transaction send nothing.
+   */
+  async expire(bookingId: string): Promise<ExpireOutcome> {
     // TODO(3.7): querydr ngoài transaction — read the booking's PENDING payment here, outside any
     // transaction, ask VNPay about it, then open the transaction below with the answer.
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // set_config(…, true) is SET LOCAL: it ends with this transaction.
       await tx.$queryRaw`SELECT set_config('lock_timeout', ${`${WORKER_LOCK_TIMEOUT_MS}ms`}, true)`;
       return expireBooking(tx, bookingId, this.clock.now());
     }, EXPIRE_TX);
+    if (result.outcome === 'expired') {
+      this.seatEvents.released(result.showtimeId, result.releasedSeatIds);
+    }
+    return result;
   }
 
   /**

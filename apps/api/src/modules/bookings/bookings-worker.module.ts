@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RealtimeWorkerModule } from '../realtime/realtime.module';
 import {
   BookingExpiryProcessor,
   DEFAULT_SWEEP_INTERVAL_MS,
@@ -6,8 +7,12 @@ import {
 } from './booking-expiry.processor';
 import { BookingExpiryService } from './booking-expiry.service';
 
-/** Booking jobs of the worker process: hold expiry and the sweep. No HTTP controller. */
+/**
+ * Booking jobs of the worker process: hold expiry and the sweep (which announce released seats
+ * through the Redis emitter). No HTTP controller.
+ */
 @Module({
+  imports: [RealtimeWorkerModule],
   providers: [
     BookingExpiryService,
     BookingExpiryProcessor,
