@@ -9,6 +9,7 @@ import { type AuthUser, CurrentUser } from '../../src/common/decorators/current-
 import { Roles } from '../../src/common/decorators/roles.decorator';
 import { ClockService } from '../../src/infra/clock/clock.service';
 import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
+import { RefreshTokenService } from '../../src/modules/auth/tokens/refresh-token.service';
 import { appTestEnv } from '../support/app-env';
 import { createTestDatabase, type TestDatabase } from '../support/database';
 import { bodyOf, cookieValue, errorOf, setCookieLine } from '../support/http';
@@ -456,6 +457,59 @@ describe('Auth (real Postgres + Redis)', () => {
       expect((await logout(refreshToken)).status).toBe(204);
       expect((await logout('unknown-token')).status).toBe(204);
       expect((await logout()).status).toBe(204);
+    });
+  });
+
+  describe('purgeExpired', () => {
+    it('deletes only expired tokens, in batches, and keeps rotated ones for reuse detection', async () => {
+      const service = app.get(RefreshTokenService);
+      const { email, session, refreshToken: rotated } = await signUp(); // expires START + 7d
+      const loggedOut = refreshTokenOf(await login(email)); // expires START + 7d
+      await logout(loggedOut);
+      clock.advance({ hours: 24 });
+      const current = refreshTokenOf(await refresh(rotated)); // expires START + 8d
+      await db.prisma.refreshToken.createMany({
+        data: Array.from({ length: 5 }, (_, i) => ({
+          userId: session.user.id,
+          tokenHash: sha256(`expired-${i}-${email}`),
+          expiresAt: new Date(Date.parse(START) - (i + 1) * 3_600_000),
+        })),
+      });
+      const tokenCount = () => db.prisma.refreshToken.count({ where: { userId: session.user.id } });
+      await expect(tokenCount()).resolves.toBe(8);
+
+      // Batch size 2 → three DELETE statements (2 + 2 + 1).
+      await expect(service.purgeExpired(2)).resolves.toBe(5);
+      const kept = await db.prisma.refreshToken.findMany({ where: { userId: session.user.id } });
+      expect(kept.map((token) => token.tokenHash).sort()).toEqual(
+        [rotated, loggedOut, current].map(sha256).sort(),
+      );
+      // The rotated token is still there, so presenting it again is still caught as reuse.
+      const reuse = await refresh(rotated);
+      expect(errorOf(reuse).code).toBe('REFRESH_TOKEN_REUSED');
+    });
+
+    it('removes a rotated predecessor once expired; its successor keeps working', async () => {
+      const service = app.get(RefreshTokenService);
+      const { session, refreshToken: first } = await signUp(); // expires START + 7d
+      clock.advance({ hours: 24 });
+      const second = refreshTokenOf(await refresh(first)); // expires START + 8d
+
+      clock.advance({ hours: 6 * 24 }); // START + 7d: `first` has just expired
+      // Tokens from earlier tests in this suite expire then too, so only a lower bound here.
+      await expect(service.purgeExpired()).resolves.toBeGreaterThanOrEqual(1);
+
+      const remaining = await db.prisma.refreshToken.findMany({
+        where: { userId: session.user.id },
+      });
+      expect(remaining.map((token) => token.tokenHash)).toEqual([sha256(second)]);
+      expect((await refresh(second)).status).toBe(200);
+    });
+
+    it('returns 0 when nothing has expired', async () => {
+      await signUp();
+
+      await expect(app.get(RefreshTokenService).purgeExpired()).resolves.toBe(0);
     });
   });
 
