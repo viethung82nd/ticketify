@@ -12,6 +12,7 @@ import { EditMoviePage, NewMoviePage } from '@/pages/admin/movie-form-page';
 import { RoomEditorPage } from '@/pages/admin/room-editor-page';
 import { NewRoomPage } from '@/pages/admin/room-form-page';
 import { NewShowtimePage } from '@/pages/admin/showtime-form-page';
+import { BookingPage } from '@/pages/booking-page';
 import { HomePage } from '@/pages/home-page';
 import { LoginPage } from '@/pages/login-page';
 import { MovieDetailPage } from '@/pages/movie-detail-page';
@@ -53,6 +54,11 @@ export const router = createBrowserRouter([
           { path: 'admin/showtimes/new', element: <NewShowtimePage /> },
           { path: 'admin/combos', element: <AdminCombosPage /> },
         ],
+      },
+      {
+        // Booking needs an account (PLAN §1); the realtime seat map too (the socket needs a token).
+        element: <RequireAuth />,
+        children: [{ path: 'showtimes/:id/book', element: <BookingPage /> }],
       },
       {
         element: <RequireAuth roles={[Role.STAFF, Role.ADMIN]} />,
