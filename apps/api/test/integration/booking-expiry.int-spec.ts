@@ -575,6 +575,23 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
       expect(await job?.getState()).toBe('delayed');
     });
 
+    it('enqueuing the same booking twice keeps one job, whose id has no ":"', async () => {
+      const { seat, showtime: st } = await scene();
+      const booking = await held(await newUser(), st.id, [seat('A1')]);
+      const producer = app.get(BookingQueueProducer);
+
+      // The hold enqueued it once; a retry (or a second API instance) enqueues it again.
+      await producer.enqueueExpiry(booking.id, 1_000);
+
+      const jobs = (await producer.queue.getJobs(['delayed', 'waiting', 'active'])).filter(
+        (job) => (job.data as { bookingId?: string }).bookingId === booking.id,
+      );
+      expect(jobs.map((job) => job.id)).toEqual([`expire-booking-${booking.id}`]);
+      expect(jobs[0]?.id).not.toContain(':');
+      // The first one stays as it was: BullMQ ignores an add with an existing job id.
+      expect(jobs[0]?.opts.delay).toBe(HOLD_MINUTES * 60_000);
+    });
+
     it.each([
       [
         'refuses the job',
