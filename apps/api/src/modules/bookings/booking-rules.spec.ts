@@ -1,9 +1,15 @@
-import { BookingErrorCode, ShowtimeSeatStatus, ShowtimeStatus } from '@ticketify/shared';
+import {
+  BookingErrorCode,
+  BookingStatus,
+  ShowtimeSeatStatus,
+  ShowtimeStatus,
+} from '@ticketify/shared';
 import { FakeClock } from '../../infra/clock/testing/fake-clock';
 import {
   bookingCode,
   bookingTotals,
   holdDeadlines,
+  isHoldExpired,
   missingCouplePartners,
   missingSeatIds,
   showtimeRefusal,
@@ -134,5 +140,30 @@ describe('bookingTotals', () => {
 describe('bookingCode', () => {
   it('10 characters without the look-alikes 0/O and 1/I', () => {
     for (let i = 0; i < 200; i++) expect(bookingCode()).toMatch(/^[A-HJ-NP-Z2-9]{10}$/);
+  });
+});
+
+describe('isHoldExpired (the `expired` flag)', () => {
+  const holdUntil = at('2026-11-01T10:15:00.000Z');
+
+  it('PENDING from holdUntil on → true, even though nothing marked it EXPIRED yet', () => {
+    expect(
+      isHoldExpired({ status: BookingStatus.PENDING, holdUntil }, at('2026-11-01T10:14:59.999Z')),
+    ).toBe(false);
+    expect(isHoldExpired({ status: BookingStatus.PENDING, holdUntil }, holdUntil)).toBe(true);
+    expect(
+      isHoldExpired({ status: BookingStatus.PENDING, holdUntil }, at('2026-11-02T00:00:00.000Z')),
+    ).toBe(true);
+  });
+
+  it('any other status → false, whatever the time (CONFIRMED stays valid; EXPIRED says it already)', () => {
+    const late = at('2026-11-02T00:00:00.000Z');
+    for (const status of [
+      BookingStatus.CONFIRMED,
+      BookingStatus.EXPIRED,
+      BookingStatus.NEEDS_REVIEW,
+    ]) {
+      expect(isHoldExpired({ status, holdUntil }, late)).toBe(false);
+    }
   });
 });

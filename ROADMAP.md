@@ -89,11 +89,11 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **2.5** Unit + integration test cho các nhánh validate và idempotency
 
 ### Tuần 8: Hết hạn & worker
-- [ ] **2.6** Entry point `main.worker.ts`; module BullMQ dùng chung cho API và worker
-- [ ] **2.7** Delayed job `expire-booking` và hàm `expireBooking()` (chưa có querydr, sẽ thêm ở 3.10). Gắn job vào `ExpirationScheduler.schedule(bookingId, holdUntil)`: hook rỗng từ tuần 7, được gọi sau khi transaction giữ ghế commit
-- [ ] **2.8** Cron quét mỗi phút với `SKIP LOCKED`
-- [ ] **2.9** `GET /bookings/:id`, `GET /me/bookings`; rate limit `POST /bookings`
-- [ ] **2.10** Test hết hạn bằng `ClockService`: job chạy 2 lần, cron và job chạy song song, ghế đã bị booking khác lấy (lazy expiry)
+- [x] **2.6** Entry point `main.worker.ts`; module BullMQ dùng chung cho API và worker. `main.worker.ts` dùng `createApplicationContext(WorkerModule)` (không HTTP); `QueueModule` (`infra/queue`) cung cấp `BookingQueueProducer` (API) và `QueueWorkers` (worker), mỗi bên một kết nối ioredis riêng với `maxRetriesPerRequest: null` (không dùng lại client `REDIS`). Worker concurrency 5; `SIGTERM`/`SIGINT` → đóng worker, chờ job đang chạy tối đa 10 giây, rồi đóng DB và Redis. Script `start:worker`, `dev:worker`
+- [x] **2.7** Delayed job `expire-booking` và hàm `expireBooking()` (chưa có querydr, sẽ thêm ở 3.7; điểm chèn `TODO(3.7)`). `ExpirationScheduler` đổi tên thành `BookingExpirationQueue`, gọi sau khi transaction giữ ghế commit; enqueue lỗi chỉ ghi log, request vẫn `201` (cron 2.8 là lưới an toàn). `jobId = expire-booking-{bookingId}`: BullMQ từ chối id tự đặt có đúng một dấu `:`, nên không dùng được `expire-booking:{id}` (lưu ý cho jobId `{eventId}:{action}` ở 4.1). **Thứ tự khóa khi giải phóng ghế** (28/10/2026): `bookings` `FOR UPDATE SKIP LOCKED` rồi các `showtime_seats` `HELD` của đơn `FOR UPDATE ORDER BY seat_id`. Không có vòng chờ: giữ ghế không chờ khóa nào (`NOWAIT`), hủy suất khóa `showtimes` rồi `showtime_seats` và không bao giờ khóa `bookings`
+- [x] **2.8** Cron quét mỗi phút với `SKIP LOCKED`: job lặp của BullMQ (`upsertJobScheduler`, 60 giây), chỉ trong worker. Câu `SELECT` lấy 100 đơn quá hạn không khóa; `SKIP LOCKED` nằm ở bước khóa từng đơn trong `expireBooking`. Đủ 100 thì quét tiếp ngay, tối đa 10 vòng mỗi job
+- [x] **2.9** `GET /bookings/:id`, `GET /me/bookings`; rate limit `POST /bookings`. Đơn của người khác → `404 BOOKING_NOT_FOUND`; trường `expired` (PENDING quá `holdUntil`); `429 TOO_MANY_ATTEMPTS` theo `BOOKING_RATE_LIMIT_MAX`/`BOOKING_RATE_LIMIT_WINDOW_SECONDS` (10 / 60 giây), đếm trước luồng idempotency
+- [x] **2.10** Test hết hạn bằng `ClockService`: job chạy 2 lần, cron và job chạy song song, ghế đã bị booking khác lấy (lazy expiry). `booking-expiry.int-spec.ts`: thêm ghế `SOLD`, cron 150 đơn, enqueue lỗi sau commit, worker thật và tắt worker giữa job, đọc đơn, rate limit
 
 ### Tuần 9: Realtime & UI chọn ghế
 - [ ] **2.11** Socket.IO gateway: xác thực JWT khi handshake, join/leave room `showtime:{id}`, Redis adapter; worker phát sự kiện qua redis-emitter; chỉ emit sau khi commit
