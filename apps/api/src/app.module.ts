@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
-import { Module, ValidationPipe } from '@nestjs/common';
+import { type MiddlewareConsumer, Module, type NestModule, ValidationPipe } from '@nestjs/common';
 import { APP_FILTER, APP_PIPE } from '@nestjs/core';
+import cookieParser from 'cookie-parser';
 import { LoggerModule } from 'nestjs-pino';
 import { validationExceptionFactory } from './common/errors/api-error';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -10,7 +11,9 @@ import { AppConfig } from './config/app-config.service';
 import { ClockModule } from './infra/clock/clock.module';
 import { PrismaModule } from './infra/prisma/prisma.module';
 import { RedisModule } from './infra/redis/redis.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { UsersModule } from './modules/users/users.module';
 
 const requestIdFrom = (req: IncomingMessage): string => {
   const header = req.headers['x-request-id'];
@@ -40,6 +43,8 @@ const requestIdFrom = (req: IncomingMessage): string => {
     PrismaModule,
     RedisModule,
     HealthModule,
+    AuthModule,
+    UsersModule,
   ],
   providers: [
     {
@@ -54,4 +59,9 @@ const requestIdFrom = (req: IncomingMessage): string => {
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Needed for the refresh-token cookie. '*path' is the path-to-regexp v8 catch-all.
+    consumer.apply(cookieParser()).forRoutes('*path');
+  }
+}

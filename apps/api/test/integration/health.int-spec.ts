@@ -42,6 +42,7 @@ describe('GET /health (real Postgres + Redis)', () => {
       SMTP_HOST: 'localhost',
       SMTP_PORT: '1025',
       SMTP_FROM: 'test@ticketify.local',
+      JWT_ACCESS_SECRET: 'integration-test-access-secret-0123456789',
     });
     ({ AppModule } = await import('../../src/app.module.js'));
     ({ REDIS } = await import('../../src/infra/redis/redis.module.js'));
