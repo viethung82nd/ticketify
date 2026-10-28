@@ -14,8 +14,9 @@ const READY_TIMEOUT_MS = 3_000;
  * Resolves once the client is ready, or after the timeout. Without this, the offline-queue-less
  * client rejects commands issued right after boot (e.g. the first /health probe).
  * If Redis is down the app still starts; /health reports it and ioredis keeps reconnecting.
+ * Also used by the BullMQ producer connection (infra/queue), which fails fast the same way.
  */
-function waitUntilReady(client: Redis): Promise<void> {
+export function waitUntilReady(client: Redis): Promise<void> {
   if (client.status === 'ready') return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(() => {

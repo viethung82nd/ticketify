@@ -6,7 +6,9 @@
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",
+    "dev:worker": "nest start --watch --entryFile main.worker",
     "start": "node dist/main.js",
+    "start:worker": "node dist/main.worker.js",
     "typecheck": "tsc --noEmit",
     "test:unit": "node --experimental-vm-modules --no-warnings=ExperimentalWarning node_modules/jest/bin/jest.js --config jest.unit.config.js",
     "postinstall": "prisma generate",
@@ -30,6 +32,7 @@
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "@ticketify/shared": "workspace:*",
+    "bullmq": "^6.5.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",

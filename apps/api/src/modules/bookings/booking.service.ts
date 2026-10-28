@@ -16,6 +16,7 @@ import type { Prisma } from '../../generated/prisma/client';
 import { ClockService } from '../../infra/clock/clock.service';
 import { isConstraintViolation, SQLSTATE, sqlStateOf } from '../../infra/prisma/prisma-errors';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { BookingExpirationQueue } from './booking-expiration-queue';
 import {
   bookingCode,
   bookingTotals,
@@ -27,7 +28,6 @@ import {
   showtimeRefusal,
   unavailableSeatIds,
 } from './booking-rules';
-import { ExpirationScheduler } from './expiration-scheduler';
 import { requestHash } from './request-hash';
 
 type Tx = Prisma.TransactionClient;
@@ -171,7 +171,7 @@ export class BookingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
-    private readonly scheduler: ExpirationScheduler,
+    private readonly expirations: BookingExpirationQueue,
     config: AppConfig,
   ) {
     this.holdTtlSeconds = config.get('HOLD_TTL_SECONDS');
@@ -211,7 +211,7 @@ export class BookingService {
       return { booking: await this.view(outcome.id), created: false };
     }
     // After commit: a job must never see a booking that was rolled back.
-    await this.scheduler.schedule(outcome.id, outcome.holdUntil);
+    await this.expirations.schedule(outcome.id, outcome.holdUntil);
     return { booking: await this.view(outcome.id), created: true };
   }
 
