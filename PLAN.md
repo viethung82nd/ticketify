@@ -114,7 +114,7 @@ Ticket       : ISSUED ──► CHECKED_IN
 |---|---|---|
 | `User` | email, passwordHash (argon2), fullName, phone, role | unique(email) |
 | `RefreshToken` | userId, tokenHash, expiresAt, revokedAt, replacedBy | Rotation, phát hiện token bị dùng lại |
-| `Movie`, `Genre`, `MovieGenre` | title, slug, duration, posterKey, ageRating, releaseDate, status | unique(slug) |
+| `Movie`, `Genre`, `MovieGenre` | title, slug, synopsis, duration, posterKey, ageRating, releaseDate, status | unique(slug). Bổ sung 10/2026: `synopsis` (mô tả phim, tùy chọn) |
 | `Room` | name, rows, cols | |
 | `Seat` | roomId, row, number, type (`STANDARD/VIP/COUPLE`), coupleGroup, isActive | unique(roomId,row,number) |
 | `Showtime` | movieId, roomId, startsAt, endsAt, status (`SCHEDULED/CANCELLED`) | **Exclusion constraint** (btree_gist): không có 2 suất chồng giờ trong một phòng, `WHERE status <> 'CANCELLED'` |

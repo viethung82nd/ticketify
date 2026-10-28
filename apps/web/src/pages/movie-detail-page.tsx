@@ -106,6 +106,17 @@ export function MovieDetailPage() {
           </div>
         </div>
 
+        {movie.synopsis && (
+          <section aria-labelledby="noi-dung" className="mt-14 max-w-3xl space-y-3">
+            <h2 id="noi-dung" className="text-2xl font-bold text-cream">
+              Nội dung
+            </h2>
+            <p className="leading-relaxed whitespace-pre-line text-muted-foreground">
+              {movie.synopsis}
+            </p>
+          </section>
+        )}
+
         <section aria-labelledby="lich-chieu" className="mt-14 space-y-4">
           <h2 id="lich-chieu" className="text-2xl font-bold text-cream">
             Lịch chiếu

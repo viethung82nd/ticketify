@@ -158,6 +158,7 @@ export class MoviesService {
             data: {
               title: dto.title,
               slug,
+              synopsis: dto.synopsis ?? null,
               duration: dto.duration,
               ageRating: dto.ageRating,
               status: dto.status,
@@ -200,6 +201,7 @@ export class MoviesService {
           data: {
             title: dto.title,
             slug: dto.slug,
+            synopsis: dto.synopsis,
             duration: dto.duration,
             ageRating: dto.ageRating,
             status: dto.status,

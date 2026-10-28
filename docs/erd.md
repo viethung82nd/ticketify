@@ -62,6 +62,7 @@ erDiagram
         uuid id PK
         text title
         text slug UK
+        text synopsis "nullable, plot summary"
         int duration "minutes"
         text poster_key "nullable, object storage key"
         age_rating age_rating "P | K | T13 | T16 | T18 | C"

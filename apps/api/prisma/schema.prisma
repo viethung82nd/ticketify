@@ -169,6 +169,8 @@ model Movie {
   id          String      @id @default(uuid(7)) @db.Uuid
   title       String
   slug        String      @unique
+  /// Plot summary shown on the movie page. Length is limited by the API (CATALOG_LIMITS).
+  synopsis    String?
   /// Running time in minutes.
   duration    Int
   /// Object-storage key of the poster image.

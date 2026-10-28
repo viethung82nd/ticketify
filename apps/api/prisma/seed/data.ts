@@ -56,6 +56,7 @@ type GenreSlug = (typeof GENRES)[number]['slug'];
 export interface SeedMovie {
   slug: string;
   title: string;
+  synopsis: string;
   duration: number;
   ageRating: AgeRating;
   releaseDate: string;
@@ -68,6 +69,8 @@ export const MOVIES: SeedMovie[] = [
   {
     slug: 'mua-ha-cuoi-cung',
     title: 'Mùa Hạ Cuối Cùng',
+    synopsis:
+      'Mùa hè cuối cấp, bốn người bạn thân hẹn nhau một chuyến đi ra biển trước khi mỗi người một ngả. Chuyến đi ngắn ngủi buộc họ đối diện những điều chưa từng nói với nhau.',
     duration: 112,
     ageRating: 'T13',
     releaseDate: '2026-10-10',
@@ -77,6 +80,8 @@ export const MOVIES: SeedMovie[] = [
   {
     slug: 'biet-doi-sao-bang',
     title: 'Biệt Đội Sao Băng',
+    synopsis:
+      'Khi một trạm quan sát trên quỹ đạo mất liên lạc, một đội cứu hộ tạm thời gồm những người chưa từng làm việc cùng nhau phải đưa phi hành đoàn trở về trước khi cơn mưa sao băng ập tới.',
     duration: 128,
     ageRating: 'T16',
     releaseDate: '2026-10-24',
@@ -86,6 +91,8 @@ export const MOVIES: SeedMovie[] = [
   {
     slug: 'can-nha-so-13',
     title: 'Căn Nhà Số 13',
+    synopsis:
+      'Một gia đình chuyển đến căn nhà cũ cuối hẻm với giá thuê rẻ bất ngờ. Đêm đầu tiên, đồng hồ trong nhà đồng loạt dừng ở 3 giờ 13 phút.',
     duration: 104,
     ageRating: 'T18',
     releaseDate: '2026-09-19',
@@ -95,6 +102,8 @@ export const MOVIES: SeedMovie[] = [
   {
     slug: 'chu-meo-va-ngon-hai-dang',
     title: 'Chú Mèo Và Ngọn Hải Đăng',
+    synopsis:
+      'Chú mèo hoang Mướp sống cùng ông giữ hải đăng trên một hòn đảo nhỏ. Khi ngọn đèn bỗng tắt giữa mùa bão, Mướp phải băng qua cả hòn đảo để tìm cách thắp sáng lại.',
     duration: 95,
     ageRating: 'P',
     releaseDate: '2026-11-14',

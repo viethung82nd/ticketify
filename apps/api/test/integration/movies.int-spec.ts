@@ -28,6 +28,7 @@ const UNKNOWN_ID = '01a17e75-0000-7000-8000-000000000000';
 
 interface MovieInput {
   title: string;
+  synopsis?: string | null;
   duration: number;
   ageRating: string;
   status: string;
@@ -255,6 +256,7 @@ describe('Movies & genres (real Postgres + Redis, fake object storage)', () => {
         ageRating: 'T13',
         status: 'NOW_SHOWING',
         releaseDate: '2026-11-01',
+        synopsis: null,
         posterKey: null,
         posterUrl: null,
       });
@@ -269,6 +271,33 @@ describe('Movies & genres (real Postgres + Redis, fake object storage)', () => {
       const stored = await db.prisma.$queryRaw<{ release_date: string }[]>`
         SELECT release_date::text FROM movies WHERE id = ${created.id}::uuid`;
       expect(stored[0]?.release_date).toBe('2026-11-01');
+    });
+
+    it('stores a synopsis (trimmed), serves it publicly, and clears it with null or blank', async () => {
+      const text = 'Hai dòng.\nDòng thứ hai.';
+      const movie = await createMovie({ synopsis: `  ${text}  ` });
+      expect(movie.synopsis).toBe(text);
+
+      const detail = bodyOf<Movie>(await http().get(`/movies/${movie.slug}`));
+      expect(detail.synopsis).toBe(text);
+
+      const untouched = await admin('patch', `/admin/movies/${movie.id}`, { duration: 99 });
+      expect(bodyOf<AdminMovie>(untouched).synopsis).toBe(text);
+
+      for (const synopsis of [null, '   ']) {
+        await admin('patch', `/admin/movies/${movie.id}`, { synopsis: 'Tạm' });
+        const cleared = await admin('patch', `/admin/movies/${movie.id}`, { synopsis });
+        expect(cleared.status).toBe(200);
+        expect(bodyOf<AdminMovie>(cleared).synopsis).toBeNull();
+      }
+
+      const tooLong = await admin(
+        'post',
+        '/admin/movies',
+        movieInput({ synopsis: 'a'.repeat(2001) }),
+      );
+      expect(tooLong.status).toBe(400);
+      expect(fieldsOf(errorOf(tooLong).details)).toEqual(['synopsis']);
     });
 
     it('404 MOVIE_NOT_FOUND for unknown slugs and ids', async () => {

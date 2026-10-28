@@ -4,6 +4,8 @@ import { AgeRating, MovieStatus } from '../enums.js';
 /** Limits shared by the API DTOs and the web forms so both validate the same way. */
 export const CATALOG_LIMITS = {
   titleMax: 200,
+  /** Plot summary, in characters. */
+  synopsisMax: 2000,
   durationMin: 1,
   /** Minutes. */
   durationMax: 400,
@@ -79,6 +81,15 @@ const titleSchema = z
   .min(1, { error: 'Vui lòng nhập tên phim' })
   .max(CATALOG_LIMITS.titleMax, { error: `Tên phim tối đa ${CATALOG_LIMITS.titleMax} ký tự` });
 
+/** Optional plot summary; the API stores a blank one as `null`. */
+const synopsisSchema = z
+  .string()
+  .trim()
+  .max(CATALOG_LIMITS.synopsisMax, {
+    error: `Mô tả tối đa ${CATALOG_LIMITS.synopsisMax} ký tự`,
+  })
+  .nullable();
+
 const durationSchema = z
   .number({ error: 'Vui lòng nhập thời lượng (phút)' })
   .int({ error: 'Thời lượng phải là số phút nguyên' })
@@ -111,6 +122,7 @@ export const slugSchema = z
 /** `POST /admin/movies`. The slug is generated from the title. */
 export const createMovieRequestSchema = z.object({
   title: titleSchema,
+  synopsis: synopsisSchema.optional(),
   duration: durationSchema,
   ageRating: z.enum(AgeRating, { error: 'Vui lòng chọn độ tuổi' }),
   status: z.enum(MovieStatus, { error: 'Trạng thái không hợp lệ' }),
@@ -184,6 +196,8 @@ export const movieSchema = z.object({
   id: z.uuid(),
   title: z.string(),
   slug: z.string(),
+  /** Plot summary, `null` when not written yet. */
+  synopsis: z.string().nullable(),
   duration: z.number().int(),
   ageRating: z.enum(AgeRating),
   status: z.enum(MovieStatus),

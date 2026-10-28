@@ -17,3 +17,10 @@ export const blankToUndefined = ({ value }: { value: unknown }): unknown => {
   const trimmed = value.trim();
   return trimmed === '' ? undefined : trimmed;
 };
+
+/** Trims + NFC like `trimNfcValue`; a blank string becomes `null` (optional free text). */
+export const trimNfcBlankToNull = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().normalize('NFC');
+  return normalized === '' ? null : normalized;
+};

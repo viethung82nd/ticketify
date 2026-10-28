@@ -31,6 +31,7 @@ export function toMovieView(movie: MovieWithGenres, posterUrl: string | null): M
     id: movie.id,
     title: movie.title,
     slug: movie.slug,
+    synopsis: movie.synopsis,
     duration: movie.duration,
     ageRating: movie.ageRating,
     status: movie.status,

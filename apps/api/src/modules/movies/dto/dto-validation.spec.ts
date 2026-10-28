@@ -101,12 +101,51 @@ describe('CreateMovieDto', () => {
   it('rejects unknown fields such as a client-chosen slug', () => {
     expect(check(CreateMovieDto, { ...validMovie, slug: 'x' }).invalid).toEqual(['slug']);
   });
+
+  describe('synopsis', () => {
+    it('is optional and trimmed', () => {
+      expect(check(CreateMovieDto, validMovie).instance.synopsis).toBeUndefined();
+      expect(
+        check(CreateMovieDto, { ...validMovie, synopsis: '  Nội dung.\n ' }).instance,
+      ).toMatchObject({
+        synopsis: 'Nội dung.',
+      });
+    });
+
+    it.each(['', '   \n\t'])('stores blank %j as null', (synopsis) => {
+      const { instance, invalid } = check(CreateMovieDto, { ...validMovie, synopsis });
+
+      expect(invalid).toEqual([]);
+      expect(instance.synopsis).toBeNull();
+    });
+
+    it('accepts exactly the limit and rejects one character more', () => {
+      const max = CATALOG_LIMITS.synopsisMax;
+      expect(check(CreateMovieDto, { ...validMovie, synopsis: 'a'.repeat(max) }).invalid).toEqual(
+        [],
+      );
+      expect(
+        check(CreateMovieDto, { ...validMovie, synopsis: 'a'.repeat(max + 1) }).invalid,
+      ).toEqual(['synopsis']);
+    });
+
+    it('rejects a non-string', () => {
+      expect(check(CreateMovieDto, { ...validMovie, synopsis: 42 }).invalid).toEqual(['synopsis']);
+    });
+  });
 });
 
 describe('UpdateMovieDto', () => {
   it('accepts an empty patch and posterKey: null (remove poster)', () => {
     expect(check(UpdateMovieDto, {}).invalid).toEqual([]);
     expect(check(UpdateMovieDto, { posterKey: null }).invalid).toEqual([]);
+  });
+
+  it('accepts synopsis: null to clear it', () => {
+    const { instance, invalid } = check(UpdateMovieDto, { synopsis: null });
+
+    expect(invalid).toEqual([]);
+    expect(instance.synopsis).toBeNull();
   });
 
   it('rejects null for non-nullable fields instead of skipping them', () => {

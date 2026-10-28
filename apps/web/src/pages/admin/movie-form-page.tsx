@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { FormAlert } from '@/features/auth/auth-card';
 import { createMovie, updateMovie } from '@/features/catalog/catalog-api';
 import { catalogErrorMessage, errorCodeOf, errorFieldsOf } from '@/features/catalog/catalog-errors';
@@ -36,6 +37,7 @@ type MovieFormValues = z.output<typeof movieFormSchema>;
 const FORM_FIELDS: FieldPath<MovieFormInput>[] = [
   'title',
   'slug',
+  'synopsis',
   'duration',
   'ageRating',
   'status',
@@ -72,6 +74,7 @@ function MovieForm({ movie }: { movie?: AdminMovie }) {
       ? {
           title: movie.title,
           slug: movie.slug,
+          synopsis: movie.synopsis ?? '',
           duration: movie.duration,
           ageRating: movie.ageRating,
           status: movie.status,
@@ -79,7 +82,7 @@ function MovieForm({ movie }: { movie?: AdminMovie }) {
           genreIds: movie.genres.map((genre) => genre.id),
           posterKey: movie.posterKey,
         }
-      : { status: MovieStatus.COMING_SOON, genreIds: [], posterKey: null },
+      : { synopsis: '', status: MovieStatus.COMING_SOON, genreIds: [], posterKey: null },
   });
 
   const onSubmit = async (values: MovieFormValues) => {
@@ -112,6 +115,7 @@ function MovieForm({ movie }: { movie?: AdminMovie }) {
   };
 
   const title = useWatch({ control, name: 'title' }) ?? '';
+  const synopsisLength = (useWatch({ control, name: 'synopsis' }) ?? '').length;
 
   return (
     <form
@@ -168,6 +172,14 @@ function MovieForm({ movie }: { movie?: AdminMovie }) {
             </Select>
           </FormField>
         </div>
+
+        <FormField
+          label="Nội dung phim"
+          error={errors.synopsis}
+          hint={`Không bắt buộc. ${synopsisLength}/${CATALOG_LIMITS.synopsisMax} ký tự.`}
+        >
+          <Textarea rows={5} maxLength={CATALOG_LIMITS.synopsisMax} {...register('synopsis')} />
+        </FormField>
 
         <Controller
           control={control}

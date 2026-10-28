@@ -16,7 +16,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { trimNfcValue, trimValue } from '../../../common/dto/transforms';
+import { trimNfcBlankToNull, trimNfcValue, trimValue } from '../../../common/dto/transforms';
 import { IsIsoDate, OptionalNotNull } from '../../../common/dto/validators';
 
 const AGE_RATINGS = Object.values(AgeRating);
@@ -30,6 +30,17 @@ export class CreateMovieDto {
   @IsString()
   @Length(1, CATALOG_LIMITS.titleMax)
   title: string;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    maxLength: CATALOG_LIMITS.synopsisMax,
+    description: 'Plot summary; blank is stored as null',
+  })
+  @Transform(trimNfcBlankToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(CATALOG_LIMITS.synopsisMax)
+  synopsis?: string | null;
 
   @ApiProperty({ description: 'Minutes', minimum: 1, maximum: CATALOG_LIMITS.durationMax })
   @IsInt()
@@ -77,6 +88,17 @@ export class UpdateMovieDto {
   @IsString()
   @Length(1, CATALOG_LIMITS.titleMax)
   title?: string;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    maxLength: CATALOG_LIMITS.synopsisMax,
+    description: 'null or blank clears the summary',
+  })
+  @Transform(trimNfcBlankToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(CATALOG_LIMITS.synopsisMax)
+  synopsis?: string | null;
 
   @ApiPropertyOptional({ pattern: SLUG_PATTERN.source, maxLength: CATALOG_LIMITS.slugMax })
   @Transform(trimValue)
