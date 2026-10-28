@@ -31,6 +31,37 @@ describe('S3ObjectStorage presigning', () => {
     expect([...url.searchParams.keys()].filter((key) => /checksum/i.test(key))).toEqual([]);
   });
 
+  describe('with S3_PUBLIC_ENDPOINT', () => {
+    const publicStorage = new S3ObjectStorage(
+      testConfig({
+        S3_ENDPOINT: 'http://s3:9000',
+        S3_PUBLIC_ENDPOINT: 'https://files.example.com',
+        S3_BUCKET: 'posters-bucket',
+      }),
+      clock,
+    );
+
+    afterAll(() => publicStorage.onModuleDestroy());
+
+    it('signs browser URLs for the public origin, not the internal one', async () => {
+      const upload = new URL(
+        await publicStorage.presignUpload({
+          key: 'posters/a.png',
+          contentType: 'image/png',
+          contentLength: 1,
+          expiresInSeconds: 300,
+        }),
+      );
+      const download = new URL(await publicStorage.presignDownload('posters/a.png', 3600));
+
+      for (const url of [upload, download]) {
+        expect(url.origin).toBe('https://files.example.com');
+        expect(url.pathname).toBe('/posters-bucket/posters/a.png');
+        expect(url.searchParams.get('X-Amz-SignedHeaders')).toContain('host');
+      }
+    });
+  });
+
   it('signs a GET with the requested lifetime', async () => {
     const url = new URL(await storage.presignDownload('posters/a.png', 3600));
 

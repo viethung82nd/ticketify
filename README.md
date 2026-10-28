@@ -77,7 +77,7 @@ pnpm test:integration
 ## Danh mục phim và poster
 
 - **Upload poster hai bước**: `POST /admin/uploads/poster` trả về URL PUT đã ký (5 phút, ký cả `Content-Type` và `Content-Length`), trình duyệt PUT thẳng lên RustFS, rồi gửi `key` khi lưu phim. API kiểm tra object bằng `HEAD` trước khi nhận. Bucket cần CORS cho origin của web: `s3-init` trong `docker-compose.yml` đặt CORS theo `CORS_ORIGINS`.
-- **`posterUrl`** là URL GET đã ký, sống 1 giờ. URL được ký bằng `S3_ENDPOINT`, nên endpoint này phải truy cập được từ trình duyệt.
+- **`posterUrl`** là URL GET đã ký, sống 1 giờ. Chữ ký SigV4 gắn với host, nên URL trao cho trình duyệt (cả PUT lẫn GET) được ký cho `S3_PUBLIC_ENDPOINT` nếu có, ngược lại cho `S3_ENDPOINT`. API vẫn gọi `HEAD`/`DELETE` qua `S3_ENDPOINT`. Ở local hai giá trị trùng nhau (`http://localhost:9000`), để trống `S3_PUBLIC_ENDPOINT`. Khi deploy, ví dụ API trong Docker dùng `S3_ENDPOINT=http://s3:9000` còn trình duyệt đi qua Caddy thì đặt `S3_PUBLIC_ENDPOINT=https://files.example.com`. Origin công khai cũng phải có trong CORS của bucket.
 - **Tìm kiếm không dấu** (`GET /movies?q=`): so khớp `lower(translate(title, …))` với chuỗi tìm kiếm đã bỏ dấu, không cần cột mới hay extension `unaccent`. Giới hạn:
   - chỉ bỏ dấu các chữ cái tiếng Việt ở phía database (tìm `nino` không ra `Niño`);
   - quét tuần tự, không dùng index. Đủ cho danh mục vài trăm phim của một rạp; nếu cần nhanh hơn thì thêm `unaccent` + index `pg_trgm` bằng migration.

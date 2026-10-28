@@ -31,6 +31,18 @@ describe('validateEnv', () => {
     expect(env.LOGIN_RATE_LIMIT_WINDOW_SECONDS).toBe(900);
   });
 
+  it.each([
+    [undefined, undefined],
+    ['', undefined],
+    ['https://files.example.com', 'https://files.example.com'],
+  ])('S3_PUBLIC_ENDPOINT=%p is optional (blank = unset)', (raw, expected) => {
+    const env = validateEnv(
+      raw === undefined ? validEnv() : { ...validEnv(), S3_PUBLIC_ENDPOINT: raw },
+    );
+
+    expect(env.S3_PUBLIC_ENDPOINT).toBe(expected);
+  });
+
   it('coerces numbers and booleans', () => {
     const env = validateEnv({ ...validEnv(), PORT: '8080', S3_FORCE_PATH_STYLE: 'false' });
 
@@ -82,6 +94,8 @@ describe('validateEnv', () => {
     ['PORT', '70000'],
     ['CINEMA_TZ', 'Mars/Olympus'],
     ['S3_FORCE_PATH_STYLE', 'yes'],
+    ['S3_PUBLIC_ENDPOINT', 'files.example.com'],
+    ['S3_PUBLIC_ENDPOINT', 'ftp://files.example.com'],
     ['CORS_ORIGINS', 'not-a-url'],
     ['HOLD_TTL_SECONDS', '0'],
     ['JWT_ACCESS_SECRET', 'too-short'],

@@ -33,7 +33,14 @@ const statusOf = (error: unknown): number | undefined =>
 /** `ObjectStorage` over the AWS SDK v3, for any S3-compatible service (RustFS, MinIO, S3). */
 @Injectable()
 export class S3ObjectStorage extends ObjectStorage implements OnModuleDestroy {
+  /** Server-to-store calls (HEAD, DELETE) on S3_ENDPOINT. */
   private readonly client: S3Client;
+  /**
+   * Signs URLs handed to browsers. A SigV4 signature covers the Host header, so it must be
+   * made for the host the browser will call: S3_PUBLIC_ENDPOINT when set. Presigning is
+   * local, so this client never opens a connection.
+   */
+  private readonly signer: S3Client;
   private readonly bucket: string;
 
   constructor(
@@ -42,8 +49,16 @@ export class S3ObjectStorage extends ObjectStorage implements OnModuleDestroy {
   ) {
     super();
     this.bucket = config.get('S3_BUCKET');
-    this.client = new S3Client({
-      endpoint: config.get('S3_ENDPOINT'),
+    this.client = S3ObjectStorage.createClient(config, config.get('S3_ENDPOINT'));
+    const publicEndpoint = config.get('S3_PUBLIC_ENDPOINT');
+    this.signer = publicEndpoint
+      ? S3ObjectStorage.createClient(config, publicEndpoint)
+      : this.client;
+  }
+
+  private static createClient(config: AppConfig, endpoint: string): S3Client {
+    return new S3Client({
+      endpoint,
       region: config.get('S3_REGION'),
       forcePathStyle: config.get('S3_FORCE_PATH_STYLE'),
       credentials: {
@@ -69,7 +84,7 @@ export class S3ObjectStorage extends ObjectStorage implements OnModuleDestroy {
       ContentType: input.contentType,
       ContentLength: input.contentLength,
     });
-    return getSignedUrl(this.client, command, {
+    return getSignedUrl(this.signer, command, {
       expiresIn: input.expiresInSeconds,
       signingDate: this.clock.now(),
       signableHeaders: SIGNED_UPLOAD_HEADERS,
@@ -78,7 +93,7 @@ export class S3ObjectStorage extends ObjectStorage implements OnModuleDestroy {
 
   presignDownload(key: string, expiresInSeconds: number): Promise<string> {
     const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
-    return getSignedUrl(this.client, command, {
+    return getSignedUrl(this.signer, command, {
       expiresIn: expiresInSeconds,
       signingDate: this.clock.now(),
     });
@@ -104,5 +119,6 @@ export class S3ObjectStorage extends ObjectStorage implements OnModuleDestroy {
 
   onModuleDestroy(): void {
     this.client.destroy();
+    if (this.signer !== this.client) this.signer.destroy();
   }
 }

@@ -27,6 +27,19 @@ const REGION = 'us-east-1';
 const DEAD_ENDPOINT = 'http://127.0.0.1:1';
 
 /**
+ * The same server under another name (localhost <-> 127.0.0.1), used as S3_PUBLIC_ENDPOINT:
+ * the API talks to one host while "browsers" (fetch) use the other, as with an internal Docker
+ * name and a public domain. A URL signed for the wrong host would fail with 403.
+ */
+function otherHostFor(url: string): string | undefined {
+  const parsed = new URL(url);
+  if (parsed.hostname === 'localhost') parsed.hostname = '127.0.0.1';
+  else if (parsed.hostname === '127.0.0.1') parsed.hostname = 'localhost';
+  else return undefined;
+  return parsed.origin;
+}
+
+/**
  * The real upload path: API presigns → the "browser" (fetch) PUTs straight to RustFS →
  * the API verifies the object → posterUrl serves the same bytes.
  * Uses a RustFS container, or TEST_S3_ENDPOINT when a server is already running.
@@ -39,6 +52,7 @@ describe('Poster storage (real RustFS)', () => {
   let containerStopped = false;
   let s3: S3Client;
   let endpoint: string;
+  let publicEndpoint: string | undefined;
   let app: INestApplication<App>;
   let adminToken: string;
   const bucket = `ticketify-test-${randomUUID().slice(0, 8)}`;
@@ -63,6 +77,7 @@ describe('Poster storage (real RustFS)', () => {
     ]);
     [db, redis, rustfs] = [database, testRedis, container];
     endpoint = external ?? `http://${container?.getHost()}:${container?.getMappedPort(9000)}`;
+    publicEndpoint = otherHostFor(endpoint);
 
     s3 = new S3Client({
       endpoint,
@@ -78,6 +93,7 @@ describe('Poster storage (real RustFS)', () => {
         { databaseUrl: db.url, redisUrl: redis.url },
         {
           S3_ENDPOINT: endpoint,
+          S3_PUBLIC_ENDPOINT: publicEndpoint ?? '',
           S3_REGION: REGION,
           S3_ACCESS_KEY: ACCESS_KEY,
           S3_SECRET_KEY: SECRET_KEY,
@@ -132,7 +148,10 @@ describe('Poster storage (real RustFS)', () => {
   async function presign(contentType: string, sizeBytes: number): Promise<PosterUpload> {
     const res = await admin().post('/admin/uploads/poster', { contentType, sizeBytes });
     expect(res.status).toBe(201);
-    return bodyOf<PosterUpload>(res);
+    const upload = bodyOf<PosterUpload>(res);
+    // Signed for the browser-facing host, while HEAD/DELETE go to S3_ENDPOINT.
+    if (publicEndpoint) expect(new URL(upload.uploadUrl).origin).toBe(publicEndpoint);
+    return upload;
   }
 
   /** What the browser does with the presigned URL. */
@@ -173,6 +192,10 @@ describe('Poster storage (real RustFS)', () => {
 
   // ─── Tests ───
 
+  it('exercises S3_PUBLIC_ENDPOINT against our own container', () => {
+    if (rustfs) expect(publicEndpoint).toBeDefined();
+  });
+
   it('presign → PUT → save movie → posterUrl serves the same bytes', async () => {
     const { key, bytes } = await uploadPoster('image/webp');
     const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
@@ -185,6 +208,7 @@ describe('Poster storage (real RustFS)', () => {
     const detail = await request(app.getHttpServer()).get(`/movies/${movie.slug}`);
     const posterUrl = bodyOf<Movie>(detail).posterUrl;
     expect(posterUrl).toContain('X-Amz-Expires=3600');
+    if (publicEndpoint) expect(new URL(posterUrl ?? '').origin).toBe(publicEndpoint);
 
     const download = await fetch(posterUrl ?? '');
     expect(download.status).toBe(200);
