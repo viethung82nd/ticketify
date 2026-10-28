@@ -64,17 +64,25 @@ export type SeatReleasedEvent = z.infer<typeof seatReleasedEventSchema>;
 export const seatSoldEventSchema = seatReleasedEventSchema;
 export type SeatSoldEvent = z.infer<typeof seatSoldEventSchema>;
 
-/** Machine-readable codes of realtime errors (besides the shared auth and validation ones). */
+/**
+ * Machine-readable codes of realtime errors (besides the shared auth and validation ones). The two
+ * limits of `showtime:join` have distinct codes: how many rooms at once is not how often.
+ */
 export const RealtimeErrorCode = {
   /** `showtime:join` beyond `REALTIME_LIMITS.subscriptionsMax` rooms on one socket. */
   TOO_MANY_SUBSCRIPTIONS: 'TOO_MANY_SUBSCRIPTIONS',
+  /**
+   * `showtime:join` more than `REALTIME_LIMITS.joinsMax` times per user per window;
+   * `details.retryAfterSeconds`. Same code as the login and booking rate limits.
+   */
+  TOO_MANY_ATTEMPTS: 'TOO_MANY_ATTEMPTS',
 } as const;
 export type RealtimeErrorCode = (typeof RealtimeErrorCode)[keyof typeof RealtimeErrorCode];
 
 /**
  * `error` event and the `error` of a failed ack. Codes: `VALIDATION_FAILED`, `SHOWTIME_NOT_FOUND`
- * (unknown or cancelled showtime), `TOO_MANY_SUBSCRIPTIONS`, `TOO_MANY_ATTEMPTS`
- * (`details.retryAfterSeconds`), `INTERNAL_ERROR`.
+ * (unknown or cancelled showtime), `TOO_MANY_SUBSCRIPTIONS` (rooms per socket),
+ * `TOO_MANY_ATTEMPTS` (join rate, `details.retryAfterSeconds`), `INTERNAL_ERROR`.
  */
 export const realtimeErrorSchema = z.object({
   /** Client event that failed. */

@@ -412,6 +412,25 @@ describe('Realtime — gateway, rooms, seat events, multi-instance (real Postgre
       await expect(join(socket, showtimes.at(-1)!)).resolves.toEqual({ joined: true });
     });
 
+    it(`more than ${REALTIME_LIMITS.joinsMax} joins a minute → TOO_MANY_ATTEMPTS, not TOO_MANY_SUBSCRIPTIONS`, async () => {
+      const { showtime } = await scene();
+      const socket = await connect();
+      // Joining the same room again is not a new subscription, but it is a new attempt.
+      for (let i = 0; i < REALTIME_LIMITS.joinsMax; i++) {
+        await expect(join(socket, showtime.id)).resolves.toEqual({ joined: true });
+      }
+
+      const { ack, errorEvent } = await failedJoin(socket, showtime.id);
+
+      expect(ack).toEqual({ joined: false, error: errorEvent });
+      expect(errorEvent).toMatchObject({
+        event: 'showtime:join',
+        code: RealtimeErrorCode.TOO_MANY_ATTEMPTS,
+        details: { retryAfterSeconds: expect.any(Number) as number },
+      });
+      expect(errorEvent.code).not.toBe(RealtimeErrorCode.TOO_MANY_SUBSCRIPTIONS);
+    });
+
     it('after leaving, the socket no longer receives the showtime events', async () => {
       const { showtime, seat } = await scene();
       const socket = await connect();

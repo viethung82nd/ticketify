@@ -221,11 +221,28 @@ describe('RealtimeGateway', () => {
       expect(results.at(-1)).toMatchObject({
         joined: false,
         error: {
-          code: 'TOO_MANY_ATTEMPTS',
+          code: RealtimeErrorCode.TOO_MANY_ATTEMPTS,
           details: { retryAfterSeconds: REALTIME_LIMITS.joinWindowSeconds },
         },
       });
       expect(redis.values.get(joinRateKey(USER.id))).toBe(REALTIME_LIMITS.joinsMax + 1);
+    });
+
+    it('rooms per socket and join rate are two limits with two codes', async () => {
+      const rooms = connected();
+      for (let n = 1; n <= REALTIME_LIMITS.subscriptionsMax; n++) {
+        await gateway.join(rooms.socket, { showtimeId: showtimeId(n) });
+      }
+      const tooManyRooms = await gateway.join(rooms.socket, { showtimeId: showtimeId(99) });
+      redis.values.set(joinRateKey(USER.id), REALTIME_LIMITS.joinsMax);
+      const tooOften = await gateway.join(connected().socket, { showtimeId: showtimeId(1) });
+
+      const codeOf = (ack: JoinShowtimeAck) => (ack.joined ? undefined : ack.error.code);
+      expect(codeOf(tooManyRooms)).toBe(RealtimeErrorCode.TOO_MANY_SUBSCRIPTIONS);
+      expect(codeOf(tooOften)).toBe(RealtimeErrorCode.TOO_MANY_ATTEMPTS);
+      expect(RealtimeErrorCode.TOO_MANY_SUBSCRIPTIONS).not.toBe(
+        RealtimeErrorCode.TOO_MANY_ATTEMPTS,
+      );
     });
   });
 

@@ -9,7 +9,6 @@ import {
 } from '@nestjs/websockets';
 import {
   AuthErrorCode,
-  BookingErrorCode,
   type ClientToServerEvents,
   type HandshakeErrorData,
   type JoinShowtimeAck,
@@ -171,7 +170,7 @@ export class RealtimeGateway implements OnGatewayInit {
     if (!limit.allowed) {
       return {
         joined: false,
-        error: failure(event, BookingErrorCode.TOO_MANY_ATTEMPTS, 'Too many joins, slow down', {
+        error: failure(event, RealtimeErrorCode.TOO_MANY_ATTEMPTS, 'Too many joins, slow down', {
           retryAfterSeconds: limit.retryAfterSeconds,
         }),
       };
