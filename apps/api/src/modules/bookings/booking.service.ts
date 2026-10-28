@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
   type Booking as BookingView,
+  type BookingAlreadyPendingDetails,
   BookingErrorCode,
   BookingStatus,
   type SeatType,
@@ -14,6 +15,7 @@ import type { Prisma } from '../../generated/prisma/client';
 import { ClockService } from '../../infra/clock/clock.service';
 import { isConstraintViolation, SQLSTATE, sqlStateOf } from '../../infra/prisma/prisma-errors';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { SeatEvents } from '../realtime/seat-events';
 import { BookingExpirationQueue } from './booking-expiration-queue';
 import {
   bookingCode,
@@ -53,7 +55,7 @@ export interface HoldResult {
 
 /** What the hold transaction ended with. */
 type HoldOutcome =
-  | { kind: 'created'; id: string; holdUntil: Date }
+  | { kind: 'created'; id: string; holdUntil: Date; seatIds: string[] }
   /** The user already used this Idempotency-Key; nothing was written. */
   | { kind: 'existing'; id: string; requestHash: string };
 
@@ -110,13 +112,19 @@ const comboNotAvailable = (comboIds: string[]) =>
     'Some combos do not exist or are not on sale',
     { comboIds },
   );
-const alreadyPending = (bookingId: string) =>
-  apiException(
+const alreadyPending = (existing: { id: string; expires_at: Date }) => {
+  const details: BookingAlreadyPendingDetails = {
+    existingBookingId: existing.id,
+    expiresAt: existing.expires_at.toISOString(),
+    bookingId: existing.id,
+  };
+  return apiException(
     HttpStatus.CONFLICT,
     BookingErrorCode.BOOKING_ALREADY_PENDING,
     'You already have a booking waiting for payment for this showtime',
-    { bookingId },
+    details,
   );
+};
 const keyReused = () =>
   apiException(
     HttpStatus.UNPROCESSABLE_ENTITY,
@@ -172,6 +180,7 @@ export class BookingService {
     private readonly clock: ClockService,
     private readonly expirations: BookingExpirationQueue,
     private readonly views: BookingViews,
+    private readonly seatEvents: SeatEvents,
     config: AppConfig,
   ) {
     this.holdTtlSeconds = config.get('HOLD_TTL_SECONDS');
@@ -210,8 +219,10 @@ export class BookingService {
       if (outcome.requestHash !== hash) throw keyReused();
       return { booking: await this.views.byId(outcome.id), created: false };
     }
-    // After commit: a job must never see a booking that was rolled back.
+    // After commit: a job must never see a booking that was rolled back, and a browser must never
+    // see seats change that did not. Neither step can fail the request (both only log).
     await this.expirations.schedule(outcome.id, outcome.holdUntil);
+    this.seatEvents.held(input.showtimeId, outcome.seatIds, outcome.holdUntil);
     return { booking: await this.views.byId(outcome.id), created: true };
   }
 
@@ -242,14 +253,18 @@ export class BookingService {
     const early = showtimeRefusal({ status: showtime.status, startsAt: showtime.starts_at }, now);
     if (early) throw showtimeRefused(early);
 
-    // One live PENDING booking per user per showtime. A PENDING booking past its holdUntil does not
-    // count: it is expired, only waiting for the expiry job (week 8) to mark it.
-    const [pending] = await tx.$queryRaw<{ id: string }[]>`
-      SELECT id FROM bookings
+    // One PENDING booking per user per showtime while it can still be paid: a booking past its
+    // expiresAt can no longer start a payment (PLAN §5), so it no longer blocks a new one. It keeps
+    // its seats HELD until holdUntil (payment grace, for a late IPN of a payment already started):
+    // the seat locks below refuse those seats (409 SEAT_UNAVAILABLE), other seats are fine. The
+    // advisory lock above makes this check and the insert atomic per (user, showtime).
+    const [pending] = await tx.$queryRaw<{ id: string; expires_at: Date }[]>`
+      SELECT id, expires_at FROM bookings
       WHERE user_id = ${userId}::uuid AND showtime_id = ${showtimeId}::uuid
-        AND status = 'PENDING' AND hold_until > ${now}
+        AND status = 'PENDING' AND expires_at > ${now}
+      ORDER BY expires_at DESC
       LIMIT 1`;
-    if (pending) throw alreadyPending(pending.id);
+    if (pending) throw alreadyPending(pending);
 
     // 2. Lock the requested seats in seat_id order, failing fast if anyone else holds a lock.
     const locked = await this.lockSeats(tx, showtimeId, seatIds);
@@ -329,7 +344,7 @@ export class BookingService {
         AND (status = 'AVAILABLE' OR (status = 'HELD' AND held_until <= ${now}))`;
     if (updated !== seatIds.length) throw seatUnavailable(seatIds);
 
-    return { kind: 'created', id: booking.id, holdUntil };
+    return { kind: 'created', id: booking.id, holdUntil, seatIds };
   }
 
   private async lockSeats(tx: Tx, showtimeId: string, seatIds: string[]): Promise<LockedRow[]> {

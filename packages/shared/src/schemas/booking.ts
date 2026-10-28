@@ -141,6 +141,18 @@ export type Booking = z.infer<typeof bookingSchema>;
 /** `GET /me/bookings`: the user's bookings, newest first. */
 export const bookingPageSchema = pageSchema(bookingSchema);
 
+/**
+ * `details` of `409 BOOKING_ALREADY_PENDING`: the booking that blocks a new one, so the client can
+ * send the customer to it. `bookingId` is the same id, kept from week 7.
+ */
+export const bookingAlreadyPendingDetailsSchema = z.object({
+  existingBookingId: z.uuid(),
+  /** ISO instant; once past it, the same user may book this showtime again. */
+  expiresAt: z.string(),
+  bookingId: z.uuid(),
+});
+export type BookingAlreadyPendingDetails = z.infer<typeof bookingAlreadyPendingDetailsSchema>;
+
 /** Machine-readable `code` values of booking API errors (also SHOWTIME_NOT_FOUND). */
 export const BookingErrorCode = {
   /** 409: another request holds a lock on one of the seats right now; reload the seat map. */
@@ -159,7 +171,10 @@ export const BookingErrorCode = {
   COMBO_NOT_AVAILABLE: 'COMBO_NOT_AVAILABLE',
   /** 422: this Idempotency-Key was already used by the user for a different request. */
   IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
-  /** 409: the user already has a live PENDING booking for this showtime; `details.bookingId`. */
+  /**
+   * 409: the user already has a PENDING booking for this showtime whose `expiresAt` has not passed;
+   * `details` = `bookingAlreadyPendingDetailsSchema`.
+   */
   BOOKING_ALREADY_PENDING: 'BOOKING_ALREADY_PENDING',
   /** 404: no such booking, or it belongs to another user (never 403: that would confirm it exists). */
   BOOKING_NOT_FOUND: 'BOOKING_NOT_FOUND',

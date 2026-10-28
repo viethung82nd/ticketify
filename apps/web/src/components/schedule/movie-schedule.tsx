@@ -1,6 +1,7 @@
 import type { ShowtimeListItem } from '@ticketify/shared';
 import { Armchair, Clock } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { ErrorState } from '@/components/catalog/query-states';
 import { DateChips } from '@/components/schedule/date-chips';
 import { Button } from '@/components/ui/button';
@@ -22,21 +23,14 @@ function nearestDate(dates: string[], selected: string): string | undefined {
   return distance(later) <= distance(earlier) ? later : earlier;
 }
 
+/** One showtime; opens its seat map (`/showtimes/:id/book`, sign-in required) unless sold out. */
 function ShowtimeCard({ showtime }: { showtime: ShowtimeListItem }) {
   const soldOut = showtime.availableSeats === 0;
-  return (
-    <li
-      data-showtime={showtime.id}
-      aria-label={`${cinemaTime(showtime.startsAt)}, ${showtime.room.name}, ${
-        soldOut ? 'hết chỗ' : `còn ${showtime.availableSeats} ghế`
-      }`}
-      className={cn(
-        'rounded-2xl border p-4 transition-colors',
-        soldOut
-          ? 'border-white/5 bg-white/[0.03] text-muted-foreground'
-          : 'border-white/10 bg-surface text-cream',
-      )}
-    >
+  const label = `${cinemaTime(showtime.startsAt)}, ${showtime.room.name}, ${
+    soldOut ? 'hết chỗ' : `còn ${showtime.availableSeats} ghế, chọn ghế`
+  }`;
+  const body = (
+    <>
       <div className="flex items-baseline gap-2">
         <span className={cn('text-2xl font-bold tabular-nums', !soldOut && 'text-brand')}>
           {cinemaTime(showtime.startsAt)}
@@ -50,11 +44,35 @@ function ShowtimeCard({ showtime }: { showtime: ShowtimeListItem }) {
         <Armchair className="size-3.5" aria-hidden />
         {soldOut ? 'Hết chỗ' : `Còn ${showtime.availableSeats}/${showtime.totalSeats} ghế`}
       </p>
+    </>
+  );
+  const card = 'block rounded-2xl border p-4 transition-colors';
+  return (
+    <li data-showtime={showtime.id}>
+      {soldOut ? (
+        <div
+          aria-label={label}
+          className={cn(card, 'border-white/5 bg-white/[0.03] text-muted-foreground')}
+        >
+          {body}
+        </div>
+      ) : (
+        <Link
+          to={`/showtimes/${showtime.id}/book`}
+          aria-label={label}
+          className={cn(
+            card,
+            'border-white/10 bg-surface text-cream outline-none hover:border-brand/60 focus-visible:ring-3 focus-visible:ring-ring/50',
+          )}
+        >
+          {body}
+        </Link>
+      )}
     </li>
   );
 }
 
-/** "Lịch chiếu" on the movie page: day chips and that day's showtimes (no seat picking yet). */
+/** "Lịch chiếu" on the movie page: day chips and that day's showtimes, each opening its seat map. */
 export function MovieSchedule({ movieId }: { movieId: string }) {
   const today = cinemaToday();
   const [selected, setSelected] = useState(today);
@@ -126,7 +144,7 @@ export function MovieSchedule({ movieId }: { movieId: string }) {
       </div>
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Clock className="size-3.5" aria-hidden />
-        Giờ chiếu theo giờ Việt Nam (GMT+7). Chọn ghế sẽ có ở bước đặt vé.
+        Giờ chiếu theo giờ Việt Nam (GMT+7). Chọn một suất để chọn ghế (cần đăng nhập).
       </p>
     </div>
   );

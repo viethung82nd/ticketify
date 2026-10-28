@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { RateLimitService } from '../../common/rate-limit/rate-limit.service';
+import { RealtimeModule } from '../realtime/realtime.module';
 import { BookingExpirationQueue } from './booking-expiration-queue';
 import { BookingRateLimiter } from './booking-rate-limiter';
 import { BookingViews } from './booking-views';
@@ -8,6 +9,7 @@ import { BookingsController, MyBookingsController } from './bookings.controller'
 
 /** Seat holds and bookings (ROADMAP phase 2), HTTP side. Jobs run in BookingsWorkerModule. */
 @Module({
+  imports: [RealtimeModule],
   controllers: [BookingsController, MyBookingsController],
   providers: [
     BookingService,

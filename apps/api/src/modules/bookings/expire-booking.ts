@@ -11,14 +11,18 @@ export type ExpireOutcome =
   | { outcome: 'noop' }
   /** `now < holdUntil`: too soon. The caller tries again at `holdUntil`. */
   | { outcome: 'early'; holdUntil: Date }
-  /** Booking EXPIRED; `releasedSeats` seats of its own went back to AVAILABLE. */
-  | { outcome: 'expired'; releasedSeats: number };
+  /**
+   * Booking EXPIRED; `releasedSeatIds` (sorted) are the seats of its own that went back to
+   * AVAILABLE — empty when other bookings had already taken them all (lazy expiry).
+   */
+  | { outcome: 'expired'; showtimeId: string; releasedSeatIds: string[] };
 
 export type ExpireOutcomeKind = ExpireOutcome['outcome'];
 
 interface BookingRow {
   status: BookingStatus;
   hold_until: Date;
+  showtime_id: string;
 }
 
 /**
@@ -39,7 +43,7 @@ interface BookingRow {
 export async function expireBooking(tx: Tx, bookingId: string, now: Date): Promise<ExpireOutcome> {
   // 1. Lock the booking. No row: either it does not exist or another transaction has it.
   const [booking] = await tx.$queryRaw<BookingRow[]>`
-    SELECT status::text AS status, hold_until FROM bookings
+    SELECT status::text AS status, hold_until, showtime_id FROM bookings
     WHERE id = ${bookingId}::uuid
     FOR UPDATE SKIP LOCKED`;
   if (!booking) {
@@ -77,11 +81,17 @@ export async function expireBooking(tx: Tx, bookingId: string, now: Date): Promi
   //    may already have taken a seat (lazy expiry: the hold flow treats an expired HELD seat as
   //    free and points it at the new booking) — `booking_id = $1` leaves that seat alone. A SOLD
   //    seat is never touched either.
-  const releasedSeats = await tx.$executeRaw`
+  const released = await tx.$queryRaw<{ seat_id: string }[]>`
     UPDATE showtime_seats
     SET status = 'AVAILABLE', booking_id = NULL, held_until = NULL
-    WHERE booking_id = ${bookingId}::uuid AND status = 'HELD'`;
+    WHERE booking_id = ${bookingId}::uuid AND status = 'HELD'
+    RETURNING seat_id`;
 
   // (phase 4) INSERT outbox(seats.released); (phase 5) VoucherUsage RESERVED → RELEASED.
-  return { outcome: 'expired', releasedSeats };
+  // Until then the caller emits `seat:released` itself, once this transaction has committed.
+  return {
+    outcome: 'expired',
+    showtimeId: booking.showtime_id,
+    releasedSeatIds: released.map((row) => row.seat_id).sort(),
+  };
 }

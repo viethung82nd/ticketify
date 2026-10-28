@@ -10,3 +10,4 @@ export * from './schemas/showtime.js';
 export * from './schemas/combo.js';
 export * from './cinema-time.js';
 export * from './schemas/booking.js';
+export * from './schemas/realtime.js';
