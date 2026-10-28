@@ -17,6 +17,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:reset": "prisma migrate reset --force",
     "test:integration": "node --experimental-vm-modules --no-warnings=ExperimentalWarning node_modules/jest/bin/jest.js --config jest.integration.config.js",
+    "test:scenarios": "node --experimental-vm-modules --no-warnings=ExperimentalWarning node_modules/jest/bin/jest.js --config jest.scenarios.config.js",
     "db:seed": "prisma db seed",
     "db:cleanup-test-data": "tsx scripts/cleanup-dev-test-data.ts"
   },
