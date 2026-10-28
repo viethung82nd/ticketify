@@ -57,10 +57,10 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
 - [x] **1.8** FE: trang chủ, danh sách phim, chi tiết phim; admin: bảng phim + form
 
 ### Tuần 5: Phòng, ghế, giá
-- [ ] **1.9** CRUD phòng; sinh lưới ghế; sửa loại ghế, bật/tắt ghế, ghép cặp ghế đôi
-- [ ] **1.10** CRUD `SeatPrice` và `Holiday`
-- [ ] **1.11** `PricingService`: `dayType()` tính theo `Asia/Ho_Chi_Minh`. Unit test các ca biên: 23:30 Chủ nhật giờ VN, suất qua nửa đêm, ngày lễ trùng cuối tuần
-- [ ] **1.12** FE admin: trình sửa sơ đồ ghế dạng lưới, bảng giá, ngày lễ
+- [x] **1.9** CRUD phòng; sinh lưới ghế; sửa loại ghế, bật/tắt ghế, ghép cặp ghế đôi
+- [x] **1.10** CRUD `SeatPrice` và `Holiday`
+- [x] **1.11** `PricingService`: `dayType()` tính theo `Asia/Ho_Chi_Minh`. Unit test các ca biên: 23:30 Chủ nhật giờ VN, suất qua nửa đêm, ngày lễ trùng cuối tuần
+- [x] **1.12** FE admin: trình sửa sơ đồ ghế dạng lưới, bảng giá, ngày lễ
 
 ### Tuần 6: Suất chiếu & combo
 - [ ] **1.13** Tạo suất chiếu: `endsAt = startsAt + thời lượng + thời gian dọn phòng`. Trong cùng transaction tạo `Showtime` + sinh `ShowtimeSeat`, chốt giá từng ghế (`PricingService.dayType(startsAt, tx)` + `priceFor`). Lỗi exclusion constraint trả về `409`. **Khóa dòng phòng bằng `SELECT … FROM rooms WHERE id = $1 FOR SHARE` trước khi đọc danh sách ghế**, để không chạy đồng thời với một lần sửa ghế (`PATCH /admin/rooms/:id/seats` giữ `FOR UPDATE` trên cùng dòng)

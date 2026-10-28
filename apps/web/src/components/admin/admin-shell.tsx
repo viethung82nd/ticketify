@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils';
 const ADMIN_NAV = [
   { to: '/admin/movies', label: 'Phim' },
   { to: '/admin/genres', label: 'Thể loại' },
+  { to: '/admin/rooms', label: 'Phòng chiếu' },
+  { to: '/admin/pricing', label: 'Giá vé & ngày lễ' },
 ];
 
 /** Page frame for admin screens: section tabs, title, optional actions on the right. */

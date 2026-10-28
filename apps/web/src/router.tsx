@@ -4,7 +4,11 @@ import { AppLayout } from '@/components/layout/app-layout';
 import { GuestOnly, RequireAuth } from '@/features/auth/route-guards';
 import { AdminGenresPage } from '@/pages/admin/admin-genres-page';
 import { AdminMoviesPage } from '@/pages/admin/admin-movies-page';
+import { AdminPricingPage } from '@/pages/admin/admin-pricing-page';
+import { AdminRoomsPage } from '@/pages/admin/admin-rooms-page';
 import { EditMoviePage, NewMoviePage } from '@/pages/admin/movie-form-page';
+import { RoomEditorPage } from '@/pages/admin/room-editor-page';
+import { NewRoomPage } from '@/pages/admin/room-form-page';
 import { HomePage } from '@/pages/home-page';
 import { LoginPage } from '@/pages/login-page';
 import { MovieDetailPage } from '@/pages/movie-detail-page';
@@ -38,6 +42,10 @@ export const router = createBrowserRouter([
           { path: 'admin/movies/new', element: <NewMoviePage /> },
           { path: 'admin/movies/:id/edit', element: <EditMoviePage /> },
           { path: 'admin/genres', element: <AdminGenresPage /> },
+          { path: 'admin/rooms', element: <AdminRoomsPage /> },
+          { path: 'admin/rooms/new', element: <NewRoomPage /> },
+          { path: 'admin/rooms/:id', element: <RoomEditorPage /> },
+          { path: 'admin/pricing', element: <AdminPricingPage /> },
         ],
       },
       {
