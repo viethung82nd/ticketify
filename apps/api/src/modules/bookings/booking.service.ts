@@ -382,7 +382,11 @@ export class BookingService {
    *
    * Locks, in the order of `expireBooking` (PLAN §4: Payment → Booking → ShowtimeSeat):
    * 1. the booking row `FOR UPDATE` — waits for an expiry running on the same booking (it holds
-   *    the row for milliseconds); once that commits the booking is EXPIRED and this is a no-op;
+   *    the row for milliseconds); once that commits the booking is EXPIRED and this is a no-op.
+   *    It also waits for a payment creation (`PaymentService.createVnpay`, FOR KEY SHARE on the
+   *    same row, which conflicts with FOR UPDATE): the payments are read only after this lock, so
+   *    a payment that committed first is always seen, and one that starts later waits for this
+   *    cancel and then finds the booking EXPIRED;
    * 2. the booking's own HELD seats `FOR UPDATE ORDER BY seat_id`.
    * An expiry that comes second skips the booking (SKIP LOCKED), a hold never waits (NOWAIT) and a
    * showtime cancel never locks `bookings`, so no flow waits on this one in a cycle.
@@ -399,7 +403,9 @@ export class BookingService {
       if (booking.status === BookingStatus.EXPIRED) return null;
       if (booking.status !== BookingStatus.PENDING) throw notCancellable();
       // 3. A paid booking is never cancelled; one with a payment still open at VNPay waits for its
-      //    result. Read inside the transaction but without a lock: no flow locks payments yet. When
+      //    result. Read after the booking lock of step 1 and never before it: that lock is what
+      //    keeps a payment creation (FOR KEY SHARE) from committing between this read and the
+      //    update below. Without a lock on payments: no flow locks payments yet. When
       //    the IPN (3.4) starts locking Payment → Booking → Seats, a cancel that needs the payment
       //    locked must take it in that order too, before the booking row (PLAN §4).
       const payments = await tx.$queryRaw<{ status: PaymentStatus }[]>`
