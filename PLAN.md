@@ -237,6 +237,19 @@ Bước 6, trong cùng transaction và theo thứ tự khóa `Payment → Bookin
 
 Lớp chặn cuối: partial unique index trên `Ticket(showtimeId, seatId)`. Nếu có lỗi logic thì transaction sẽ fail thay vì sinh ra hai vé cho cùng một ghế.
 
+> **Làm rõ (29/10/2026, tuần 12, không đổi thiết kế)** — đối chiếu bảng trên với tài liệu `pay.html` của VNPay (mục "Cài đặt Code IPN URL", đọc nguyên văn ngày 29/10/2026). Mã và thứ tự kiểm tra (chữ ký → đơn → số tiền → trạng thái) **khớp** tài liệu; các điểm sau được ghi rõ thêm:
+> - **Định dạng**: luôn HTTP 200, thân JSON `{ "RspCode", "Message" }`. `Message` theo mẫu của tài liệu: `00` Confirm Success, `02` Order already confirmed, `01` Order not found, `04` Invalid amount, `97` Invalid signature.
+> - **Lỗi không xác định** (DB, quá thời gian transaction, thiếu `VNPAY_HASH_SECRET`): HTTP **500** với `{ "RspCode": "99", "Message": "Unknown error" }`, không ghi gì. Tài liệu không nói gì về mã HTTP; `99` là mã của chính tài liệu cho lỗi không xác định ("Unknow error"), nên VNPay gọi lại dù họ đọc mã HTTP hay đọc `RspCode`.
+> - **Retry của VNPay** (tài liệu): `00` và `02` kết thúc luồng; `01`, `04`, `97`, `99` hoặc IPN quá thời gian → VNPay gọi lại, **tối đa 10 lần, cách nhau 5 phút**. Tức là IPN có thể đến sau `holdUntil` tới khoảng 45 phút; khi đó đơn thường đã `EXPIRED` và đi nhánh bước 3/4. Hành vi này chưa kiểm được trên sandbox (ROADMAP 3.6).
+> - **"Thanh toán thành công"** = `vnp_ResponseCode = 00` **và** `vnp_TransactionStatus = 00`. Bảng tham số của tài liệu ghi `vnp_TransactionStatus` "khác 00: giao dịch không thành công tại VNPAY"; các đoạn code mẫu lại không thống nhất (C# kiểm cả hai, Java/Python chỉ `vnp_ResponseCode`, PHP chấp nhận một trong hai). Chọn cách chặt nhất; mọi tổ hợp khác là bước 5 (`FAILED`). Mã `07` ("trừ tiền thành công, giao dịch bị nghi ngờ") cũng là bước 5.
+> - **Bước 2**: thiếu `vnp_TxnRef` cũng là `01`. Query rỗng là `97` (không có chữ ký); mẫu C#/Python của tài liệu trả `99` ("Input data required") cho trường hợp này, cả hai đều làm VNPay gọi lại.
+> - **Bước 4**: trạng thái cuối chỉ là `SUCCESS` và `FAILED`, đúng như bảng; `Payment` `EXPIRED` (querydr ở 3.7) vẫn đi tiếp bước 5/6, vì tiền đến muộn vẫn phải được ghi nhận.
+> - **Bước 5**: không lưu `vnp_TransactionNo` cho giao dịch thất bại (VNPay có thể gửi `0` cho giao dịch bị hủy, cột này `UNIQUE`); giá trị vẫn nằm trong `rawPayload`.
+> - **Bước 6, giữa bước 1 và 2**: nếu đơn đã có `Payment` `SUCCESS` khác (người dùng mở hai trang thanh toán và trả cả hai) thì trả `02`, không ghi gì, ghi log `error` để hoàn tiền tay. **Đang chờ chủ dự án quyết định** cách lưu lại trường hợp này (ROADMAP "Quyết định chờ").
+> - **Bước 6.3**: "ghế đang trống" = `AVAILABLE`, hoặc `HELD` của chính đơn, hoặc `HELD` của đơn khác đã quá `heldUntil` (ghế trống theo nguyên tắc 3 mục 4, như luồng giữ ghế). Ghế bị đơn khác giữ còn hạn, ghế `SOLD`, suất `CANCELLED` → bước 4.
+> - **Bước 6.4**: không đổi ghế nào, kể cả ghế đơn đó vẫn đang `HELD` (đơn `PENDING` mất một phần ghế): các ghế đó trống lại theo hết hạn lười khi qua `heldUntil`; `expireBooking` không nhả vì đơn không còn `PENDING`.
+> - **Suất đã bắt đầu** khi IPN thành công đến: mặc định vẫn xử lý như bước 2/3 (ghế đã thuộc đơn), có ghi log `warn`. **Đang chờ chủ dự án quyết định** (ROADMAP "Quyết định chờ"). Suất `CANCELLED` → bước 4.
+
 ### Xử lý `NEEDS_REVIEW` (ngoại lệ vận hành, chưa tự động)
 
 - Trang admin liệt kê các đơn `NEEDS_REVIEW` (thông tin user, số tiền, `vnpTransactionNo`).
@@ -245,8 +258,8 @@ Lớp chặn cuối: partial unique index trên `Ticket(showtimeId, seatId)`. N�
 
 ### Lưu ý
 
-- Ý nghĩa các mã phản hồi và chính sách VNPay retry IPN cần **xác minh lại với tài liệu sandbox** khi có tài khoản.
-- Dev local dùng cloudflared/ngrok tunnel để VNPay gọi được IPN.
+- Ý nghĩa các mã phản hồi và chính sách VNPay retry IPN: đã đối chiếu với tài liệu ngày 29/10/2026 (làm rõ ở trên, không đổi thiết kế). Hành vi retry thực tế trên sandbox chưa kiểm (ROADMAP 3.6).
+- Dev local dùng cloudflared/ngrok tunnel để VNPay gọi được IPN. Tài liệu yêu cầu IPN URL dùng **HTTPS**.
 - **Việc cần làm sớm**: đăng ký sandbox tại `sandbox.vnpayment.vn` để lấy `TMN_CODE` và `HASH_SECRET`.
 
 ## 6. Voucher (giai đoạn 5)
