@@ -1,0 +1,69 @@
+{
+  "source": "https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html",
+  "retrievedAt": "2026-10-29",
+  "official": {
+    "note": "Copied verbatim from the page: the sample payment URL (section \"Tạo URL Thanh toán\") and the sample ReturnUrl (section \"Code ReturnURL\"). The page does not publish the vnp_HashSecret behind these vnp_SecureHash values, so the hashes themselves cannot be recomputed; the tests check everything before the hash byte for byte.",
+    "paymentUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=1806000&vnp_Command=pay&vnp_CreateDate=20210801153333&vnp_CurrCode=VND&vnp_IpAddr=127.0.0.1&vnp_Locale=vn&vnp_OrderInfo=Thanh+toan+don+hang+%3A5&vnp_OrderType=other&vnp_ReturnUrl=https%3A%2F%2Fdomainmerchant.vn%2FReturnUrl&vnp_TmnCode=DEMOV210&vnp_TxnRef=5&vnp_Version=2.1.0&vnp_SecureHash=3e0d61a0c0534b2e36680b3f7277743e8784cc4e1d68fa7d276e79c23be7d6318d338b477910a27992f5057bb1582bd44bd82ae8009ffaf6d141219218625c42",
+    "returnUrl": "https://{domain}/ReturnUrl?vnp_Amount=1000000&vnp_BankCode=NCB&vnp_BankTranNo=VNP14226112&vnp_CardType=ATM&vnp_OrderInfo=Thanh+toan+don+hang+thoi+gian%3A+2023-12-07+17%3A00%3A44&vnp_PayDate=20231207170112&vnp_ResponseCode=00&vnp_TmnCode=CTTVNP01&vnp_TransactionNo=14226112&vnp_TransactionStatus=00&vnp_TxnRef=166117&vnp_SecureHash=b6dababca5e07a2d8e32fdd3cf05c29cb426c721ae18e9589f7ad0e2db4b657c6e0e5cc8e271cf745162bcb100fdf2f64520554a6f5275bc4c5b5b3e57dc4b4b"
+  },
+  "reference": {
+    "note": "Not published by VNPay. Signatures computed on 2026-10-29 by the PHP signing loop of the same page (ksort, urlencode, hash_hmac sha512), copied unchanged and run with PHP 8.4.27 (docker image php:8.4-cli-alpine), using a made-up test secret. They pin the HMAC step that the official samples cannot.",
+    "hashSecret": "TICKETIFYTESTSECRETNOTREAL000000",
+    "cases": {
+      "docCreateSample": {
+        "params": {
+          "vnp_Amount": "1806000",
+          "vnp_Command": "pay",
+          "vnp_CreateDate": "20210801153333",
+          "vnp_CurrCode": "VND",
+          "vnp_IpAddr": "127.0.0.1",
+          "vnp_Locale": "vn",
+          "vnp_OrderInfo": "Thanh toan don hang :5",
+          "vnp_OrderType": "other",
+          "vnp_ReturnUrl": "https://domainmerchant.vn/ReturnUrl",
+          "vnp_TmnCode": "DEMOV210",
+          "vnp_TxnRef": "5",
+          "vnp_Version": "2.1.0"
+        },
+        "hashData": "vnp_Amount=1806000&vnp_Command=pay&vnp_CreateDate=20210801153333&vnp_CurrCode=VND&vnp_IpAddr=127.0.0.1&vnp_Locale=vn&vnp_OrderInfo=Thanh+toan+don+hang+%3A5&vnp_OrderType=other&vnp_ReturnUrl=https%3A%2F%2Fdomainmerchant.vn%2FReturnUrl&vnp_TmnCode=DEMOV210&vnp_TxnRef=5&vnp_Version=2.1.0",
+        "secureHash": "c3d6ef1c6527f405545f029abb4a5398ceebbfa9af08db750e908e56ac1a79584fe12c4d597967febcfcb880e5b8b83f506ea282d27214a09a9c9f88ae951113"
+      },
+      "docReturnSample": {
+        "params": {
+          "vnp_Amount": "1000000",
+          "vnp_BankCode": "NCB",
+          "vnp_BankTranNo": "VNP14226112",
+          "vnp_CardType": "ATM",
+          "vnp_OrderInfo": "Thanh toan don hang thoi gian: 2023-12-07 17:00:44",
+          "vnp_PayDate": "20231207170112",
+          "vnp_ResponseCode": "00",
+          "vnp_TmnCode": "CTTVNP01",
+          "vnp_TransactionNo": "14226112",
+          "vnp_TransactionStatus": "00",
+          "vnp_TxnRef": "166117"
+        },
+        "hashData": "vnp_Amount=1000000&vnp_BankCode=NCB&vnp_BankTranNo=VNP14226112&vnp_CardType=ATM&vnp_OrderInfo=Thanh+toan+don+hang+thoi+gian%3A+2023-12-07+17%3A00%3A44&vnp_PayDate=20231207170112&vnp_ResponseCode=00&vnp_TmnCode=CTTVNP01&vnp_TransactionNo=14226112&vnp_TransactionStatus=00&vnp_TxnRef=166117",
+        "secureHash": "60b86df6813b9bb0d43951d5e05fe5991213eeb3c40b9113b5fc1e840f7c6da5f679945efc9de502aa2053e350068a14f053719eaef9edc8a393ff5635e819f7"
+      },
+      "vietnameseAndSpecialChars": {
+        "params": {
+          "vnp_Version": "2.1.0",
+          "vnp_Command": "pay",
+          "vnp_TmnCode": "TKFTEST1",
+          "vnp_Amount": "18000000",
+          "vnp_CurrCode": "VND",
+          "vnp_TxnRef": "aB3dE5fG7hJ9kL1mN3pQ",
+          "vnp_OrderInfo": "Thanh toán vé Mùa Hè — ghế A1, A2 (ưu đãi) ~!*'@#&=+/?",
+          "vnp_OrderType": "other",
+          "vnp_Locale": "vn",
+          "vnp_ReturnUrl": "http://localhost:5173/payment/result?from=vnpay&x=1",
+          "vnp_IpAddr": "203.113.0.45",
+          "vnp_CreateDate": "20261101170000",
+          "vnp_ExpireDate": "20261101171000"
+        },
+        "hashData": "vnp_Amount=18000000&vnp_Command=pay&vnp_CreateDate=20261101170000&vnp_CurrCode=VND&vnp_ExpireDate=20261101171000&vnp_IpAddr=203.113.0.45&vnp_Locale=vn&vnp_OrderInfo=Thanh+to%C3%A1n+v%C3%A9+M%C3%B9a+H%C3%A8+%E2%80%94+gh%E1%BA%BF+A1%2C+A2+%28%C6%B0u+%C4%91%C3%A3i%29+%7E%21%2A%27%40%23%26%3D%2B%2F%3F&vnp_OrderType=other&vnp_ReturnUrl=http%3A%2F%2Flocalhost%3A5173%2Fpayment%2Fresult%3Ffrom%3Dvnpay%26x%3D1&vnp_TmnCode=TKFTEST1&vnp_TxnRef=aB3dE5fG7hJ9kL1mN3pQ&vnp_Version=2.1.0",
+        "secureHash": "b0ea2398b980886eca81d29aeb5714d3ad8f63599812725b4a56ca89fb4f64704bf1722bbc4b39881d8d935a16934223fb52ad39a5395682afe3915d926c5e8f"
+      }
+    }
+  }
+}
