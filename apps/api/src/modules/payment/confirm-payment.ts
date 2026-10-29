@@ -2,6 +2,7 @@ import { BookingStatus, PaymentStatus, ShowtimeStatus, TicketStatus } from '@tic
 import type { Prisma } from '../../generated/prisma/client';
 import { OutboxEventType, writeOutboxEvent } from '../../infra/outbox/outbox-events';
 import { lockSeatsOfBooking, type ShowtimeState, showtimeOf } from './booking-seats';
+import { reclaimSeatsForExpiredBooking } from './reclaim-seats';
 import { heldSeatsProblem, ReviewReason, type SeatProblem } from './seat-settlement';
 import { vnpayAmount } from './vnpay/vnpay-format';
 import { readVnpayIpn, type VnpayIpnResult } from './vnpay/vnpay-ipn';
@@ -53,6 +54,8 @@ export type ConfirmOutcome =
       showtimeId: string;
       seatIds: string[];
       ticketIds: string[];
+      /** Branch B: the booking had EXPIRED and took its seats back. */
+      reclaimed: boolean;
       /** The showtime had already started (owner decision pending, ROADMAP "Quyết định chờ"). */
       showtimeStarted: boolean;
     }
@@ -87,6 +90,7 @@ interface Settlement {
   /** Seats HELD by the booking, ready to be sold; empty when `problem` is set. */
   seatIds: string[];
   problem: SeatProblem | null;
+  reclaimed: boolean;
 }
 
 /**
@@ -189,9 +193,11 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
         processed_at = ${now}, updated_at = ${now}
     WHERE id = ${payment.id}::uuid`;
 
-  // 8. The seats decide: A (still held) or C (review). An EXPIRED booking has given its seats
-  //    back, so none of them is HELD for it any more: it goes to review.
-  const settlement = await settleHeldSeats(tx, booking);
+  // 8. The seats decide: A (still held), B (expired, taken back) or C (review).
+  const settlement =
+    booking.status === BookingStatus.PENDING
+      ? await settleHeldSeats(tx, booking)
+      : await settleExpiredBooking(tx, booking, now);
   const showtimeStarted = settlement.showtime.startsAt.getTime() <= now.getTime();
 
   if (settlement.problem) {
@@ -208,7 +214,7 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
 
   const ticketIds = await confirmBooking(
     tx,
-    { booking, payment, seatIds: settlement.seatIds },
+    { booking, payment, seatIds: settlement.seatIds, reclaimed: settlement.reclaimed },
     input,
   );
   return {
@@ -218,12 +224,13 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
     showtimeId: booking.showtime_id,
     seatIds: settlement.seatIds,
     ticketIds,
+    reclaimed: settlement.reclaimed,
     showtimeStarted,
   };
 }
 
 /**
- * Branch A (or C): the booking's seats must all still be HELD by it, even past
+ * Branch A (or C) for a PENDING booking: its seats must all still be HELD by it, even past
  * `heldUntil` (nobody took them), and the showtime not cancelled. A started showtime does not
  * matter here (owner decision pending).
  */
@@ -238,20 +245,29 @@ async function settleHeldSeats(tx: Tx, booking: BookingRow): Promise<Settlement>
     showtime,
     seatIds: problem ? [] : seats.map((seat) => seat.seatId),
     problem,
+    reclaimed: false,
   };
 }
 
+/** Branch B (or C) for an EXPIRED booking: take every seat back, or none (ROADMAP 3.5). */
+async function settleExpiredBooking(tx: Tx, booking: BookingRow, now: Date): Promise<Settlement> {
+  const result = await reclaimSeatsForExpiredBooking(tx, booking.id, now);
+  return result.reclaimed
+    ? { showtime: result.showtime, seatIds: result.seatIds, problem: null, reclaimed: true }
+    : { showtime: result.showtime, seatIds: [], problem: result.problem, reclaimed: false };
+}
+
 /**
- * Branch A: seats SOLD, booking CONFIRMED, one ISSUED ticket per seat, outbox
+ * Branches A and B: seats SOLD, booking CONFIRMED, one ISSUED ticket per seat, outbox
  * `booking.confirmed`. Returns the ticket ids. Every count is checked: anything off rolls the
  * whole IPN back rather than confirming a booking that does not own all of its seats.
  */
 async function confirmBooking(
   tx: Tx,
-  ctx: { booking: BookingRow; payment: PaymentRow; seatIds: string[] },
+  ctx: { booking: BookingRow; payment: PaymentRow; seatIds: string[]; reclaimed: boolean },
   input: ConfirmPaymentInput,
 ): Promise<string[]> {
-  const { booking, payment, seatIds } = ctx;
+  const { booking, payment, seatIds, reclaimed } = ctx;
   const { now } = input;
 
   const sold = await tx.$executeRaw`
@@ -296,6 +312,7 @@ async function confirmBooking(
         paymentId: payment.id,
         seatIds,
         ticketIds,
+        reclaimed,
       },
     },
     now,

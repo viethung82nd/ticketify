@@ -330,7 +330,7 @@ export class PaymentService {
       case 'confirmed':
         this.logger.log(
           `IPN 00: payment ${result.paymentId} (${ref}) SUCCESS, booking ${result.bookingId} ` +
-            `CONFIRMED, ` +
+            `CONFIRMED${result.reclaimed ? ' after taking its seats back' : ''}, ` +
             `${result.ticketIds.length} ticket(s)`,
         );
         if (result.showtimeStarted) {

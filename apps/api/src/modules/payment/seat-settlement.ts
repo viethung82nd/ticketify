@@ -71,6 +71,35 @@ export function heldSeatsProblem(
   });
 }
 
+/**
+ * A seat an EXPIRED booking may take back: AVAILABLE, still HELD by the booking itself, or HELD by
+ * another booking past its `heldUntil`. The last one is free for anyone (PLAN §4 rule 3, lazy
+ * expiry): the hold flow would give it to a new booking just the same.
+ */
+export function isReclaimable(seat: BookingSeatState, bookingId: string, now: Date): boolean {
+  if (seat.status === ShowtimeSeatStatus.AVAILABLE) return true;
+  if (seat.status !== ShowtimeSeatStatus.HELD) return false;
+  if (seat.bookingId === bookingId) return true;
+  return seat.heldUntil !== null && seat.heldUntil.getTime() <= now.getTime();
+}
+
+/**
+ * Branch B (PLAN §5 step 6.3) for an EXPIRED booking: every seat must be reclaimable
+ * (`isReclaimable`). `null` when all of them can be taken back; otherwise none is.
+ */
+export function reclaimProblem(
+  seats: readonly BookingSeatState[],
+  bookingId: string,
+  now: Date,
+): SeatProblem | null {
+  return problemOf(seats, (seat) => {
+    if (isReclaimable(seat, bookingId, now)) return null;
+    return seat.status === ShowtimeSeatStatus.SOLD
+      ? ReviewReason.SEAT_SOLD
+      : ReviewReason.SEAT_HELD_BY_OTHER;
+  });
+}
+
 /** No 0/O or 1/I: the code is read out at the door. */
 const TICKET_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const TICKET_CODE_LENGTH = 12;
