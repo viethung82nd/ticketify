@@ -102,11 +102,13 @@ Booking      : PENDING ──► CONFIRMED            (đã trả tiền + đã 
                   │   └──► NEEDS_REVIEW         (đã trả tiền nhưng không giữ được ghế)
                   └──────► EXPIRED
 
-Payment      : PENDING ──► SUCCESS | FAILED | EXPIRED   (mỗi lần thử thanh toán là 1 bản ghi)
+Payment      : PENDING ──► SUCCESS | FAILED | EXPIRED | REFUND_REQUIRED   (mỗi lần thử thanh toán là 1 bản ghi)
 
 Ticket       : ISSUED ──► CHECKED_IN
                   └────► VOID                   (dành cho xử lý thủ công)
 ```
+
+**Thay đổi 29/10/2026 (tuần 12):** thêm `Payment.REFUND_REQUIRED` cho một lần thử VNPay báo đã trả trong khi đơn đã được một lần thử khác trả (người dùng mở hai trang thanh toán và trả cả hai). Một đơn vẫn chỉ có tối đa một `SUCCESS`; tiền của lần sau được ghi lại để hoàn tay (mục 5). Migration chỉ thêm giá trị enum.
 
 **`PAID` ≠ vé đã phát hành**: `Payment.SUCCESS` chỉ ghi nhận đã nhận tiền. Vé chỉ tồn tại khi đã có bản ghi `Ticket`, và các bản ghi này được tạo trong cùng transaction chuyển booking sang `CONFIRMED`.
 
@@ -245,17 +247,18 @@ Lớp chặn cuối: partial unique index trên `Ticket(showtimeId, seatId)`. N�
 > - **Bước 2**: thiếu `vnp_TxnRef` cũng là `01`. Query rỗng là `97` (không có chữ ký); mẫu C#/Python của tài liệu trả `99` ("Input data required") cho trường hợp này, cả hai đều làm VNPay gọi lại.
 > - **Bước 4**: trạng thái cuối chỉ là `SUCCESS` và `FAILED`, đúng như bảng; `Payment` `EXPIRED` (querydr ở 3.7) vẫn đi tiếp bước 5/6, vì tiền đến muộn vẫn phải được ghi nhận.
 > - **Bước 5**: không lưu `vnp_TransactionNo` cho giao dịch thất bại (VNPay có thể gửi `0` cho giao dịch bị hủy, cột này `UNIQUE`); giá trị vẫn nằm trong `rawPayload`.
-> - **Bước 6, giữa bước 1 và 2**: nếu đơn đã có `Payment` `SUCCESS` khác (người dùng mở hai trang thanh toán và trả cả hai) thì trả `02`, không ghi gì, ghi log `error` để hoàn tiền tay. **Đang chờ chủ dự án quyết định** cách lưu lại trường hợp này (ROADMAP "Quyết định chờ").
+> - **Bước 6, giữa bước 1 và 2**: nếu đơn đã có `Payment` `SUCCESS` khác (người dùng mở hai trang thanh toán và trả cả hai), lần này thành `Payment` `REFUND_REQUIRED` (lưu `vnpTransactionNo`, `bankCode`, `rawPayload`), ghi outbox `payment.refund_required`, đơn và ghế không đổi, trả `00`; IPN lặp lại của lần đó trả `02`. Xem quyết định 6 bên dưới.
 > - **Bước 6.3**: "ghế đang trống" = `AVAILABLE`, hoặc `HELD` của chính đơn, hoặc `HELD` của đơn khác đã quá `heldUntil` (ghế trống theo nguyên tắc 3 mục 4, như luồng giữ ghế). Ghế bị đơn khác giữ còn hạn, ghế `SOLD`, suất `CANCELLED` → bước 4.
 > - **Bước 6.4**: ghế của chính đơn còn `HELD` được nhả ngay (xem quyết định 1 bên dưới); ghế `SOLD` và ghế của đơn khác không đổi.
-> - **Suất đã bắt đầu** khi IPN thành công đến: xem quyết định 4 bên dưới. Suất `CANCELLED` → bước 4.
+> - **Suất đã bắt đầu** khi IPN thành công đến: xem quyết định 4 bên dưới. Suất `CANCELLED` hoặc đã kết thúc → bước 4.
 
 > **Quyết định tuần 12 (29/10/2026) — đều là làm rõ, không phải thay đổi thiết kế.** Bảng và các bước ở trên giữ nguyên; các điểm sau ghi rõ phần bảng chưa nói tới.
 > 1. **Nhả ghế khi chuyển `NEEDS_REVIEW`** (bước 4, kể cả khi bước 3 không giành lại được đủ ghế): trong cùng transaction IPN, các ghế `HELD` có `booking_id` của chính đơn về `AVAILABLE`, `booking_id = NULL`, `held_until = NULL`; ghế `SOLD` và ghế của đơn khác không đổi. Thứ tự khóa không đổi (`payments` → `bookings` → `showtime_seats ORDER BY seat_id FOR UPDATE`; các ghế này đã bị khóa ở bước 6.2/6.3 vì đều là ghế của đơn). Ghi outbox `seats.released` đúng một lần, chỉ khi có ghế được nhả (relay ở 4.1), và phát `seat:released` sau commit. Lý do: bước 4 không nói gì về ghế; để `HELD` thì ghế không phục vụ ai, `expireBooking` không nhả (đơn không còn `PENDING`) và hủy suất (1.14) bị chặn.
 > 2. **Log không chứa chữ ký hay secret**: log request (pino-http) bỏ hẳn `vnp_SecureHash`, cả tên lẫn giá trị, khỏi `url` và `query` của trang return và IPN; không log `VNPAY_HASH_SECRET`. Có test chụp log thật (`payment-logs.int-spec.ts`).
 > 3. **Bảng mã phản hồi**: khớp tài liệu VNPay như ghi ở trên; lỗi không lường trước là HTTP 500 `99`.
-> 4. **Suất đã bắt đầu khi IPN thành công**: tạm xác nhận (bước 2/3) kèm log `warn`, chờ chủ dự án xác nhận (ROADMAP "Quyết định chờ").
+> 4. **Suất đã bắt đầu khi IPN thành công** (chốt 29/10/2026 theo ủy quyền của chủ dự án): suất đã bắt đầu nhưng chưa kết thúc (`startsAt <= now < endsAt`) vẫn xác nhận theo bước 2/3, kèm log `warn` (khách vào muộn vẫn dùng được vé); suất đã kết thúc (`endsAt <= now`) → bước 4 với lý do `SHOWTIME_ENDED` (vé không còn dùng được, hoàn tiền tay), nhả ghế như mọi đơn `NEEDS_REVIEW`.
 > 5. **`PAYMENT_GRACE` giữ 5 phút** dù VNPay có thể gọi lại IPN trong khoảng 45 phút (10 lần, cách 5 phút); IPN đến sau `holdUntil` đi bước 3/4. Đánh giá lại sau khi có dữ liệu sandbox và số đơn `NEEDS_REVIEW` thực tế (ROADMAP "Quyết định chờ"). Hoàn tiền cho đơn `NEEDS_REVIEW` vẫn làm tay, là việc của admin (trang ở 3.8).
+> 6. **Một đơn được trả hai lần** (chốt 29/10/2026 theo ủy quyền của chủ dự án; **đây là thay đổi**, không phải làm rõ: thêm `Payment.REFUND_REQUIRED`, xem mục 3): lần trả sau thành `REFUND_REQUIRED` với dữ liệu VNPay gửi, outbox `payment.refund_required` (aggregate là payment), trả `00`. Trước đó lần trả sau chỉ được ghi vào log và `Payment` đó treo ở `PENDING`. Hoàn tiền vẫn làm tay (3.8).
 
 ### Xử lý `NEEDS_REVIEW` (ngoại lệ vận hành, chưa tự động)
 

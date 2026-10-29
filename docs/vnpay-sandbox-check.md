@@ -42,11 +42,11 @@ Còn lại khi có URL IPN đúng: thanh toán thẻ test NCB → ghi giờ IPN 
 Mỗi dòng là một mã phản hồi (hoặc một nhóm kiểm tra không gắn với một mã) trong một file test. Các cột:
 
 - **`RspCode`**: mã API trả cho VNPay; `99` đi kèm HTTP 500, mọi mã khác đi kèm HTTP 200. `—` là nhóm kiểm tra không gắn với một mã.
-- **Trường hợp**: điều API kiểm. Nhánh A: đơn `PENDING`, mọi ghế còn `HELD` cho đơn. Nhánh B: đơn `EXPIRED`, giành lại được mọi ghế. Nhánh C: không giữ được ghế, đơn `NEEDS_REVIEW` (PLAN §5).
+- **Trường hợp**: điều API kiểm. Nhánh A: đơn `PENDING`, mọi ghế còn `HELD` cho đơn. Nhánh B: đơn `EXPIRED`, giành lại được mọi ghế. Nhánh C: không giữ được ghế (hoặc suất đã hủy hay đã kết thúc), đơn `NEEDS_REVIEW` (PLAN §5).
 - **File test**: đường dẫn trong `apps/api`; `*.spec.ts` là unit test (transaction giả), `*.int-spec.ts` là integration test (Postgres và Redis thật).
 - **Số test pass**: số test của dòng đó, trong file đó, đã pass ở lần chạy ngày 29/10/2026 (Windows, và 3 lần liên tiếp trên Linux).
 - **Tổng số test**: số test của dòng đó trong file đó.
-- **Sandbox**: kết quả trên sandbox VNPay thật. "Chưa chạy" nghĩa là chưa có IPN thật nào (chờ URL IPN cố định).
+- **Sandbox**: kết quả trên sandbox VNPay thật. "Chưa chạy" nghĩa là chưa có IPN thật nào (xem mục "Thanh toán thật bằng thẻ test" bên dưới).
 
 | `RspCode` | Trường hợp | File test | Số test pass | Tổng số test | Sandbox |
 | --- | --- | --- | --- | --- | --- |
@@ -58,28 +58,42 @@ Mỗi dòng là một mã phản hồi (hoặc một nhóm kiểm tra không g�
 | `04` | `vnp_Amount` khác `amount × 100` (kiểm trước trạng thái) | `src/modules/payment/confirm-payment.spec.ts` | 6 | 6 | Chưa chạy |
 | `04` | `vnp_Amount` khác `amount × 100` | `test/integration/payment-ipn.int-spec.ts` | 2 | 2 | Chưa chạy |
 | `04` và `02` | Một test kiểm cả hai mã, lấy từ `confirmPayment` | `src/modules/payment/payment-ipn.spec.ts` | 1 | 1 | Chưa chạy |
-| `02` | `Payment` đã `SUCCESS` hoặc `FAILED`; hoặc đơn đã được một `Payment` khác trả | `src/modules/payment/confirm-payment.spec.ts` | 3 | 3 | Chưa chạy |
-| `02` | IPN lặp lại (2 lần nối tiếp, 10 lần đồng thời), thành công sau thất bại, trả hai lần | `test/integration/payment-ipn.int-spec.ts` | 4 | 4 | Chưa chạy |
+| `02` | `Payment` đã `SUCCESS`, `FAILED` hoặc `REFUND_REQUIRED` | `src/modules/payment/confirm-payment.spec.ts` | 3 | 3 | Chưa chạy |
+| `02` | IPN lặp lại (2 lần nối tiếp, 10 lần đồng thời), thành công sau thất bại | `test/integration/payment-ipn.int-spec.ts` | 3 | 3 | Chưa chạy |
 | `00` | Chưa trả: `Payment` `FAILED`, đơn giữ nguyên | `src/modules/payment/confirm-payment.spec.ts` | 3 | 3 | Chưa chạy |
 | `00` | Chưa trả: `Payment` `FAILED`, không phát sự kiện ghế | `src/modules/payment/payment-ipn.spec.ts` | 1 | 1 | Chưa chạy |
 | `00` | Chưa trả: `Payment` `FAILED`, đơn `PENDING`, thanh toán lại được | `test/integration/payment-ipn.int-spec.ts` | 3 | 3 | Chưa chạy |
-| `00` | Đã trả, nhánh A hoặc B: `CONFIRMED`, ghế `SOLD`, vé `ISSUED` | `src/modules/payment/confirm-payment.spec.ts` | 5 | 5 | Chưa chạy |
+| `00` | Trả hai lần: `Payment` thứ hai `REFUND_REQUIRED`, outbox `payment.refund_required`, đơn không đổi | `src/modules/payment/confirm-payment.spec.ts` | 2 | 2 | Chưa chạy |
+| `00` | Trả hai lần: như trên, IPN lặp lại của `Payment` đó trả `02` | `test/integration/payment-ipn.int-spec.ts` | 1 | 1 | Chưa chạy |
+| `00` | Đã trả, nhánh A hoặc B: `CONFIRMED`, ghế `SOLD`, vé `ISSUED` (kể cả suất đã bắt đầu, chưa kết thúc) | `src/modules/payment/confirm-payment.spec.ts` | 5 | 5 | Chưa chạy |
 | `00` | Đã trả, nhánh A: `seat:sold` sau commit | `src/modules/payment/payment-ipn.spec.ts` | 1 | 1 | Chưa chạy |
-| `00` | Đã trả, nhánh A hoặc B | `test/integration/payment-ipn.int-spec.ts` | 5 | 5 | Chưa chạy |
-| `00` | Đã trả, nhánh C: `NEEDS_REVIEW`, nhả ghế `HELD` của chính đơn | `src/modules/payment/confirm-payment.spec.ts` | 5 | 5 | Chưa chạy |
+| `00` | Đã trả, nhánh A hoặc B (kể cả suất đã bắt đầu, chưa kết thúc) | `test/integration/payment-ipn.int-spec.ts` | 5 | 5 | Chưa chạy |
+| `00` | Đã trả, nhánh C: `NEEDS_REVIEW`, nhả ghế `HELD` của chính đơn; gồm suất đã kết thúc (`SHOWTIME_ENDED`) | `src/modules/payment/confirm-payment.spec.ts` | 6 | 6 | Chưa chạy |
 | `00` | Đã trả, nhánh C: `seat:released` sau commit | `src/modules/payment/payment-ipn.spec.ts` | 1 | 1 | Chưa chạy |
-| `00` | Đã trả, nhánh C, gồm một ghế `SOLD` cho đơn khác: ghế còn lại của đơn về `AVAILABLE`, ghế `SOLD` không đổi | `test/integration/payment-ipn.int-spec.ts` | 5 | 5 | Chưa chạy |
+| `00` | Đã trả, nhánh C, gồm một ghế `SOLD` cho đơn khác (ghế còn lại của đơn về `AVAILABLE`, ghế `SOLD` không đổi) và suất đã kết thúc | `test/integration/payment-ipn.int-spec.ts` | 6 | 6 | Chưa chạy |
 | `99` | Lỗi không lường trước (dữ liệu sai lệch, đổi ít dòng hơn dự kiến): rollback | `src/modules/payment/confirm-payment.spec.ts` | 3 | 3 | Chưa chạy |
 | `99` | Thiếu `VNPAY_HASH_SECRET`; controller trả HTTP 500 khi service ném lỗi | `src/modules/payment/payment-ipn.spec.ts` | 2 | 2 | Chưa chạy |
 | `99` | Mã vé trùng, vé sống có sẵn (partial unique), thiếu secret: không ghi gì | `test/integration/payment-ipn.int-spec.ts` | 3 | 3 | Chưa chạy |
 | — | Khóa `payments` `FOR UPDATE` theo `txn_ref` trước mọi thứ | `src/modules/payment/confirm-payment.spec.ts` | 1 | 1 | — |
 | — | Controller luôn trả HTTP 200 với câu trả lời của service | `src/modules/payment/payment-ipn.spec.ts` | 1 | 1 | — |
-| — | `reclaimSeatsForExpiredBooking` gọi trực tiếp (3.5), tất cả hoặc không | `src/modules/payment/reclaim-seats.spec.ts` | 9 | 9 | — |
+| — | `reclaimSeatsForExpiredBooking` gọi trực tiếp (3.5), tất cả hoặc không, gồm suất đã kết thúc | `src/modules/payment/reclaim-seats.spec.ts` | 10 | 10 | — |
 | — | `reclaimSeatsForExpiredBooking` gọi trực tiếp (3.5), tất cả hoặc không | `test/integration/payment-ipn.int-spec.ts` | 4 | 4 | — |
 | — | Đua 20 vòng: IPN với hủy, với hết hạn, với giữ ghế của người khác | `test/integration/payment-ipn.int-spec.ts` | 3 | 3 | — |
-| — | Quy tắc ghế của nhánh A, B, C và mã vé | `src/modules/payment/seat-settlement.spec.ts` | 19 | 19 | — |
+| — | Quy tắc ghế của nhánh A, B, C, kiểm tra suất (hủy, đã kết thúc) và mã vé | `src/modules/payment/seat-settlement.spec.ts` | 22 | 22 | — |
 | — | Cặp `RspCode` và `Message`; điều kiện "đã trả" (`vnp_ResponseCode` và `vnp_TransactionStatus` đều `00`) | `src/modules/payment/vnpay/vnpay-ipn.spec.ts` | 10 | 10 | — |
 | — | Log của trang return và IPN (qua `97`, `04`, `00`, `02`, `99`) không chứa chữ ký, `vnp_SecureHash`, `HashSecret` hay secret | `test/integration/payment-logs.int-spec.ts` | 1 | 1 | — |
 | — | Bỏ `vnp_SecureHash` khỏi `url` và `query` của log request | `src/config/log-redaction.spec.ts` | 5 | 5 | — |
 
-Theo file: `confirm-payment.spec.ts` 27 test, `payment-ipn.spec.ts` 12, `reclaim-seats.spec.ts` 9, `seat-settlement.spec.ts` 19, `vnpay-ipn.spec.ts` 10, `log-redaction.spec.ts` 5, `payment-ipn.int-spec.ts` 34, `payment-logs.int-spec.ts` 1; tất cả đều pass.
+Theo file: `confirm-payment.spec.ts` 30 test, `payment-ipn.spec.ts` 12, `reclaim-seats.spec.ts` 10, `seat-settlement.spec.ts` 22, `vnpay-ipn.spec.ts` 10, `log-redaction.spec.ts` 5, `payment-ipn.int-spec.ts` 35, `payment-logs.int-spec.ts` 1; tất cả đều pass.
+
+## Thanh toán thật bằng thẻ test — 29/10/2026 (không thực hiện được)
+
+Cách làm được chọn để tiến mà không cần URL IPN cố định: thanh toán (và hủy) một đơn `PENDING` thật bằng thẻ test NCB, chặn lần trình duyệt quay về `VNPAY_RETURN_URL` (tham số do VNPay ký, giống hệt tham số IPN theo `pay.html`), rồi gửi nguyên bộ tham số đó tới return và IPN của API local. Cách này kiểm được chữ ký và giá trị thật của VNPay với IPN của mình, không kiểm được việc VNPay tự gọi IPN và retry.
+
+| Giờ (UTC) | Bước | Kết quả |
+| --- | --- | --- |
+| 14:19 | Mở URL thanh toán của 3 đơn thử (`pw12-explore-*`) bằng Chromium để dò trang | `PaymentMethod.html` → "Thẻ nội địa và tài khoản ngân hàng" → nút `#NCB` → `paymentv2/Ncb/Transaction/Index.html`: ô `#card_number_mask`, `#cardHolder`, `#cardDate`, nút `#btnContinue`, liên kết "Hủy thanh toán". Không nhập thẻ, không gửi gì |
+| ~14:25 | Chạy bước nhập thẻ test và OTP | **Bị chặn** bởi chính sách quyền của phiên Claude (xếp vào "giao dịch thực tế"). Không lách; luồng hủy trên VNPay cũng không chạy |
+| sau đó | Dọn dữ liệu | Xóa 3 user `pw12-explore-*`, 3 đơn, 3 `Payment` `PENDING` (chưa trả), trả 3 ghế về `AVAILABLE` |
+
+Script và hướng dẫn để chủ dự án tự chạy (ngoài repo): `C:\NestJsProject\ticketify-week12\` (`sandbox-pay.cjs pay|cancel <showtimeId>`, `cleanup.sql`). Script không in URL thanh toán, chữ ký hay secret.
