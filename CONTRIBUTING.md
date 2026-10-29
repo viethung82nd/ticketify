@@ -4,7 +4,7 @@
 
 - One task from [ROADMAP.md](ROADMAP.md) per branch: `phase-<n>/<task-id>-<slug>` (e.g. `phase-0/0.7-prisma-schema`).
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) and are checked by commitlint in the `commit-msg` hook.
-- The `pre-commit` hook runs ESLint + Prettier on staged files (lint-staged). Never bypass hooks with `--no-verify`.
+- The `pre-commit` hook runs ESLint + Prettier on staged files (lint-staged), then leaves out of the commit any file lint-staged staged that you had not (a lint-staged 17.6.0 bug, see `.husky/pre-commit`). Never bypass hooks with `--no-verify`.
 
 ## Tests that need OS signals
 
