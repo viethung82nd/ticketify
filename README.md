@@ -127,6 +127,14 @@ pnpm test:integration
 - Thứ tự khóa giống `expireBooking`: dòng `bookings` `FOR UPDATE`, rồi các `showtime_seats` `HELD` của đơn `FOR UPDATE ORDER BY seat_id`. Job hết hạn đến sau gặp `SKIP LOCKED` → `skipped`; job `expire-booking` của đơn đã hủy vẫn chạy ở `holdUntil` và kết thúc `noop`.
 - Sequence diagram của giữ ghế, hết hạn và hủy: [docs/sequence-hold.md](docs/sequence-hold.md).
 
+**Thanh toán VNPay** (giai đoạn 3, tuần 11):
+
+- `POST /payments/vnpay` (đăng nhập, chỉ chủ đơn), body `{ bookingId }` → `201 { paymentId, txnRef, paymentUrl, expiresAt }`: mỗi lần gọi là một lần thử mới, tạo một `Payment` `PENDING` với `txnRef` mới (20 ký tự chữ-số); web chuyển trình duyệt sang `paymentUrl`. `vnp_ExpireDate` = `expiresAt` của đơn, giờ GMT+7.
+- Đơn không `PENDING` (kể cả đã hủy) → `409 BOOKING_NOT_PAYABLE`; quá `expiresAt` → `422 BOOKING_EXPIRED`; đã có `Payment` `SUCCESS` → `409 BOOKING_ALREADY_PAID`; đơn của người khác → `404 BOOKING_NOT_FOUND`; thiếu cấu hình VNPay → `503 PAYMENT_NOT_CONFIGURED`. Rate limit `PAYMENT_RATE_LIMIT_MAX` (10) mỗi user mỗi `PAYMENT_RATE_LIMIT_WINDOW_SECONDS` (60 giây).
+- Khóa dòng `bookings` `FOR KEY SHARE`: nhiều lần tạo thanh toán chạy song song được, nhưng không chạy cùng lúc với hủy đơn hay hết hạn (cả hai `FOR UPDATE`). Hủy thắng thì tạo thanh toán nhận `409 BOOKING_NOT_PAYABLE`; tạo thanh toán thắng thì hủy nhận `409 BOOKING_HAS_PAYMENT_IN_PROGRESS`.
+- `GET /payments/vnpay/return` (công khai, rate limit theo IP `PAYMENT_RETURN_RATE_LIMIT_MAX`): **chỉ để hiển thị**, không đổi trạng thái nào. Sai chữ ký hoặc `vnp_TxnRef` lạ → `{ verified: false }`; ngược lại `{ verified: true, bookingId, paymentStatus, vnpResponseCode, amountMismatch }`, trong đó `paymentStatus` là trạng thái đang lưu. Kết quả thanh toán chỉ được ghi bởi IPN (tuần 12), nên tới lúc đó đơn vẫn `PENDING` dù VNPay trả mã `00`.
+- Trang web `/payment/result` (= `VNPAY_RETURN_URL`) gửi nguyên query cho API; mã `00` thì đọc lại đơn mỗi 3 giây (tối đa 2 phút) tới khi có trạng thái cuối.
+
 **Kịch bản A và B** (PLAN §10, `apps/api/test/scenarios/`): chỉ chạy khi đặt `RUN_SCENARIO_TESTS=1`; không đặt thì mọi suite bị bỏ qua và không khởi động container nào.
 
 ```bash
@@ -212,7 +220,7 @@ Tích hợp VNPay bắt đầu ở giai đoạn 3, nhưng nên đăng ký sớm 
    | `VNPAY_PAYMENT_URL` | `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html` (mặc định) |
    | `VNPAY_RETURN_URL` | URL trang kết quả trên web, ví dụ `http://localhost:5173/payment/result` |
 
-3. Hai biến đầu đang là tùy chọn ở giai đoạn 0; giai đoạn 3 sẽ chuyển thành bắt buộc. URL IPN cần một tunnel công khai (cloudflared/ngrok), xem PLAN mục 5.
+3. `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET` và `VNPAY_RETURN_URL` vẫn tùy chọn để API khởi động được khi chưa có tài khoản; thiếu một trong ba thì `POST /payments/vnpay` và `GET /payments/vnpay/return` trả `503 PAYMENT_NOT_CONFIGURED`. URL IPN cần một tunnel công khai (cloudflared/ngrok), xem PLAN mục 5.
 
 ## Quyết định đáng chú ý
 

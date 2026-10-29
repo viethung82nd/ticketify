@@ -114,6 +114,11 @@ export const envSchema = z.object({
   /** `POST /bookings` requests allowed per user inside one fixed window (ROADMAP 2.9). */
   BOOKING_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
   BOOKING_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  /** `POST /payments/vnpay` requests allowed per user inside one fixed window (ROADMAP 3.2). */
+  PAYMENT_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+  /** `GET /payments/vnpay/return` requests allowed per client IP inside one window (ROADMAP 3.3). */
+  PAYMENT_RETURN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
+  PAYMENT_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
 
   /** S3-compatible object storage (RustFS in dev). */
   S3_ENDPOINT: z.url({ protocol: /^https?$/ }),
@@ -133,7 +138,8 @@ export const envSchema = z.object({
   SMTP_PORT: port,
   SMTP_FROM: z.string().min(1),
 
-  // VNPay sandbox credentials are registered manually (see README); optional until phase 3.
+  // VNPay sandbox credentials are registered manually (see README). Optional so the API still boots
+  // without them; POST /payments/vnpay then answers 503 PAYMENT_NOT_CONFIGURED (ROADMAP 3.2).
   VNPAY_TMN_CODE: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   VNPAY_HASH_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   VNPAY_PAYMENT_URL: z.url().default('https://sandbox.vnpayment.vn/paymentv2/vpcpay.html'),

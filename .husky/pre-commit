@@ -1,1 +1,17 @@
+staged() { git -c core.quotepath=false diff --cached --name-only --no-renames; }
+
+before=$(staged)
 pnpm exec lint-staged
+
+# lint-staged 17.6.0 can `git add` a file that was never staged. It stages every file whose unstaged
+# diff changed while the tasks ran, and it reads `git diff` through tinyexec, which decodes stdout
+# chunk by chunk: a multi-byte character (Vietnamese text in README.md, ROADMAP.md…) cut at a chunk
+# boundary becomes U+FFFD in one read and not the other, so an untouched unstaged file looks changed.
+# Tasks only ever change files that were staged, so anything new in the index is put back
+# (index = HEAD, as it was before) and the working tree keeps the change.
+staged | while IFS= read -r file; do
+  if ! printf '%s\n' "$before" | grep -qxF -- "$file"; then
+    git reset -q -- "$file"
+    echo "pre-commit: left $file out of the commit (lint-staged staged it, you did not)" >&2
+  fi
+done
