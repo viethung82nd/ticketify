@@ -116,6 +116,8 @@ export const envSchema = z.object({
   BOOKING_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   /** `POST /payments/vnpay` requests allowed per user inside one fixed window (ROADMAP 3.2). */
   PAYMENT_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+  /** `GET /payments/vnpay/return` requests allowed per client IP inside one window (ROADMAP 3.3). */
+  PAYMENT_RETURN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
   PAYMENT_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
 
   /** S3-compatible object storage (RustFS in dev). */

@@ -1,18 +1,20 @@
-import { Body, Controller, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiServiceUnavailableResponse,
   ApiTags,
   ApiTooManyRequestsResponse,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
-import type { CreatedVnpayPayment } from '@ticketify/shared';
+import type { CreatedVnpayPayment, VnpayReturnResult } from '@ticketify/shared';
 import type { Request } from 'express';
 import { type AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { CreateVnpayPaymentDto } from './dto/create-vnpay-payment.dto';
 import { PaymentRateLimiter } from './payment-rate-limiter';
 import { PaymentService } from './payment.service';
@@ -61,5 +63,26 @@ export class PaymentsController {
       bookingId: dto.bookingId,
       clientIp: req.ip,
     });
+  }
+
+  @Get('return')
+  @Public()
+  @ApiOkResponse({
+    description:
+      'Display only, changes nothing. Bad signature or unknown vnp_TxnRef: { verified: false }. ' +
+      'Otherwise { verified: true, bookingId, paymentStatus (as stored: PENDING until the IPN), ' +
+      'vnpResponseCode, amountMismatch }',
+  })
+  @ApiTooManyRequestsResponse({
+    description:
+      'TOO_MANY_ATTEMPTS (details.retryAfterSeconds): PAYMENT_RETURN_RATE_LIMIT_MAX per client IP',
+  })
+  @ApiServiceUnavailableResponse({ description: NOT_CONFIGURED })
+  async vnpayReturn(
+    @Query() query: Record<string, unknown>,
+    @Req() req: Request,
+  ): Promise<VnpayReturnResult> {
+    await this.rateLimiter.consumeReturn(req.ip ?? 'unknown');
+    return this.payments.vnpayReturn(query);
   }
 }

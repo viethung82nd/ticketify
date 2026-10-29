@@ -4,6 +4,7 @@ import {
   type CreatedVnpayPayment,
   PaymentErrorCode,
   PaymentStatus,
+  type VnpayReturnResult,
 } from '@ticketify/shared';
 import { apiException } from '../../common/errors/api-error';
 import { AppConfig } from '../../config/app-config.service';
@@ -11,7 +12,7 @@ import type { Prisma } from '../../generated/prisma/client';
 import { ClockService } from '../../infra/clock/clock.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { newTxnRef, vnpayDate, vnpayIpAddr } from './vnpay/vnpay-format';
-import { VnpayService } from './vnpay/vnpay.service';
+import { type VnpayQuery, VnpayService } from './vnpay/vnpay.service';
 
 type Tx = Prisma.TransactionClient;
 
@@ -86,7 +87,7 @@ const notConfigured = () =>
   );
 
 /**
- * VNPay payment creation (PLAN §5, ROADMAP 3.2). Payment results are
+ * VNPay payments, creation and the return page (PLAN §5, ROADMAP 3.2–3.3). Payment results are
  * written by the IPN only (3.4): nothing here moves a payment or a booking to another status.
  */
 @Injectable()
@@ -207,6 +208,35 @@ export class PaymentService {
       }
     }
     throw new Error(`No unused txnRef after ${TXN_REF_ATTEMPTS} attempts`);
+  }
+
+  /**
+   * What the result page may show for the query VNPay sent the browser back with (`vnp_ReturnUrl`).
+   * Display only: it changes nothing, and `vnp_ResponseCode = 00` is never taken as "paid" (the
+   * IPN, signed server to server, is the only source of truth). A bad signature and an unknown
+   * `vnp_TxnRef` both answer `{ verified: false }` and nothing more.
+   */
+  async vnpayReturn(query: VnpayQuery): Promise<VnpayReturnResult> {
+    const { hashSecret } = this.vnpaySettings();
+    if (!this.vnpay.verifySignature(query, hashSecret)) return { verified: false };
+
+    const txnRef = query.vnp_TxnRef;
+    if (typeof txnRef !== 'string') return { verified: false };
+    const payment = await this.prisma.payment.findUnique({
+      where: { txnRef },
+      select: { bookingId: true, status: true, amount: true },
+    });
+    if (!payment) return { verified: false };
+
+    const responseCode = query.vnp_ResponseCode;
+    return {
+      verified: true,
+      bookingId: payment.bookingId,
+      paymentStatus: payment.status,
+      vnpResponseCode: typeof responseCode === 'string' ? responseCode : null,
+      // Compared as strings: anything but exactly amount × 100 is a mismatch.
+      amountMismatch: query.vnp_Amount !== String(payment.amount * VNPAY.amountFactor),
+    };
   }
 
   /** The merchant settings, or `503 PAYMENT_NOT_CONFIGURED` when one is missing. Read per call. */

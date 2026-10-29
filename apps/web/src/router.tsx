@@ -19,6 +19,7 @@ import { LoginPage } from '@/pages/login-page';
 import { MovieDetailPage } from '@/pages/movie-detail-page';
 import { MoviesPage } from '@/pages/movies-page';
 import { NotFoundPage } from '@/pages/not-found-page';
+import { PaymentResultPage } from '@/pages/payment-result-page';
 import { RegisterPage } from '@/pages/register-page';
 import { ForbiddenPage, StaffPage } from '@/pages/role-pages';
 import { StatusPage } from '@/pages/status-page';
@@ -62,6 +63,8 @@ export const router = createBrowserRouter([
         children: [
           { path: 'showtimes/:id/book', element: <BookingPage /> },
           { path: 'bookings/:id', element: <BookingDetailPage /> },
+          // vnp_ReturnUrl. Behind login: a guest is sent to /login with the query kept in `from`.
+          { path: 'payment/result', element: <PaymentResultPage /> },
         ],
       },
       {

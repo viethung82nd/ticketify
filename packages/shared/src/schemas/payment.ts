@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PaymentStatus } from '../enums.js';
 
 // ─── Requests ───
 
@@ -19,6 +20,29 @@ export const createdVnpayPaymentSchema = z.object({
   expiresAt: z.string(),
 });
 export type CreatedVnpayPayment = z.infer<typeof createdVnpayPaymentSchema>;
+
+/**
+ * `GET /payments/vnpay/return`: what the result page may show. Display only: the API changes
+ * nothing here (the IPN does, ROADMAP 3.4), so `paymentStatus` is whatever the database holds now
+ * and stays PENDING until the IPN arrives, whatever `vnpResponseCode` says.
+ */
+export const vnpayReturnResultSchema = z.discriminatedUnion('verified', [
+  /** Bad signature or unknown `vnp_TxnRef`: nothing else is disclosed. */
+  z.object({ verified: z.literal(false) }),
+  z.object({
+    verified: z.literal(true),
+    bookingId: z.uuid(),
+    paymentStatus: z.enum(PaymentStatus),
+    /** `vnp_ResponseCode` as VNPay sent it (`00` = VNPay reports success), or null if absent. */
+    vnpResponseCode: z.string().nullable(),
+    /** `vnp_Amount` ≠ amount × 100: never treat the result as a success. */
+    amountMismatch: z.boolean(),
+  }),
+]);
+export type VnpayReturnResult = z.infer<typeof vnpayReturnResultSchema>;
+
+/** `vnp_ResponseCode` VNPay uses for a successful transaction. */
+export const VNPAY_SUCCESS_CODE = '00';
 
 /** Machine-readable `code` values of payment API errors (also BOOKING_NOT_FOUND, TOO_MANY_ATTEMPTS). */
 export const PaymentErrorCode = {
