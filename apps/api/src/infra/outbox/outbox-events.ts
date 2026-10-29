@@ -16,12 +16,17 @@ export const OutboxEventType = {
    * a booking goes to review; `expireBooking` writes it too from ROADMAP 4.1.
    */
   SEATS_RELEASED: 'seats.released',
+  /**
+   * A second payment of an already paid booking went through at VNPay: tell an admin to refund
+   * it. The aggregate is the payment (REFUND_REQUIRED), not the booking.
+   */
+  PAYMENT_REFUND_REQUIRED: 'payment.refund_required',
 } as const;
 export type OutboxEventType = (typeof OutboxEventType)[keyof typeof OutboxEventType];
 
 export interface OutboxEventInput {
   type: OutboxEventType;
-  /** Id of the row the event is about (a booking id for the events above). */
+  /** Id of the row the event is about: the booking, or the payment for `payment.refund_required`. */
   aggregateId: string;
   payload: Prisma.InputJsonObject;
 }

@@ -11,9 +11,10 @@ const SHOWTIME_ID = '01a17e75-7100-7679-b8b1-0000000000a1';
 const SEAT_A = '01a17e75-7100-7679-b8b1-0000000000c1';
 const SEAT_B = '01a17e75-7100-7679-b8b1-0000000000c2';
 const STARTS_AT = at('2026-11-02T12:00:00.000Z');
+const ENDS_AT = at('2026-11-02T13:55:00.000Z');
 
 const expired = [{ status: BookingStatus.EXPIRED, showtime_id: SHOWTIME_ID }];
-const scheduled = [{ status: ShowtimeStatus.SCHEDULED, starts_at: STARTS_AT }];
+const scheduled = [{ status: ShowtimeStatus.SCHEDULED, starts_at: STARTS_AT, ends_at: ENDS_AT }];
 const seat = (
   seatId: string,
   status: ShowtimeSeatStatus,
@@ -43,7 +44,7 @@ describe('reclaimSeatsForExpiredBooking', () => {
     await expect(reclaimSeatsForExpiredBooking(tx, BOOKING_ID, NOW)).resolves.toEqual({
       reclaimed: true,
       seatIds: [SEAT_A, SEAT_B],
-      showtime: { id: SHOWTIME_ID, status: 'SCHEDULED', startsAt: STARTS_AT },
+      showtime: { id: SHOWTIME_ID, status: 'SCHEDULED', startsAt: STARTS_AT, endsAt: ENDS_AT },
     });
     const [update] = writes(statements);
     expect(update?.sql).toContain(
@@ -96,12 +97,27 @@ describe('reclaimSeatsForExpiredBooking', () => {
   });
 
   it('a cancelled showtime: nothing is updated', async () => {
-    const cancelled = [{ status: ShowtimeStatus.CANCELLED, starts_at: STARTS_AT }];
+    const cancelled = [
+      { status: ShowtimeStatus.CANCELLED, starts_at: STARTS_AT, ends_at: ENDS_AT },
+    ];
     const { tx, statements } = mockTx([expired, free, cancelled]);
 
     await expect(reclaimSeatsForExpiredBooking(tx, BOOKING_ID, NOW)).resolves.toMatchObject({
       reclaimed: false,
       problem: { reason: 'SHOWTIME_CANCELLED', seatIds: [] },
+    });
+    expect(writes(statements)).toEqual([]);
+  });
+
+  it('a showtime that is over: nothing is updated (SHOWTIME_ENDED)', async () => {
+    const over = [
+      { status: ShowtimeStatus.SCHEDULED, starts_at: at('2026-11-01T08:00:00.000Z'), ends_at: NOW },
+    ];
+    const { tx, statements } = mockTx([expired, free, over]);
+
+    await expect(reclaimSeatsForExpiredBooking(tx, BOOKING_ID, NOW)).resolves.toMatchObject({
+      reclaimed: false,
+      problem: { reason: 'SHOWTIME_ENDED', seatIds: [] },
     });
     expect(writes(statements)).toEqual([]);
   });

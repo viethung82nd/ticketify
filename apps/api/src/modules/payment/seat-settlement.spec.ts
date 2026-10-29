@@ -1,4 +1,4 @@
-import { ShowtimeSeatStatus } from '@ticketify/shared';
+import { ShowtimeSeatStatus, ShowtimeStatus } from '@ticketify/shared';
 import { FakeClock } from '../../infra/clock/testing/fake-clock';
 import {
   type BookingSeatState,
@@ -6,6 +6,7 @@ import {
   isReclaimable,
   reclaimProblem,
   ReviewReason,
+  showtimeProblem,
   TicketCodes,
 } from './seat-settlement';
 
@@ -114,6 +115,32 @@ describe('isReclaimable / reclaimProblem (branch B: EXPIRED booking)', () => {
       reason: ReviewReason.NO_SEATS,
       seatIds: [],
     });
+  });
+});
+
+describe('showtimeProblem', () => {
+  const showtime = (status: ShowtimeStatus, endsAt: Date) => ({ status, endsAt });
+
+  it('null while the showtime runs or has not started: late entry is allowed', () => {
+    expect(showtimeProblem(showtime(ShowtimeStatus.SCHEDULED, FUTURE), NOW)).toBe(null);
+  });
+
+  it('SHOWTIME_ENDED once endsAt has passed, and exactly at endsAt', () => {
+    expect(showtimeProblem(showtime(ShowtimeStatus.SCHEDULED, PAST), NOW)).toEqual({
+      reason: ReviewReason.SHOWTIME_ENDED,
+      seatIds: [],
+    });
+    expect(showtimeProblem(showtime(ShowtimeStatus.SCHEDULED, NOW), NOW)?.reason).toBe(
+      ReviewReason.SHOWTIME_ENDED,
+    );
+  });
+
+  it('SHOWTIME_CANCELLED first, ended or not', () => {
+    for (const endsAt of [PAST, FUTURE]) {
+      expect(showtimeProblem(showtime(ShowtimeStatus.CANCELLED, endsAt), NOW)?.reason).toBe(
+        ReviewReason.SHOWTIME_CANCELLED,
+      );
+    }
   });
 });
 

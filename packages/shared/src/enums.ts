@@ -44,12 +44,17 @@ export const BookingStatus = {
 } as const;
 export type BookingStatus = ValueOf<typeof BookingStatus>;
 
-/** One row per payment attempt. PENDING ──► SUCCESS | FAILED | EXPIRED */
+/**
+ * One row per payment attempt. PENDING ──► SUCCESS | FAILED | EXPIRED | REFUND_REQUIRED.
+ * REFUND_REQUIRED: VNPay took the money, but another attempt had already paid the booking (a
+ * booking is paid at most once); it is refunded by hand (week 12).
+ */
 export const PaymentStatus = {
   PENDING: 'PENDING',
   SUCCESS: 'SUCCESS',
   FAILED: 'FAILED',
   EXPIRED: 'EXPIRED',
+  REFUND_REQUIRED: 'REFUND_REQUIRED',
 } as const;
 export type PaymentStatus = ValueOf<typeof PaymentStatus>;
 

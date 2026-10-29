@@ -1,7 +1,7 @@
-import { BookingStatus, ShowtimeStatus } from '@ticketify/shared';
+import { BookingStatus } from '@ticketify/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { lockSeatsOfBooking, type ShowtimeState, showtimeOf } from './booking-seats';
-import { ReviewReason, reclaimProblem, type SeatProblem } from './seat-settlement';
+import { reclaimProblem, type SeatProblem, showtimeProblem } from './seat-settlement';
 
 type Tx = Prisma.TransactionClient;
 
@@ -14,8 +14,8 @@ export type ReclaimOutcome =
 /**
  * Branch B of the IPN (PLAN §5 step 6.3, ROADMAP 3.5): a booking that EXPIRED before its payment
  * was confirmed takes its seats back, if every one of them is still free for it (`isReclaimable`:
- * AVAILABLE, HELD by itself, or HELD by another booking past `heldUntil`) and the showtime was not
- * cancelled. All or nothing: one lost seat and no seat changes.
+ * AVAILABLE, HELD by itself, or HELD by another booking past `heldUntil`) and the showtime is
+ * neither cancelled nor over. All or nothing: one lost seat and no seat changes.
  *
  * Runs inside the IPN transaction, which already holds Payment → Booking (`FOR UPDATE`); it locks
  * the booking's seats next, `FOR UPDATE ORDER BY seat_id`, so the check and the update below see
@@ -36,13 +36,9 @@ export async function reclaimSeatsForExpiredBooking(
   // 1. Seats first, then the showtime (see showtimeOf).
   const seats = await lockSeatsOfBooking(tx, bookingId);
   const showtime = await showtimeOf(tx, booking.showtime_id);
-  if (showtime.status === ShowtimeStatus.CANCELLED) {
-    return {
-      reclaimed: false,
-      problem: { reason: ReviewReason.SHOWTIME_CANCELLED, seatIds: [] },
-      showtime,
-    };
-  }
+  // Cancelled or over: nothing to take back for.
+  const closed = showtimeProblem(showtime, now);
+  if (closed) return { reclaimed: false, problem: closed, showtime };
 
   // 2. All or nothing: one seat SOLD or held by a live booking and none is taken.
   const problem = reclaimProblem(seats, bookingId, now);

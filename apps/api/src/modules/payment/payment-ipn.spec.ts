@@ -163,7 +163,13 @@ describe('PaymentService.vnpayIpn', () => {
             held_until: null,
           },
         ],
-        [{ status: ShowtimeStatus.SCHEDULED, starts_at: new FakeClock('2026-11-02').now() }],
+        [
+          {
+            status: ShowtimeStatus.SCHEDULED,
+            starts_at: new FakeClock('2026-11-02').now(),
+            ends_at: new FakeClock('2026-11-03').now(),
+          },
+        ],
       ],
       [1, 1, 1],
     );
@@ -208,7 +214,13 @@ describe('PaymentService.vnpayIpn', () => {
             held_until: null,
           },
         ],
-        [{ status: ShowtimeStatus.CANCELLED, starts_at: new FakeClock('2026-11-02').now() }],
+        [
+          {
+            status: ShowtimeStatus.CANCELLED,
+            starts_at: new FakeClock('2026-11-02').now(),
+            ends_at: new FakeClock('2026-11-03').now(),
+          },
+        ],
         [{ seat_id: SEAT_A }],
       ],
       [1, 1],

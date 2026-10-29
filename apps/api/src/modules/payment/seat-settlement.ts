@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
-import { ShowtimeSeatStatus } from '@ticketify/shared';
+import { ShowtimeSeatStatus, ShowtimeStatus } from '@ticketify/shared';
 
 /** One seat of a paid booking, as locked by the IPN transaction. */
 export interface BookingSeatState {
@@ -18,6 +18,8 @@ export interface BookingSeatState {
 export const ReviewReason = {
   /** The showtime was cancelled. */
   SHOWTIME_CANCELLED: 'SHOWTIME_CANCELLED',
+  /** The showtime is over (`endsAt <= now`): a ticket would be of no use. */
+  SHOWTIME_ENDED: 'SHOWTIME_ENDED',
   /** A seat is SOLD (to another booking). */
   SEAT_SOLD: 'SEAT_SOLD',
   /** Another booking holds a seat. */
@@ -33,6 +35,24 @@ export interface SeatProblem {
   reason: ReviewReason;
   /** The seats behind `reason` and every other failing seat, sorted; empty for the showtime. */
   seatIds: string[];
+}
+
+/**
+ * Whether the showtime still takes a paid booking, whatever its seats: not when it was cancelled,
+ * nor once it is over. A showtime that has started but not ended still does (ROADMAP "Đã chốt":
+ * late entry), the caller only logs a warning.
+ */
+export function showtimeProblem(
+  showtime: { status: ShowtimeStatus; endsAt: Date },
+  now: Date,
+): SeatProblem | null {
+  if (showtime.status === ShowtimeStatus.CANCELLED) {
+    return { reason: ReviewReason.SHOWTIME_CANCELLED, seatIds: [] };
+  }
+  if (showtime.endsAt.getTime() <= now.getTime()) {
+    return { reason: ReviewReason.SHOWTIME_ENDED, seatIds: [] };
+  }
+  return null;
 }
 
 const SEVERITY: readonly ReviewReason[] = [

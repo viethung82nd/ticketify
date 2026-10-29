@@ -36,6 +36,7 @@ export interface ShowtimeState {
   id: string;
   status: ShowtimeStatus;
   startsAt: Date;
+  endsAt: Date;
 }
 
 /**
@@ -45,8 +46,8 @@ export interface ShowtimeState {
  * SOLD (it refuses HELD and SOLD seats).
  */
 export async function showtimeOf(tx: Tx, showtimeId: string): Promise<ShowtimeState> {
-  const [row] = await tx.$queryRaw<{ status: ShowtimeStatus; starts_at: Date }[]>`
-    SELECT status::text AS status, starts_at FROM showtimes WHERE id = ${showtimeId}::uuid`;
+  const [row] = await tx.$queryRaw<{ status: ShowtimeStatus; starts_at: Date; ends_at: Date }[]>`
+    SELECT status::text AS status, starts_at, ends_at FROM showtimes WHERE id = ${showtimeId}::uuid`;
   if (!row) throw new Error(`Showtime ${showtimeId} of a booking does not exist`);
-  return { id: showtimeId, status: row.status, startsAt: row.starts_at };
+  return { id: showtimeId, status: row.status, startsAt: row.starts_at, endsAt: row.ends_at };
 }

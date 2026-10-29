@@ -1,13 +1,20 @@
-import { BookingStatus, PaymentStatus, ShowtimeStatus, TicketStatus } from '@ticketify/shared';
+import { BookingStatus, PaymentStatus, TicketStatus } from '@ticketify/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { OutboxEventType, writeOutboxEvent } from '../../infra/outbox/outbox-events';
 import { lockSeatsOfBooking, type ShowtimeState, showtimeOf } from './booking-seats';
 import { reclaimSeatsForExpiredBooking } from './reclaim-seats';
-import { heldSeatsProblem, ReviewReason, type SeatProblem } from './seat-settlement';
+import { heldSeatsProblem, type SeatProblem, showtimeProblem } from './seat-settlement';
 import { vnpayAmount } from './vnpay/vnpay-format';
 import { readVnpayIpn, type VnpayIpnResult } from './vnpay/vnpay-ipn';
 
 type Tx = Prisma.TransactionClient;
+
+/** A payment in one of these has had its IPN recorded: any later IPN for it answers `02`. */
+const FINAL_STATUSES: ReadonlySet<PaymentStatus> = new Set([
+  PaymentStatus.SUCCESS,
+  PaymentStatus.FAILED,
+  PaymentStatus.REFUND_REQUIRED,
+]);
 
 export interface ConfirmPaymentInput {
   /** `vnp_TxnRef`. */
@@ -25,11 +32,13 @@ export type ConfirmOutcome =
   | { outcome: 'not_found' }
   /** `vnp_Amount` ≠ amount × 100 (`04`). */
   | { outcome: 'invalid_amount'; paymentId: string; expected: string; received: string | null }
-  /** The payment is SUCCESS or FAILED already, e.g. a repeated IPN (`02`). */
+  /** The payment is SUCCESS, FAILED or REFUND_REQUIRED already, e.g. a repeated IPN (`02`). */
   | { outcome: 'already_processed'; paymentId: string; status: PaymentStatus }
   /**
    * VNPay reports this payment paid, but another payment of the same booking already succeeded
-   * (two payment pages paid). Nothing is written (`02`); refunding it is manual for now.
+   * (two payment pages, both paid). The payment becomes REFUND_REQUIRED with what VNPay sent, and
+   * the outbox gets `payment.refund_required`; the booking and its seats do not change (`00`).
+   * The refund itself is done by hand (ROADMAP 3.8).
    */
   | {
       outcome: 'paid_twice';
@@ -137,7 +146,7 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
 
   // 3. Already recorded. EXPIRED is not final here: money that arrives after the booking gave up
   //    on this attempt must still be recorded.
-  if (payment.status === PaymentStatus.SUCCESS || payment.status === PaymentStatus.FAILED) {
+  if (FINAL_STATUSES.has(payment.status)) {
     return { outcome: 'already_processed', paymentId: payment.id, status: payment.status };
   }
 
@@ -171,12 +180,38 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
     throw new Error(`Booking ${payment.booking_id} of payment ${payment.id} is missing`);
 
   // 6. Paid twice: another payment of this booking already succeeded, and a booking is paid at
-  //    most once (payments_booking_id_success_key). Recorded nowhere but the log for now.
+  //    most once (payments_booking_id_success_key). This money goes back to the customer: the
+  //    payment is recorded as REFUND_REQUIRED, with everything VNPay sent (the refund needs
+  //    vnp_TransactionNo), and an admin is told through the outbox. Booking and seats stay.
   const [paid] = await tx.$queryRaw<{ id: string }[]>`
     SELECT id FROM payments
     WHERE booking_id = ${booking.id}::uuid AND status = 'SUCCESS'
     LIMIT 1`;
   if (paid) {
+    await tx.$executeRaw`
+      UPDATE payments
+      SET status = 'REFUND_REQUIRED', vnp_transaction_no = ${ipn.transactionNo},
+          bank_code = ${ipn.bankCode}, response_code = ${ipn.responseCode},
+          raw_payload = ${raw}::jsonb, processed_at = ${now}, updated_at = ${now}
+      WHERE id = ${payment.id}::uuid`;
+    await writeOutboxEvent(
+      tx,
+      {
+        type: OutboxEventType.PAYMENT_REFUND_REQUIRED,
+        aggregateId: payment.id,
+        payload: {
+          paymentId: payment.id,
+          txnRef,
+          bookingId: booking.id,
+          bookingCode: booking.code,
+          userId: booking.user_id,
+          amount: payment.amount,
+          vnpTransactionNo: ipn.transactionNo,
+          paidPaymentId: paid.id,
+        },
+      },
+      now,
+    );
     return {
       outcome: 'paid_twice',
       paymentId: payment.id,
@@ -201,7 +236,7 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
   // 8. The seats decide: A (still held), B (expired, taken back) or C (review).
   const settlement =
     booking.status === BookingStatus.PENDING
-      ? await settleHeldSeats(tx, booking)
+      ? await settleHeldSeats(tx, booking, now)
       : await settleExpiredBooking(tx, booking, now);
   const showtimeStarted = settlement.showtime.startsAt.getTime() <= now.getTime();
 
@@ -241,16 +276,13 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
 
 /**
  * Branch A (or C) for a PENDING booking: its seats must all still be HELD by it, even past
- * `heldUntil` (nobody took them), and the showtime not cancelled. A started showtime does not
- * matter here (owner decision pending).
+ * `heldUntil` (nobody took them), and the showtime neither cancelled nor over. A showtime that
+ * has started but not ended is still confirmed (late entry); the caller logs a warning.
  */
-async function settleHeldSeats(tx: Tx, booking: BookingRow): Promise<Settlement> {
+async function settleHeldSeats(tx: Tx, booking: BookingRow, now: Date): Promise<Settlement> {
   const seats = await lockSeatsOfBooking(tx, booking.id);
   const showtime = await showtimeOf(tx, booking.showtime_id);
-  const problem: SeatProblem | null =
-    showtime.status === ShowtimeStatus.CANCELLED
-      ? { reason: ReviewReason.SHOWTIME_CANCELLED, seatIds: [] }
-      : heldSeatsProblem(seats, booking.id);
+  const problem = showtimeProblem(showtime, now) ?? heldSeatsProblem(seats, booking.id);
   return {
     showtime,
     seatIds: problem ? [] : seats.map((seat) => seat.seatId),

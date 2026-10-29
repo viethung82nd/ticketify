@@ -98,6 +98,8 @@ enum PaymentStatus {
   SUCCESS
   FAILED
   EXPIRED
+  /// Paid at VNPay after another attempt had already paid the booking: refund by hand.
+  REFUND_REQUIRED
 
   @@map("payment_status")
 }

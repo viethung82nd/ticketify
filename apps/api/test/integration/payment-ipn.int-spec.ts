@@ -206,8 +206,11 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
 
   let movieId: string | undefined;
   let counter = 0;
-  /** Fresh `rows × 12` room with one upcoming showtime; `seat('A1')` gives a seat id. */
-  async function scene(rows = 2, startsAt = vn('2026-11-02', '19:00')) {
+  /**
+   * Fresh `rows × 12` room with one upcoming showtime; `seat('A1')` gives a seat id. A
+   * `duration` (minutes) gives the showtime a movie of its own with that length.
+   */
+  async function scene(rows = 2, startsAt = vn('2026-11-02', '19:00'), duration?: number) {
     counter += 1;
     const roomRes = await admin('/admin/rooms', {
       name: `Phòng IPN ${counter}`,
@@ -222,18 +225,24 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       if (!id) throw new Error(`No seat ${label}`);
       return id;
     };
-    movieId ??= (
-      await db.prisma.movie.create({
-        data: {
-          title: 'IPN Movie',
-          slug: `ipn-movie-${randomUUID()}`,
-          duration: 100,
-          ageRating: 'P',
-          releaseDate: instant('2026-10-01'),
-        },
-      })
-    ).id;
-    const showtimeRes = await admin('/admin/showtimes', { movieId, roomId: room.id, startsAt });
+    const newMovie = async (minutes: number) =>
+      (
+        await db.prisma.movie.create({
+          data: {
+            title: `IPN Movie ${minutes}`,
+            slug: `ipn-movie-${randomUUID()}`,
+            duration: minutes,
+            ageRating: 'P',
+            releaseDate: instant('2026-10-01'),
+          },
+        })
+      ).id;
+    const showtimeMovie = duration ? await newMovie(duration) : (movieId ??= await newMovie(100));
+    const showtimeRes = await admin('/admin/showtimes', {
+      movieId: showtimeMovie,
+      roomId: room.id,
+      startsAt,
+    });
     expect(showtimeRes.status).toBe(201);
     return { showtime: bodyOf<CreatedShowtime>(showtimeRes), seat };
   }
@@ -363,7 +372,8 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
    * bookings; a SUCCESS payment only for CONFIRMED/NEEDS_REVIEW; no seat HELD by an EXPIRED,
    * CONFIRMED or NEEDS_REVIEW booking (a booking sent to review releases its own seats); one outbox
    * event per CONFIRMED / NEEDS_REVIEW booking and none for others; at most one seats.released
-   * per booking, and only for a NEEDS_REVIEW one.
+   * per booking, and only for a NEEDS_REVIEW one; a REFUND_REQUIRED payment exactly when there is
+   * one payment.refund_required event for it, and only next to a SUCCESS payment of its booking.
    */
   async function violations() {
     const q = <T>(sql: TemplateStringsArray) => db.prisma.$queryRaw<T[]>(sql);
@@ -376,6 +386,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       successNotSettled,
       heldByOver,
       outboxMismatch,
+      refundMismatch,
     ] = await Promise.all([
       q`SELECT showtime_id, seat_id, count(*)::int AS n FROM tickets WHERE status <> 'VOID'
         GROUP BY showtime_id, seat_id HAVING count(*) > 1`,
@@ -407,6 +418,13 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
                  <> CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END
             OR count(o.id) FILTER (WHERE o.type = 'seats.released')
                  > CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END`,
+      q`SELECT p.id FROM payments p
+        WHERE (SELECT count(*) FROM outbox_events o
+               WHERE o.aggregate_id = p.id::text AND o.type = 'payment.refund_required')
+                <> CASE WHEN p.status = 'REFUND_REQUIRED' THEN 1 ELSE 0 END
+           OR (p.status = 'REFUND_REQUIRED' AND NOT EXISTS (
+                SELECT 1 FROM payments s
+                WHERE s.booking_id = p.booking_id AND s.status = 'SUCCESS'))`,
     ]);
     return {
       duplicateTickets,
@@ -417,6 +435,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       successNotSettled,
       heldByOver,
       outboxMismatch,
+      refundMismatch,
     };
   }
 
@@ -429,6 +448,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
     successNotSettled: [],
     heldByOver: [],
     outboxMismatch: [],
+    refundMismatch: [],
   };
 
   const deadlocks = async () => {
@@ -664,7 +684,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       await expect(expiry.expire(paid.booking.id)).resolves.toEqual({ outcome: 'noop' });
     });
 
-    it('the showtime has started (owner decision pending): still CONFIRMED', async () => {
+    it('the showtime has started but not ended (late entry): still CONFIRMED', async () => {
       // Starts 17:12 Vietnam time, two minutes after the booking's expiresAt.
       const { showtime, seat } = await scene(1, vn('2026-11-01', '17:12'));
       const paid = await bookAndPay(showtime.id, [seat('A1')]);
@@ -672,6 +692,25 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
 
       expect((await sendIpn(ipnQuery(paid))).body).toEqual(OK);
       expect((await stateOf(paid)).booking.status).toBe('CONFIRMED');
+    });
+
+    it('the showtime is over: NEEDS_REVIEW (SHOWTIME_ENDED), no ticket, its seats released', async () => {
+      // A 1-minute movie at 17:05 Vietnam time: with 15 minutes of cleanup it ends at 17:21.
+      const { showtime, seat } = await scene(1, vn('2026-11-01', '17:05'), 1);
+      const paid = await bookAndPay(showtime.id, [seat('A1'), seat('A2')]);
+      clock.set(instant(vn('2026-11-01', '17:30')));
+
+      expect((await sendIpn(ipnQuery(paid))).body).toEqual(OK);
+      const state = await stateOf(paid);
+      expect(state.booking.status).toBe('NEEDS_REVIEW');
+      expect(state.payments.map((p) => p.status)).toEqual(['SUCCESS']);
+      expect(state.tickets).toEqual([]);
+      expect(state.seats).toEqual(seatsOf(paid, 'AVAILABLE', null));
+      const reasons = state.events.map((e) => [e.type, (e.payload as { reason?: string }).reason]);
+      expect(reasons.sort()).toEqual([
+        ['booking.needs_review', 'SHOWTIME_ENDED'],
+        ['seats.released', undefined],
+      ]);
     });
   });
 
@@ -955,7 +994,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       expect(state.events).toHaveLength(1);
     }, 30_000);
 
-    it('two payment pages of one booking both paid: the first confirms, the second answers 02 and stays PENDING', async () => {
+    it('two payment pages of one booking both paid: the first confirms, the second becomes REFUND_REQUIRED', async () => {
       const paid = await paidBooking(1);
       clock.advance({ seconds: 1 });
       const second = await paymentFor(paid.user, paid.booking.id);
@@ -963,14 +1002,51 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
       expect((await sendIpn(ipnQuery(paid))).body).toEqual(OK);
-      const after = await stateOf(paid);
-      expect((await sendIpn(ipnQuery({ ...paid, payment: second }))).body).toEqual(ALREADY);
+      const confirmed = await stateOf(paid);
+      const secondQuery = ipnQuery({ ...paid, payment: second });
+      clock.advance({ seconds: 30 });
 
-      expect(await stateOf(paid)).toEqual(after);
-      expect(after.payments.map((p) => [p.id, p.status])).toEqual([
-        [paid.payment.paymentId, 'SUCCESS'],
-        [second.paymentId, 'PENDING'],
+      expect((await sendIpn(secondQuery)).body).toEqual(OK);
+
+      const after = await stateOf(paid);
+      // The booking, its seats, tickets and events did not change…
+      expect({ ...after, payments: [] }).toEqual({ ...confirmed, payments: [] });
+      // …and the second payment is recorded for a refund, with the VNPay transaction number.
+      expect(after.payments).toEqual([
+        confirmed.payments[0],
+        {
+          id: second.paymentId,
+          status: 'REFUND_REQUIRED',
+          vnpTransactionNo: secondQuery.vnp_TransactionNo,
+          bankCode: 'NCB',
+          responseCode: '00',
+          processedAt: clock.now(),
+        },
       ]);
+      const refundEvents = await db.prisma.outboxEvent.findMany({
+        where: { aggregateId: second.paymentId },
+        select: { type: true, status: true, payload: true },
+      });
+      expect(refundEvents).toEqual([
+        {
+          type: 'payment.refund_required',
+          status: 'PENDING',
+          payload: expect.objectContaining({
+            paymentId: second.paymentId,
+            bookingId: paid.booking.id,
+            amount: paid.booking.total,
+            vnpTransactionNo: secondQuery.vnp_TransactionNo,
+            paidPaymentId: paid.payment.paymentId,
+          }) as unknown,
+        },
+      ]);
+
+      // A repeated IPN of the second payment: 02, nothing more.
+      expect((await sendIpn(secondQuery)).body).toEqual(ALREADY);
+      expect(await stateOf(paid)).toEqual(after);
+      expect(await db.prisma.outboxEvent.count({ where: { aggregateId: second.paymentId } })).toBe(
+        1,
+      );
     });
   });
 

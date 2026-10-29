@@ -263,10 +263,11 @@ export class PaymentService {
    * 1. Signature (before anything else, as VNPay asks) → `97`.
    * 2. No `vnp_TxnRef`, or no payment with it → `01`.
    * 3. `vnp_Amount` ≠ amount × 100 → `04`.
-   * 4. Payment already SUCCESS or FAILED (a repeated IPN) → `02`; a second successful payment of
-   *    an already paid booking → `02` as well, nothing written (logged as an error).
+   * 4. Payment already SUCCESS, FAILED or REFUND_REQUIRED (a repeated IPN) → `02`.
    * 5. Not paid → Payment FAILED, booking untouched → `00`.
-   * 6. Paid → seats SOLD + CONFIRMED + tickets, or NEEDS_REVIEW (its own HELD seats released) →
+   * 6. Paid, but another payment had already paid the booking → payment REFUND_REQUIRED, outbox
+   *    `payment.refund_required`, booking untouched → `00` (logged as an error: refund by hand).
+   * 7. Paid → seats SOLD + CONFIRMED + tickets, or NEEDS_REVIEW (its own HELD seats released) →
    *    `00`.
    */
   async vnpayIpn(query: VnpayQuery): Promise<VnpayIpnResponse> {
@@ -319,9 +320,9 @@ export class PaymentService {
         return;
       case 'paid_twice':
         this.logger.error(
-          `IPN 02: payment ${result.paymentId} (${ref}, vnp_TransactionNo ` +
+          `IPN 00: payment ${result.paymentId} (${ref}, vnp_TransactionNo ` +
             `${result.transactionNo ?? '-'}) was paid, but booking ${result.bookingId} was already ` +
-            `paid by payment ${result.paidPaymentId}; nothing changed, refund it manually`,
+            `paid by payment ${result.paidPaymentId}: REFUND_REQUIRED, refund it by hand`,
         );
         return;
       case 'failed':
@@ -373,8 +374,8 @@ export function ipnResponseOf(result: ConfirmOutcome): VnpayIpnResponse {
     case 'invalid_amount':
       return VnpayIpnResponse.INVALID_AMOUNT;
     case 'already_processed':
-    case 'paid_twice':
       return VnpayIpnResponse.ALREADY_CONFIRMED;
+    case 'paid_twice':
     case 'failed':
     case 'confirmed':
     case 'needs_review':

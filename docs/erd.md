@@ -203,7 +203,7 @@ erDiagram
         uuid booking_id FK "UK(booking_id) WHERE status = SUCCESS"
         text txn_ref UK "vnp_TxnRef"
         int amount
-        payment_status status "PENDING | SUCCESS | FAILED | EXPIRED"
+        payment_status status "PENDING | SUCCESS | FAILED | EXPIRED | REFUND_REQUIRED"
         text vnp_transaction_no UK "nullable"
         text bank_code "nullable"
         text response_code "nullable"

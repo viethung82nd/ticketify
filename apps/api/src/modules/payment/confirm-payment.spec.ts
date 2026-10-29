@@ -12,6 +12,7 @@ import { mockTx, type Statement, writes } from './testing/mock-tx';
 const at = (iso: string): Date => new FakeClock(iso).now();
 const NOW = at('2026-11-01T10:05:00.000Z');
 const STARTS_AT = at('2026-11-02T12:00:00.000Z');
+const ENDS_AT = at('2026-11-02T13:55:00.000Z');
 const HELD_UNTIL = at('2026-11-01T10:15:00.000Z');
 const TXN_REF = 'Bq2qmIzmEDBQ2nWyKR55';
 const PAYMENT_ID = '01a17e75-7100-7679-b8b1-0000000000f1';
@@ -54,9 +55,11 @@ const heldByBooking = [
   seatRow(SEAT_A, ShowtimeSeatStatus.HELD, BOOKING_ID, HELD_UNTIL),
   seatRow(SEAT_B, ShowtimeSeatStatus.HELD, BOOKING_ID, HELD_UNTIL),
 ];
-const showtimeRow = (status: ShowtimeStatus = ShowtimeStatus.SCHEDULED, startsAt = STARTS_AT) => [
-  { status, starts_at: startsAt },
-];
+const showtimeRow = (
+  status: ShowtimeStatus = ShowtimeStatus.SCHEDULED,
+  startsAt = STARTS_AT,
+  endsAt = ENDS_AT,
+) => [{ status, starts_at: startsAt, ends_at: endsAt }];
 
 let codes = 0;
 const run = (rows: unknown[][], affected: number[] = [], params = ipn(), now = NOW) => {
@@ -130,7 +133,7 @@ describe('confirmPayment — classification (RspCode)', () => {
     expect(rspCode(await result)).toBe('04');
   });
 
-  it.each([PaymentStatus.SUCCESS, PaymentStatus.FAILED])(
+  it.each([PaymentStatus.SUCCESS, PaymentStatus.FAILED, PaymentStatus.REFUND_REQUIRED])(
     '02: payment already %s; nothing written, the booking is not even read',
     async (status) => {
       const { result, statements } = run([paymentRow(status)]);
@@ -196,24 +199,59 @@ describe('confirmPayment — classification (RspCode)', () => {
     await expect(result).resolves.toMatchObject({ outcome: 'confirmed' });
   });
 
-  it('02: another payment of the booking already succeeded (paid twice); nothing written', async () => {
-    const { result, statements } = run([
-      paymentRow(),
-      bookingRow(BookingStatus.CONFIRMED),
-      [{ id: OTHER_PAYMENT_ID }],
-    ]);
+  it.each([BookingStatus.CONFIRMED, BookingStatus.NEEDS_REVIEW])(
+    '00: another payment of the %s booking already succeeded (paid twice) → REFUND_REQUIRED, outbox, booking and seats untouched',
+    async (status) => {
+      const params = ipn();
+      const { result, statements, mock } = run(
+        [paymentRow(), bookingRow(status), [{ id: OTHER_PAYMENT_ID }]],
+        [1],
+        params,
+      );
 
-    const outcome = await result;
-    expect(outcome).toEqual({
-      outcome: 'paid_twice',
-      paymentId: PAYMENT_ID,
-      bookingId: BOOKING_ID,
-      paidPaymentId: OTHER_PAYMENT_ID,
-      transactionNo: '14226112',
-    });
-    expect(rspCode(outcome)).toBe('02');
-    expect(writes(statements)).toEqual([]);
-  });
+      const outcome = await result;
+      expect(outcome).toEqual({
+        outcome: 'paid_twice',
+        paymentId: PAYMENT_ID,
+        bookingId: BOOKING_ID,
+        paidPaymentId: OTHER_PAYMENT_ID,
+        transactionNo: '14226112',
+      });
+      expect(rspCode(outcome)).toBe('00');
+      expect(shape(writes(statements))).toEqual(['UPDATE payments', 'INSERT outbox_events']);
+      const [update] = writes(statements);
+      expect(update?.sql).toContain(
+        "SET status = 'REFUND_REQUIRED', vnp_transaction_no = $, bank_code = $, response_code = $, raw_payload = $::jsonb, processed_at = $, updated_at = $ WHERE id = $::uuid",
+      );
+      expect(update?.values).toEqual([
+        '14226112',
+        'NCB',
+        '00',
+        JSON.stringify(params),
+        NOW,
+        NOW,
+        PAYMENT_ID,
+      ]);
+      const [event] = mock.outboxEvent.create.mock.calls[0]!;
+      expect(event.data).toEqual({
+        type: 'payment.refund_required',
+        aggregateId: PAYMENT_ID,
+        payload: {
+          paymentId: PAYMENT_ID,
+          txnRef: TXN_REF,
+          bookingId: BOOKING_ID,
+          bookingCode: 'K7PX3MQ9TA',
+          userId: USER_ID,
+          amount: AMOUNT,
+          vnpTransactionNo: '14226112',
+          paidPaymentId: OTHER_PAYMENT_ID,
+        },
+        nextRetryAt: NOW,
+        createdAt: NOW,
+      });
+      expect(mock.ticket.createManyAndReturn).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([BookingStatus.CONFIRMED, BookingStatus.NEEDS_REVIEW])(
     'a %s booking without any SUCCESS payment is a bug: throws (500), nothing written',
@@ -314,6 +352,28 @@ describe('confirmPayment — branch A (PENDING, seats still HELD)', () => {
     );
 
     await expect(result).resolves.toMatchObject({ outcome: 'confirmed', showtimeStarted: true });
+  });
+
+  it('a showtime that is over (endsAt <= now) is not confirmed: NEEDS_REVIEW SHOWTIME_ENDED, its seats released', async () => {
+    const { result, mock } = run(
+      [
+        paymentRow(),
+        bookingRow(BookingStatus.PENDING),
+        [],
+        heldByBooking,
+        showtimeRow(ShowtimeStatus.SCHEDULED, at('2026-11-01T08:00:00.000Z'), NOW),
+        [{ seat_id: SEAT_A }, { seat_id: SEAT_B }],
+      ],
+      [1, 1],
+    );
+
+    await expect(result).resolves.toMatchObject({
+      outcome: 'needs_review',
+      problem: { reason: 'SHOWTIME_ENDED', seatIds: [] },
+      releasedSeatIds: [SEAT_A, SEAT_B],
+      showtimeStarted: true,
+    });
+    expect(mock.ticket.createManyAndReturn).not.toHaveBeenCalled();
   });
 
   it('fewer seats sold than locked: throws, so the whole IPN rolls back', async () => {
