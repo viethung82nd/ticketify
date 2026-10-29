@@ -178,6 +178,13 @@ export const BookingErrorCode = {
   BOOKING_ALREADY_PENDING: 'BOOKING_ALREADY_PENDING',
   /** 404: no such booking, or it belongs to another user (never 403: that would confirm it exists). */
   BOOKING_NOT_FOUND: 'BOOKING_NOT_FOUND',
+  /**
+   * 409: `DELETE /bookings/:id` on a booking that is CONFIRMED or NEEDS_REVIEW, or that has a
+   * SUCCESS payment.
+   */
+  BOOKING_NOT_CANCELLABLE: 'BOOKING_NOT_CANCELLABLE',
+  /** 409: `DELETE /bookings/:id` while a payment of the booking is PENDING (in progress at VNPay). */
+  BOOKING_HAS_PAYMENT_IN_PROGRESS: 'BOOKING_HAS_PAYMENT_IN_PROGRESS',
   /** 429: too many `POST /bookings` from this user; `details.retryAfterSeconds`. Same code as login. */
   TOO_MANY_ATTEMPTS: 'TOO_MANY_ATTEMPTS',
 } as const;
