@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import {
   BookingStatus,
   type CreatedVnpayPayment,
@@ -11,7 +11,11 @@ import { AppConfig } from '../../config/app-config.service';
 import type { Prisma } from '../../generated/prisma/client';
 import { ClockService } from '../../infra/clock/clock.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
-import { newTxnRef, vnpayDate, vnpayIpAddr } from './vnpay/vnpay-format';
+import { SeatEvents } from '../realtime/seat-events';
+import { confirmPayment, type ConfirmOutcome } from './confirm-payment';
+import { TicketCodes } from './seat-settlement';
+import { newTxnRef, vnpayAmount, vnpayDate, vnpayIpAddr } from './vnpay/vnpay-format';
+import { signedParams, VnpayIpnResponse } from './vnpay/vnpay-ipn';
 import { type VnpayQuery, VnpayService } from './vnpay/vnpay.service';
 
 type Tx = Prisma.TransactionClient;
@@ -22,6 +26,14 @@ type Tx = Prisma.TransactionClient;
  * Same bounds as CANCEL_TX for that reason.
  */
 const PAYMENT_TX = { maxWait: 5_000, timeout: 10_000 } as const;
+
+/**
+ * Interactive-transaction limits of an IPN. It waits on row locks held for milliseconds: the
+ * payment row (a repeated IPN of the same payment), the booking row (a cancel, a payment creation)
+ * and the seats (a hold, a cancel, an expiry, a showtime cancel). Past either bound the IPN
+ * answers 500, nothing is written and VNPay calls again.
+ */
+const IPN_TX = { maxWait: 5_000, timeout: 10_000 } as const;
 
 /**
  * A new random `vnp_TxnRef` that collides with an existing one is skipped (ON CONFLICT DO NOTHING)
@@ -38,8 +50,6 @@ const VNPAY = {
   /** Goods category; the documentation's own sample uses `other`. */
   orderType: 'other',
   locale: 'vn',
-  /** `vnp_Amount` is in hundredths of a dong: 10,000 VND is sent as 1000000. */
-  amountFactor: 100,
 } as const;
 
 export interface CreateVnpayPaymentInput {
@@ -87,16 +97,21 @@ const notConfigured = () =>
   );
 
 /**
- * VNPay payments, creation and the return page (PLAN §5, ROADMAP 3.2–3.3). Payment results are
- * written by the IPN only (3.4): nothing here moves a payment or a booking to another status.
+ * VNPay payments (PLAN §5, ROADMAP 3.2–3.4): creation, the return page and the IPN. Payment
+ * results are written by the IPN only (`vnpayIpn`); creation and the return page never move a
+ * payment or a booking to another status.
  */
 @Injectable()
 export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
     private readonly vnpay: VnpayService,
     private readonly config: AppConfig,
+    private readonly seatEvents: SeatEvents,
+    private readonly ticketCodes: TicketCodes,
   ) {}
 
   /**
@@ -132,7 +147,7 @@ export class PaymentService {
         vnp_Version: VNPAY.version,
         vnp_Command: VNPAY.command,
         vnp_TmnCode: settings.tmnCode,
-        vnp_Amount: created.amount * VNPAY.amountFactor,
+        vnp_Amount: vnpayAmount(created.amount),
         vnp_CurrCode: VNPAY.currency,
         vnp_TxnRef: created.txnRef,
         // Unaccented and without special characters, as VNPay asks.
@@ -235,8 +250,105 @@ export class PaymentService {
       paymentStatus: payment.status,
       vnpResponseCode: typeof responseCode === 'string' ? responseCode : null,
       // Compared as strings: anything but exactly amount × 100 is a mismatch.
-      amountMismatch: query.vnp_Amount !== String(payment.amount * VNPAY.amountFactor),
+      amountMismatch: query.vnp_Amount !== vnpayAmount(payment.amount),
     };
+  }
+
+  /**
+   * One VNPay IPN (`GET /payments/vnpay/ipn`, server to server): checks it in the order of the IPN
+   * table (PLAN §5) and records the result with `confirmPayment`. Every answer here is sent with
+   * HTTP 200; an error thrown from here (database, timeout, missing hash secret) has written
+   * nothing and becomes HTTP 500 `99` in the controller, so VNPay calls again.
+   *
+   * 1. Signature (before anything else, as VNPay asks) → `97`.
+   * 2. No `vnp_TxnRef`, or no payment with it → `01`.
+   * 3. `vnp_Amount` ≠ amount × 100 → `04`.
+   * 4. Payment already SUCCESS or FAILED (a repeated IPN) → `02`; a second successful payment of
+   *    an already paid booking → `02` as well, nothing written (logged as an error).
+   * 5. Not paid → Payment FAILED, booking untouched → `00`.
+   * 6. Paid → seats SOLD + CONFIRMED + tickets, or NEEDS_REVIEW → `00`.
+   */
+  async vnpayIpn(query: VnpayQuery): Promise<VnpayIpnResponse> {
+    const hashSecret = this.config.get('VNPAY_HASH_SECRET');
+    if (!hashSecret) throw new Error('VNPAY_HASH_SECRET is not set: the IPN cannot be verified');
+    const claimedRef = typeof query.vnp_TxnRef === 'string' ? query.vnp_TxnRef : '-';
+
+    if (!this.vnpay.verifySignature(query, hashSecret)) {
+      this.logger.warn(`IPN 97: invalid signature (vnp_TxnRef ${claimedRef}), nothing changed`);
+      return VnpayIpnResponse.INVALID_SIGNATURE;
+    }
+    const params = signedParams(query);
+    const txnRef = params.vnp_TxnRef;
+    if (!txnRef) {
+      this.logger.warn('IPN 01: signed IPN without vnp_TxnRef, nothing changed');
+      return VnpayIpnResponse.ORDER_NOT_FOUND;
+    }
+
+    const now = this.clock.now();
+    const result = await this.prisma.$transaction(
+      (tx) =>
+        confirmPayment(tx, { txnRef, params, now, ticketCode: () => this.ticketCodes.next() }),
+      IPN_TX,
+    );
+
+    // After the commit only: a rolled-back sale must never be announced (best-effort, never throws).
+    if (result.outcome === 'confirmed') this.seatEvents.sold(result.showtimeId, result.seatIds);
+    this.logIpn(txnRef, result);
+    return ipnResponseOf(result);
+  }
+
+  /** One line per IPN with the ids needed to follow it up; never the hash or the hash secret. */
+  private logIpn(txnRef: string, result: ConfirmOutcome): void {
+    const ref = `vnp_TxnRef ${txnRef}`;
+    switch (result.outcome) {
+      case 'not_found':
+        this.logger.warn(`IPN 01: no payment for ${ref}, nothing changed`);
+        return;
+      case 'invalid_amount':
+        this.logger.warn(
+          `IPN 04: payment ${result.paymentId} (${ref}) expects vnp_Amount ${result.expected}, ` +
+            `got ${result.received ?? '(none)'}; nothing changed`,
+        );
+        return;
+      case 'already_processed':
+        this.logger.log(`IPN 02: payment ${result.paymentId} (${ref}) already ${result.status}`);
+        return;
+      case 'paid_twice':
+        this.logger.error(
+          `IPN 02: payment ${result.paymentId} (${ref}, vnp_TransactionNo ` +
+            `${result.transactionNo ?? '-'}) was paid, but booking ${result.bookingId} was already ` +
+            `paid by payment ${result.paidPaymentId}; nothing changed, refund it manually`,
+        );
+        return;
+      case 'failed':
+        this.logger.log(
+          `IPN 00: payment ${result.paymentId} (${ref}) FAILED (vnp_ResponseCode ` +
+            `${result.responseCode ?? '-'}, vnp_TransactionStatus ${result.transactionStatus ?? '-'}); ` +
+            `booking ${result.bookingId} unchanged`,
+        );
+        return;
+      case 'confirmed':
+        this.logger.log(
+          `IPN 00: payment ${result.paymentId} (${ref}) SUCCESS, booking ${result.bookingId} ` +
+            `CONFIRMED, ` +
+            `${result.ticketIds.length} ticket(s)`,
+        );
+        if (result.showtimeStarted) {
+          this.logger.warn(
+            `IPN: booking ${result.bookingId} was confirmed after its showtime ` +
+              `${result.showtimeId} had started (owner decision pending)`,
+          );
+        }
+        return;
+      case 'needs_review':
+        this.logger.warn(
+          `IPN 00: payment ${result.paymentId} (${ref}) SUCCESS, booking ${result.bookingId} ` +
+            `NEEDS_REVIEW (${result.problem.reason}${
+              result.problem.seatIds.length > 0 ? `: ${result.problem.seatIds.join(', ')}` : ''
+            })`,
+        );
+        return;
+    }
   }
 
   /** The merchant settings, or `503 PAYMENT_NOT_CONFIGURED` when one is missing. Read per call. */
@@ -246,5 +358,22 @@ export class PaymentService {
     const returnUrl = this.config.get('VNPAY_RETURN_URL');
     if (!tmnCode || !hashSecret || !returnUrl) throw notConfigured();
     return { tmnCode, hashSecret, returnUrl, paymentUrl: this.config.get('VNPAY_PAYMENT_URL') };
+  }
+}
+
+/** The `RspCode` of each outcome (PLAN §5 IPN table). */
+export function ipnResponseOf(result: ConfirmOutcome): VnpayIpnResponse {
+  switch (result.outcome) {
+    case 'not_found':
+      return VnpayIpnResponse.ORDER_NOT_FOUND;
+    case 'invalid_amount':
+      return VnpayIpnResponse.INVALID_AMOUNT;
+    case 'already_processed':
+    case 'paid_twice':
+      return VnpayIpnResponse.ALREADY_CONFIRMED;
+    case 'failed':
+    case 'confirmed':
+    case 'needs_review':
+      return VnpayIpnResponse.CONFIRM_SUCCESS;
   }
 }
