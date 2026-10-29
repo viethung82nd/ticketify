@@ -348,6 +348,17 @@ describe('Payment creation — POST /payments/vnpay (real Postgres + Redis)', ()
       expect(await paymentsOf(booking.id)).toEqual([]);
     });
 
+    it('409 BOOKING_NOT_PAYABLE for a PENDING booking with total 0 (nothing to pay online)', async () => {
+      const { user, booking } = await pendingBooking(1);
+      await db.prisma.$executeRaw`UPDATE bookings SET total = 0 WHERE id = ${booking.id}::uuid`;
+
+      const res = await pay(user, booking.id);
+
+      expect(res.status).toBe(409);
+      expect(errorOf(res).code).toBe('BOOKING_NOT_PAYABLE');
+      expect(await paymentsOf(booking.id)).toEqual([]);
+    });
+
     it.each([
       ['at expiresAt exactly', { seconds: HOLD_TTL_SECONDS }],
       ['1 s past expiresAt', { seconds: HOLD_TTL_SECONDS + 1 }],
