@@ -10,6 +10,7 @@ Lock order shared by every flow that touches seats (no flow waits on another in 
 | Hold `POST /bookings` | advisory lock (user, showtime) → `showtime_seats` `FOR UPDATE NOWAIT ORDER BY seat_id` |
 | Expiry `expireBooking` | `bookings` `FOR UPDATE SKIP LOCKED` → its `HELD` `showtime_seats` `FOR UPDATE ORDER BY seat_id` |
 | Cancel `DELETE /bookings/:id` | `bookings` `FOR UPDATE` → (reads `payments`, no lock yet) → its `HELD` `showtime_seats` `FOR UPDATE ORDER BY seat_id` |
+| Payment create `POST /payments/vnpay` | `bookings` `FOR KEY SHARE` (compatible with itself, conflicts with the `FOR UPDATE` of cancel and expiry) → inserts `payments` |
 | Showtime cancel (admin) | `showtimes` `FOR NO KEY UPDATE` → every `showtime_seats` of it `FOR UPDATE ORDER BY seat_id` |
 | Showtime create (admin) | `rooms` `FOR NO KEY UPDATE` → `movies` `FOR SHARE` |
 
