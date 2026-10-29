@@ -145,7 +145,7 @@ pnpm test:integration
 | `02` | `Payment` đã `SUCCESS`/`FAILED` (IPN lặp lại); hoặc đơn đã được một `Payment` khác trả rồi (trả hai lần, xem giới hạn) | Không |
 | `00` | Chưa trả được (`vnp_ResponseCode` hoặc `vnp_TransactionStatus` khác `00`) | `Payment` `FAILED`; đơn giữ nguyên (`PENDING`, người dùng thử lại được trong hạn) |
 | `00` | Đã trả, ghế còn của đơn (hoặc đơn `EXPIRED` mà mọi ghế còn trống) | `Payment` `SUCCESS`, ghế `SOLD`, đơn `CONFIRMED`, mỗi ghế một `Ticket` `ISSUED`, outbox `booking.confirmed` |
-| `00` | Đã trả nhưng mất ghế (ghế bị giữ/bán cho đơn khác, suất bị hủy) | `Payment` `SUCCESS`, đơn `NEEDS_REVIEW`, ghế không đổi, không có vé, outbox `booking.needs_review` |
+| `00` | Đã trả nhưng mất ghế (ghế bị giữ/bán cho đơn khác, suất bị hủy) | `Payment` `SUCCESS`, đơn `NEEDS_REVIEW`, không có vé, outbox `booking.needs_review`; ghế của chính đơn còn `HELD` được **nhả ngay** về `AVAILABLE` (outbox `seats.released`, `seat:released`), ghế `SOLD` và ghế của đơn khác không đổi |
 
 Lỗi không lường trước (DB, quá thời gian transaction, thiếu `VNPAY_HASH_SECRET`) → HTTP 500 `{ RspCode: "99" }`, không ghi gì (một transaction duy nhất). VNPay gọi lại với `01`, `04`, `97`, `99` hoặc khi quá thời gian, tối đa 10 lần, cách nhau 5 phút; `00` và `02` kết thúc. Thứ tự khóa `payments` → `bookings` → `showtime_seats` (`ORDER BY seat_id`), giống mọi luồng khác; IPN lặp lại chạy lần lượt trên dòng `payments` và nhận `02`. Không có rate limit (VNPay tự giãn lần gọi; request không có chữ ký đúng chỉ tốn một HMAC).
 
@@ -153,7 +153,8 @@ Lỗi không lường trước (DB, quá thời gian transaction, thiếu `VNPAY
 
 - Chưa có querydr (tuần 13, 3.7): job hết hạn chưa hỏi VNPay về `Payment` `PENDING`, nên đơn hết hạn đúng `holdUntil` dù tiền có thể đang trên đường; IPN đến muộn đi nhánh giành lại ghế hoặc `NEEDS_REVIEW`.
 - Outbox chỉ được ghi (`PENDING`), chưa có relay (tuần 14, 4.1): chưa gửi email, PDF hay thông báo.
-- `NEEDS_REVIEW` xử lý tay; trang admin là 3.8. Hoàn tiền tự động nằm ngoài phạm vi.
+- `NEEDS_REVIEW` xử lý tay: tiền đã nhận nhưng không giữ được ghế (ghế của đơn đã được nhả cho người khác đặt). **Hoàn tiền thủ công là việc của admin** (qua cổng merchant VNPay hoặc liên hệ khách), với trang admin ở 3.8 (tuần 13); tới lúc đó tìm các đơn này bằng truy vấn ở ROADMAP 3.8. Hoàn tiền tự động nằm ngoài phạm vi.
+- Log request không bao giờ chứa `vnp_SecureHash` (bỏ hẳn khỏi `url` và `query`) hay `VNPAY_HASH_SECRET`.
 - Trả hai lần cho một đơn (hai trang thanh toán): lần sau chỉ có trong log `error`, `Payment` đó vẫn `PENDING`; cách lưu lại đang chờ quyết định.
 
 **Kịch bản A và B** (PLAN §10, `apps/api/test/scenarios/`): chỉ chạy khi đặt `RUN_SCENARIO_TESTS=1`; không đặt thì mọi suite bị bỏ qua và không khởi động container nào.
