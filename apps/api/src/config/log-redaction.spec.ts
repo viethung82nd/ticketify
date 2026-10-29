@@ -3,19 +3,18 @@ import { redactQuery, redactRequest, redactUrl } from './log-redaction';
 const HASH = 'b6dababca5e07a2d8e32fdd3cf05c29cb426c721ae18e9589f7ad0e2db4b657c';
 
 describe('log redaction of the VNPay signature', () => {
-  it('replaces the value of vnp_SecureHash in a request line, wherever it is', () => {
+  it('drops vnp_SecureHash, name and value, from a request line, wherever it is', () => {
     expect(
       redactUrl(`/payments/vnpay/ipn?vnp_Amount=1000000&vnp_SecureHash=${HASH}&vnp_TxnRef=166117`),
-    ).toBe('/payments/vnpay/ipn?vnp_Amount=1000000&vnp_SecureHash=[redacted]&vnp_TxnRef=166117');
+    ).toBe('/payments/vnpay/ipn?vnp_Amount=1000000&vnp_TxnRef=166117');
     expect(redactUrl(`/payments/vnpay/return?vnp_TxnRef=1&vnp_SecureHash=${HASH}`)).toBe(
-      '/payments/vnpay/return?vnp_TxnRef=1&vnp_SecureHash=[redacted]',
+      '/payments/vnpay/return?vnp_TxnRef=1',
     );
   });
 
-  it('also when the key is percent-encoded or repeated', () => {
-    expect(redactUrl(`/x?vnp%5FSecureHash=${HASH}&vnp_SecureHash=${HASH}`)).toBe(
-      '/x?vnp%5FSecureHash=[redacted]&vnp_SecureHash=[redacted]',
-    );
+  it('also when the key is percent-encoded or repeated, and drops a "?" left empty', () => {
+    expect(redactUrl(`/x?vnp%5FSecureHash=${HASH}&vnp_SecureHash=${HASH}`)).toBe('/x');
+    expect(redactUrl(`/x?vnp_SecureHash`)).toBe('/x');
   });
 
   it('leaves other URLs and parameters alone', () => {
@@ -24,10 +23,9 @@ describe('log redaction of the VNPay signature', () => {
     expect(redactUrl('/x?broken=%E0%A4%A&flag')).toBe('/x?broken=%E0%A4%A&flag');
   });
 
-  it('replaces it in the parsed query too', () => {
+  it('drops it from the parsed query too', () => {
     expect(redactQuery({ vnp_TxnRef: '166117', vnp_SecureHash: HASH })).toEqual({
       vnp_TxnRef: '166117',
-      vnp_SecureHash: '[redacted]',
     });
     expect(redactQuery(undefined)).toBeUndefined();
   });
@@ -36,16 +34,18 @@ describe('log redaction of the VNPay signature', () => {
     const req = {
       id: 'r1',
       method: 'GET',
-      url: `/payments/vnpay/ipn?vnp_SecureHash=${HASH}`,
-      query: { vnp_SecureHash: HASH },
+      url: `/payments/vnpay/ipn?vnp_TxnRef=1&vnp_SecureHash=${HASH}`,
+      query: { vnp_TxnRef: '1', vnp_SecureHash: HASH },
       headers: { host: 'localhost:3000' },
     };
 
     expect(redactRequest(req)).toEqual({
       ...req,
-      url: '/payments/vnpay/ipn?vnp_SecureHash=[redacted]',
-      query: { vnp_SecureHash: '[redacted]' },
+      url: '/payments/vnpay/ipn?vnp_TxnRef=1',
+      query: { vnp_TxnRef: '1' },
     });
-    expect(JSON.stringify(redactRequest(req))).not.toContain(HASH);
+    const logged = JSON.stringify(redactRequest(req));
+    expect(logged).not.toContain(HASH);
+    expect(logged).not.toContain('vnp_SecureHash');
   });
 });
