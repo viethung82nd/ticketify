@@ -11,6 +11,11 @@ export const OutboxEventType = {
   BOOKING_CONFIRMED: 'booking.confirmed',
   /** Paid, but the seats could not be kept: apologise to the user and tell an admin. */
   BOOKING_NEEDS_REVIEW: 'booking.needs_review',
+  /**
+   * Seats went back to AVAILABLE: tell the browsers watching the showtime. Written by the IPN when
+   * a booking goes to review; `expireBooking` writes it too from ROADMAP 4.1.
+   */
+  SEATS_RELEASED: 'seats.released',
 } as const;
 export type OutboxEventType = (typeof OutboxEventType)[keyof typeof OutboxEventType];
 

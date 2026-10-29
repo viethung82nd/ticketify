@@ -336,6 +336,7 @@ describe('confirmPayment — branch C (review)', () => {
       ],
       showtimeRow(),
       { reason: 'SEAT_HELD_BY_OTHER', seatIds: [SEAT_B] },
+      [SEAT_A],
     ],
     [
       'a seat sold to another booking',
@@ -345,18 +346,27 @@ describe('confirmPayment — branch C (review)', () => {
       ],
       showtimeRow(),
       { reason: 'SEAT_SOLD', seatIds: [SEAT_A] },
+      [SEAT_B],
     ],
     [
       'a cancelled showtime',
       heldByBooking,
       showtimeRow(ShowtimeStatus.CANCELLED),
       { reason: 'SHOWTIME_CANCELLED', seatIds: [] },
+      [SEAT_A, SEAT_B],
     ],
   ])(
-    'PENDING booking, %s → NEEDS_REVIEW, seats untouched, no ticket',
-    async (_label, seats, showtime, problem) => {
+    'PENDING booking, %s → NEEDS_REVIEW, its own HELD seats released, no ticket',
+    async (_label, seats, showtime, problem, released) => {
       const { result, statements, mock } = run(
-        [paymentRow(), bookingRow(BookingStatus.PENDING), [], seats, showtime],
+        [
+          paymentRow(),
+          bookingRow(BookingStatus.PENDING),
+          [],
+          seats,
+          showtime,
+          released.map((seatId) => ({ seat_id: seatId })),
+        ],
         [1, 1],
       );
 
@@ -367,15 +377,23 @@ describe('confirmPayment — branch C (review)', () => {
         bookingId: BOOKING_ID,
         showtimeId: SHOWTIME_ID,
         problem,
+        releasedSeatIds: released,
         showtimeStarted: false,
       });
       expect(rspCode(outcome)).toBe('00');
       expect(shape(writes(statements))).toEqual([
         'UPDATE payments',
         'UPDATE bookings',
+        'UPDATE showtime_seats',
+        'INSERT outbox_events',
         'INSERT outbox_events',
       ]);
       expect(writes(statements)[1]?.sql).toContain("SET status = 'NEEDS_REVIEW'");
+      // Only seats still HELD by this booking: never a SOLD seat, never another booking's.
+      expect(writes(statements)[2]?.sql).toBe(
+        "UPDATE showtime_seats SET status = 'AVAILABLE', booking_id = NULL, held_until = NULL WHERE showtime_id = $::uuid AND booking_id = $::uuid AND status = 'HELD' RETURNING seat_id",
+      );
+      expect(writes(statements)[2]?.values).toEqual([SHOWTIME_ID, BOOKING_ID]);
       expect(mock.ticket.createManyAndReturn).not.toHaveBeenCalled();
       const [event] = mock.outboxEvent.create.mock.calls[0]!;
       expect(event.data).toMatchObject({
@@ -388,10 +406,40 @@ describe('confirmPayment — branch C (review)', () => {
           vnpTransactionNo: '14226112',
           reason: problem.reason,
           seatIds: problem.seatIds,
+          releasedSeatIds: released,
         },
+      });
+      const [releasedEvent] = mock.outboxEvent.create.mock.calls[1]!;
+      expect(releasedEvent.data).toEqual({
+        type: 'seats.released',
+        aggregateId: BOOKING_ID,
+        payload: {
+          bookingId: BOOKING_ID,
+          showtimeId: SHOWTIME_ID,
+          seatIds: released,
+          cause: 'booking.needs_review',
+        },
+        nextRetryAt: NOW,
+        createdAt: NOW,
       });
     },
   );
+
+  it('no seat of its own HELD any more: NEEDS_REVIEW without a seats.released event', async () => {
+    const seats = [
+      seatRow(SEAT_A, ShowtimeSeatStatus.SOLD, OTHER_BOOKING_ID, null),
+      seatRow(SEAT_B, ShowtimeSeatStatus.HELD, OTHER_BOOKING_ID, HELD_UNTIL),
+    ];
+    const { result, mock } = run(
+      [paymentRow(), bookingRow(BookingStatus.PENDING), [], seats, showtimeRow(), []],
+      [1, 1],
+    );
+
+    await expect(result).resolves.toMatchObject({ outcome: 'needs_review', releasedSeatIds: [] });
+    expect(
+      mock.outboxEvent.create.mock.calls.map(([e]) => (e.data as { type: string }).type),
+    ).toEqual(['booking.needs_review']);
+  });
 });
 
 describe('confirmPayment — branch B (EXPIRED booking)', () => {
@@ -457,6 +505,7 @@ describe('confirmPayment — branch B (EXPIRED booking)', () => {
           ),
         ],
         showtimeRow(),
+        [],
       ],
       [1, 1],
     );
@@ -464,10 +513,13 @@ describe('confirmPayment — branch B (EXPIRED booking)', () => {
     await expect(result).resolves.toMatchObject({
       outcome: 'needs_review',
       problem: { reason: 'SEAT_HELD_BY_OTHER', seatIds: [SEAT_B] },
+      releasedSeatIds: [],
     });
+    // The reclaim changed nothing; the release finds no seat HELD by this booking.
     expect(shape(writes(statements))).toEqual([
       'UPDATE payments',
       'UPDATE bookings',
+      'UPDATE showtime_seats',
       'INSERT outbox_events',
     ]);
     expect(mock.ticket.createManyAndReturn).not.toHaveBeenCalled();

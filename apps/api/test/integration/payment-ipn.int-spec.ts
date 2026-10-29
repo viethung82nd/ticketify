@@ -360,8 +360,10 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
    * The rules that must hold after every test and every race round, over the whole database:
    * one live ticket per seat; a CONFIRMED booking owns all of its seats SOLD and one ticket per
    * seat; a SOLD seat belongs to a CONFIRMED/NEEDS_REVIEW booking; tickets only for CONFIRMED
-   * bookings; a SUCCESS payment only for CONFIRMED/NEEDS_REVIEW; no seat HELD by an EXPIRED or
-   * CONFIRMED booking; one outbox event per CONFIRMED / NEEDS_REVIEW booking and none for others.
+   * bookings; a SUCCESS payment only for CONFIRMED/NEEDS_REVIEW; no seat HELD by an EXPIRED,
+   * CONFIRMED or NEEDS_REVIEW booking (a booking sent to review releases its own seats); one outbox
+   * event per CONFIRMED / NEEDS_REVIEW booking and none for others; at most one seats.released
+   * per booking, and only for a NEEDS_REVIEW one.
    */
   async function violations() {
     const q = <T>(sql: TemplateStringsArray) => db.prisma.$queryRaw<T[]>(sql);
@@ -392,16 +394,19 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       q`SELECT p.id FROM payments p JOIN bookings b ON b.id = p.booking_id
         WHERE p.status = 'SUCCESS' AND b.status NOT IN ('CONFIRMED', 'NEEDS_REVIEW')`,
       q`SELECT ss.seat_id FROM showtime_seats ss JOIN bookings b ON b.id = ss.booking_id
-        WHERE ss.status = 'HELD' AND b.status IN ('EXPIRED', 'CONFIRMED')`,
+        WHERE ss.status = 'HELD' AND b.status IN ('EXPIRED', 'CONFIRMED', 'NEEDS_REVIEW')`,
       q`SELECT b.id, b.status::text AS status,
                count(o.id) FILTER (WHERE o.type = 'booking.confirmed')::int AS confirmed,
-               count(o.id) FILTER (WHERE o.type = 'booking.needs_review')::int AS review
+               count(o.id) FILTER (WHERE o.type = 'booking.needs_review')::int AS review,
+               count(o.id) FILTER (WHERE o.type = 'seats.released')::int AS released
         FROM bookings b LEFT JOIN outbox_events o ON o.aggregate_id = b.id::text
         GROUP BY b.id, b.status
         HAVING count(o.id) FILTER (WHERE o.type = 'booking.confirmed')
                  <> CASE WHEN b.status = 'CONFIRMED' THEN 1 ELSE 0 END
             OR count(o.id) FILTER (WHERE o.type = 'booking.needs_review')
-                 <> CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END`,
+                 <> CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END
+            OR count(o.id) FILTER (WHERE o.type = 'seats.released')
+                 > CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END`,
     ]);
     return {
       duplicateTickets,
@@ -785,12 +790,71 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       expect((await sendIpn(ipnQuery(paid))).body).toEqual(OK);
       const state = await stateOf(paid);
       expect(state.booking.status).toBe('NEEDS_REVIEW');
-      // Seats untouched: the rival keeps its seat, the booking's other seat stays HELD by it.
+      // The rival keeps its seat; the booking's own seat still HELD for it is released.
       expect(state.seats).toEqual([
         { seatId: paid.seatIds[0], status: 'HELD', bookingId: rivalBooking.id },
-        { seatId: paid.seatIds[1], status: 'HELD', bookingId: paid.booking.id },
+        { seatId: paid.seatIds[1], status: 'AVAILABLE', bookingId: null },
       ]);
       expect(state.tickets).toEqual([]);
+      expect(state.events.map((e) => e.type).sort()).toEqual([
+        'booking.needs_review',
+        'seats.released',
+      ]);
+    });
+
+    it('C: a PENDING booking with one seat SOLD to another booking → NEEDS_REVIEW, its other seat released, the SOLD seat untouched', async () => {
+      const paid = await paidBooking(2);
+      clock.advance({ minutes: HOLD_MINUTES });
+      // Past holdUntil another user takes one of the seats (lazy expiry) and pays for it first.
+      const other = await bookAndPay(paid.showtimeId, [paid.seatIds[0]!]);
+      expect((await sendIpn(ipnQuery(other))).body).toEqual(OK);
+      const otherBefore = await stateOf(other);
+      const releasedEvents = jest.spyOn(app.get(SeatEvents), 'released');
+      const query = ipnQuery(paid);
+
+      expect((await sendIpn(query)).body).toEqual(OK);
+
+      const state = await stateOf(paid);
+      expect(state.booking).toEqual({ status: 'NEEDS_REVIEW', confirmedAt: null });
+      expect(state.payments.map((p) => p.status)).toEqual(['SUCCESS']);
+      expect(state.seats).toEqual([
+        { seatId: paid.seatIds[0], status: 'SOLD', bookingId: other.booking.id },
+        { seatId: paid.seatIds[1], status: 'AVAILABLE', bookingId: null },
+      ]);
+      expect(state.tickets).toEqual([]);
+      expect(
+        await db.prisma.showtimeSeat.count({
+          where: { bookingId: paid.booking.id, status: 'HELD' },
+        }),
+      ).toBe(0);
+      expect(state.events.map((e) => [e.type, e.payload]).sort()).toEqual([
+        [
+          'booking.needs_review',
+          expect.objectContaining({
+            reason: 'SEAT_SOLD',
+            seatIds: [paid.seatIds[0]],
+            releasedSeatIds: [paid.seatIds[1]],
+          }),
+        ],
+        [
+          'seats.released',
+          {
+            bookingId: paid.booking.id,
+            showtimeId: paid.showtimeId,
+            seatIds: [paid.seatIds[1]],
+            cause: 'booking.needs_review',
+          },
+        ],
+      ]);
+      expect(releasedEvents).toHaveBeenCalledWith(paid.showtimeId, [paid.seatIds[1]]);
+      // The other booking, its SOLD seat and its tickets did not change.
+      expect(await stateOf(other)).toEqual(otherBefore);
+
+      // A repeated IPN changes nothing and releases nothing a second time.
+      expect((await sendIpn(query)).body).toEqual(ALREADY);
+      expect(await stateOf(paid)).toEqual(state);
+      // The released seat is free for anyone right away.
+      expect((await hold(await newUser(), paid.showtimeId, [paid.seatIds[1]!])).status).toBe(201);
     });
   });
 
@@ -1179,6 +1243,12 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
             expect(state.booking.status).toBe('NEEDS_REVIEW');
             expect(state.tickets).toEqual([]);
             if (!other) expect(rivalBooking).not.toBeNull();
+            // Sent to review: none of its own seats is left HELD for it.
+            expect(
+              state.seats.filter(
+                (row) => row.status === 'HELD' && row.bookingId === paid.booking.id,
+              ),
+            ).toEqual([]);
           }
           if (rivalBooking) {
             const rivalSeatRows = await db.prisma.showtimeSeat.findMany({

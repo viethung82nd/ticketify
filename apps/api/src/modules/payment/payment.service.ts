@@ -266,7 +266,8 @@ export class PaymentService {
    * 4. Payment already SUCCESS or FAILED (a repeated IPN) → `02`; a second successful payment of
    *    an already paid booking → `02` as well, nothing written (logged as an error).
    * 5. Not paid → Payment FAILED, booking untouched → `00`.
-   * 6. Paid → seats SOLD + CONFIRMED + tickets, or NEEDS_REVIEW → `00`.
+   * 6. Paid → seats SOLD + CONFIRMED + tickets, or NEEDS_REVIEW (its own HELD seats released) →
+   *    `00`.
    */
   async vnpayIpn(query: VnpayQuery): Promise<VnpayIpnResponse> {
     const hashSecret = this.config.get('VNPAY_HASH_SECRET');
@@ -293,6 +294,9 @@ export class PaymentService {
 
     // After the commit only: a rolled-back sale must never be announced (best-effort, never throws).
     if (result.outcome === 'confirmed') this.seatEvents.sold(result.showtimeId, result.seatIds);
+    if (result.outcome === 'needs_review') {
+      this.seatEvents.released(result.showtimeId, result.releasedSeatIds);
+    }
     this.logIpn(txnRef, result);
     return ipnResponseOf(result);
   }
@@ -345,7 +349,7 @@ export class PaymentService {
           `IPN 00: payment ${result.paymentId} (${ref}) SUCCESS, booking ${result.bookingId} ` +
             `NEEDS_REVIEW (${result.problem.reason}${
               result.problem.seatIds.length > 0 ? `: ${result.problem.seatIds.join(', ')}` : ''
-            })`,
+            }), ${result.releasedSeatIds.length} of its own HELD seat(s) released`,
         );
         return;
     }

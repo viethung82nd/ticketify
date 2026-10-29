@@ -65,7 +65,7 @@ function setup(rows: unknown[][] = [], affected: number[] = [], secret: string |
       key === 'VNPAY_HASH_SECRET' ? (secret ?? undefined) : undefined,
     ),
   };
-  const seatEvents = { sold: jest.fn() };
+  const seatEvents = { sold: jest.fn(), released: jest.fn() };
   const service = new PaymentService(
     prisma as unknown as PrismaService,
     new FakeClock(NOW),
@@ -183,6 +183,39 @@ describe('PaymentService.vnpayIpn', () => {
 
     const query = signedIpn({ vnp_ResponseCode: '24', vnp_TransactionStatus: '02' });
     expect((await service.vnpayIpn(query)).RspCode).toBe('00');
+    expect(seatEvents.sold).not.toHaveBeenCalled();
+  });
+
+  it('00 for NEEDS_REVIEW, and seat:released for its own seats that were released', async () => {
+    const { service, seatEvents } = setup(
+      [
+        [{ id: PAYMENT_ID, booking_id: BOOKING_ID, amount: 90_000, status: 'PENDING' }],
+        [
+          {
+            id: BOOKING_ID,
+            code: 'K7PX3MQ9TA',
+            user_id: BOOKING_ID,
+            showtime_id: SHOWTIME_ID,
+            status: BookingStatus.PENDING,
+          },
+        ],
+        [],
+        [
+          {
+            seat_id: SEAT_A,
+            status: ShowtimeSeatStatus.HELD,
+            booking_id: BOOKING_ID,
+            held_until: null,
+          },
+        ],
+        [{ status: ShowtimeStatus.CANCELLED, starts_at: new FakeClock('2026-11-02').now() }],
+        [{ seat_id: SEAT_A }],
+      ],
+      [1, 1],
+    );
+
+    expect((await service.vnpayIpn(signedIpn())).RspCode).toBe('00');
+    expect(seatEvents.released).toHaveBeenCalledWith(SHOWTIME_ID, [SEAT_A]);
     expect(seatEvents.sold).not.toHaveBeenCalled();
   });
 

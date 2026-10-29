@@ -59,13 +59,18 @@ export type ConfirmOutcome =
       /** The showtime had already started (owner decision pending, ROADMAP "Quyết định chờ"). */
       showtimeStarted: boolean;
     }
-  /** Payment SUCCESS, booking NEEDS_REVIEW, seats untouched, no ticket (`00`). */
+  /**
+   * Payment SUCCESS, booking NEEDS_REVIEW, no ticket (`00`). The booking's own seats that were
+   * still HELD for it are released; no other seat changes.
+   */
   | {
       outcome: 'needs_review';
       paymentId: string;
       bookingId: string;
       showtimeId: string;
       problem: SeatProblem;
+      /** Seats of this booking that went back to AVAILABLE (sorted; often none). */
+      releasedSeatIds: string[];
       showtimeStarted: boolean;
     };
 
@@ -201,13 +206,18 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
   const showtimeStarted = settlement.showtime.startsAt.getTime() <= now.getTime();
 
   if (settlement.problem) {
-    await sendToReview(tx, { booking, payment, ipn, problem: settlement.problem }, now);
+    const releasedSeatIds = await sendToReview(
+      tx,
+      { booking, payment, ipn, problem: settlement.problem },
+      now,
+    );
     return {
       outcome: 'needs_review',
       paymentId: payment.id,
       bookingId: booking.id,
       showtimeId: booking.showtime_id,
       problem: settlement.problem,
+      releasedSeatIds,
       showtimeStarted,
     };
   }
@@ -320,17 +330,34 @@ async function confirmBooking(
   return ticketIds;
 }
 
-/** Branch C: booking NEEDS_REVIEW, outbox `booking.needs_review`; seats and tickets untouched. */
+/**
+ * Branch C (and a failed branch B): booking NEEDS_REVIEW, outbox `booking.needs_review`, no ticket.
+ * The booking's own seats still HELD for it go back to AVAILABLE at once (outbox `seats.released`,
+ * once, only when there are some): a booking under review will never use them, and left HELD they
+ * would block a showtime cancel and wait for nobody. Returns those seat ids, sorted.
+ *
+ * Every one of them is already locked: a seat HELD by the booking is one of its booking_seats,
+ * which `lockSeatsOfBooking` locked FOR UPDATE ORDER BY seat_id in both branches. A SOLD seat and
+ * a seat of another booking are never touched (`booking_id` and `status = 'HELD'` in the update).
+ */
 async function sendToReview(
   tx: Tx,
   ctx: { booking: BookingRow; payment: PaymentRow; ipn: VnpayIpnResult; problem: SeatProblem },
   now: Date,
-): Promise<void> {
+): Promise<string[]> {
   const { booking, payment, ipn, problem } = ctx;
   const updated = await tx.$executeRaw`
     UPDATE bookings SET status = 'NEEDS_REVIEW', updated_at = ${now}
     WHERE id = ${booking.id}::uuid AND status IN ('PENDING', 'EXPIRED')`;
   if (updated !== 1) throw new Error(`Booking ${booking.id} could not be sent to review`);
+
+  const released = await tx.$queryRaw<{ seat_id: string }[]>`
+    UPDATE showtime_seats
+    SET status = 'AVAILABLE', booking_id = NULL, held_until = NULL
+    WHERE showtime_id = ${booking.showtime_id}::uuid AND booking_id = ${booking.id}::uuid
+      AND status = 'HELD'
+    RETURNING seat_id`;
+  const releasedSeatIds = released.map((row) => row.seat_id).sort();
 
   await writeOutboxEvent(
     tx,
@@ -347,8 +374,26 @@ async function sendToReview(
         vnpTransactionNo: ipn.transactionNo,
         reason: problem.reason,
         seatIds: problem.seatIds,
+        releasedSeatIds,
       },
     },
     now,
   );
+  if (releasedSeatIds.length > 0) {
+    await writeOutboxEvent(
+      tx,
+      {
+        type: OutboxEventType.SEATS_RELEASED,
+        aggregateId: booking.id,
+        payload: {
+          bookingId: booking.id,
+          showtimeId: booking.showtime_id,
+          seatIds: releasedSeatIds,
+          cause: OutboxEventType.BOOKING_NEEDS_REVIEW,
+        },
+      },
+      now,
+    );
+  }
+  return releasedSeatIds;
 }
