@@ -200,7 +200,13 @@ describe('Poster storage (real RustFS)', () => {
   // ─── Tests ───
 
   it('exercises S3_PUBLIC_ENDPOINT against our own container', () => {
-    if (rustfs) expect(publicEndpoint).toBeDefined();
+    // Only when the store is reachable under a second name: `otherHostFor` swaps localhost and
+    // 127.0.0.1, which needs the Testcontainers host to be one of them. It is on a developer
+    // machine and in CI; it is not when the suite itself runs inside a container
+    // (TESTCONTAINERS_HOST_OVERRIDE), and there the signing path below simply goes unexercised.
+    if (rustfs && !process.env.TESTCONTAINERS_HOST_OVERRIDE) {
+      expect(publicEndpoint).toBeDefined();
+    }
   });
 
   it('presign → PUT → save movie → posterUrl serves the same bytes', async () => {
