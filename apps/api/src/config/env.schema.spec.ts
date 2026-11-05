@@ -12,6 +12,7 @@ const validEnv = (): Record<string, string> => ({
   SMTP_PORT: '1025',
   SMTP_FROM: 'Ticketify <no-reply@ticketify.local>',
   JWT_ACCESS_SECRET: 'unit-test-access-secret-0123456789abcdef',
+  TICKET_QR_SECRET: 'unit-test-ticket-qr-secret-0123456789abc',
 });
 
 describe('validateEnv', () => {
