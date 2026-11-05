@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router';
+import { Toaster } from '@/components/ui/toast';
+import { useNotificationStream } from '@/features/notifications/use-notification-stream';
 import { SiteFooter } from './site-footer';
 import { SiteHeader } from './site-header';
 
@@ -16,6 +18,8 @@ function useHashScroll() {
 
 export function AppLayout() {
   useHashScroll();
+  // One socket for the signed-in user's notifications, for as long as the app is open.
+  useNotificationStream();
   return (
     <div className="flex min-h-svh flex-col bg-background text-foreground">
       <SiteHeader />
@@ -23,6 +27,7 @@ export function AppLayout() {
         <Outlet />
       </main>
       <SiteFooter />
+      <Toaster />
     </div>
   );
 }

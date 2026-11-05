@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Link, NavLink } from 'react-router';
 import { Logo } from '@/components/brand/logo';
 import { logout } from '@/features/auth/auth-api';
+import { NotificationBell } from '@/features/notifications/notification-bell';
 import { useAuthStore } from '@/features/auth/auth-store';
 import { cn } from '@/lib/utils';
 
@@ -129,6 +130,7 @@ export function SiteHeader() {
           >
             <Search className="size-5" aria-hidden />
           </Link>
+          <NotificationBell />
           <span className="h-6 w-px bg-white/15" aria-hidden />
           <AuthActions />
         </div>
@@ -168,8 +170,9 @@ export function SiteHeader() {
               ))}
               <CinemasSoon />
             </nav>
-            <div className="border-t border-white/10 pt-3">
+            <div className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">
               <AuthActions onNavigate={closeMenu} />
+              <NotificationBell />
             </div>
           </div>
         )}
