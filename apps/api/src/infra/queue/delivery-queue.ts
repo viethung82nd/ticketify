@@ -54,8 +54,8 @@ export const deliveryJobId = (eventId: string, action: DeliveryAction): string =
  * storage outage never keeps the in-app notification from arriving.
  */
 export const DELIVERY_ACTIONS: Readonly<Record<OutboxEventType, readonly DeliveryAction[]>> = {
-  // 4.4 adds GENERATE_PDF, which chains SEND_EMAIL in 4.6.
-  [OutboxEventType.BOOKING_CONFIRMED]: [DeliveryAction.NOTIFY],
+  // GENERATE_PDF chains SEND_EMAIL once the file is in place (4.6).
+  [OutboxEventType.BOOKING_CONFIRMED]: [DeliveryAction.NOTIFY, DeliveryAction.GENERATE_PDF],
   // 4.6 adds SEND_EMAIL (the apology to the user).
   [OutboxEventType.BOOKING_NEEDS_REVIEW]: [DeliveryAction.NOTIFY],
   [OutboxEventType.SEATS_RELEASED]: [DeliveryAction.BROADCAST_SEATS],

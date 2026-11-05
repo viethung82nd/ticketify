@@ -5,6 +5,7 @@ import { ClockModule } from './infra/clock/clock.module';
 import { PrismaModule } from './infra/prisma/prisma.module';
 import { QueueModule } from './infra/queue/queue.module';
 import { RedisModule } from './infra/redis/redis.module';
+import { StorageModule } from './infra/storage/storage.module';
 import { BookingsWorkerModule } from './modules/bookings/bookings-worker.module';
 import { DeliveryWorkerModule } from './modules/delivery/delivery-worker.module';
 
@@ -21,6 +22,7 @@ import { DeliveryWorkerModule } from './modules/delivery/delivery-worker.module'
     PrismaModule,
     RedisModule,
     QueueModule,
+    StorageModule,
     BookingsWorkerModule,
     DeliveryWorkerModule,
   ],

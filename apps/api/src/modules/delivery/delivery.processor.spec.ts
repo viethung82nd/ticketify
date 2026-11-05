@@ -13,6 +13,8 @@ import type {
 import { NotificationEvents } from '../realtime/notification-events';
 import { SeatEvents } from '../realtime/seat-events';
 import { RecordingTransport } from '../realtime/testing/recording-transport';
+import { FakeObjectStorage } from '../../infra/storage/testing/fake-object-storage';
+import { TicketPdfStorage } from '../tickets/ticket-pdf.storage';
 import { BookingDelivery, BookingGoneError, type DeliveryBooking } from './booking-delivery';
 import { DeliveryProcessor } from './delivery.processor';
 
@@ -109,6 +111,7 @@ describe('DeliveryProcessor', () => {
   let processor: DeliveryProcessor;
   let stored: NewNotification[];
   let admins: string[];
+  let storage: FakeObjectStorage;
 
   beforeEach(() => {
     transport = new RecordingTransport();
@@ -134,7 +137,14 @@ describe('DeliveryProcessor', () => {
     const bookings = {
       read: jest.fn(() => Promise.resolve(booking)),
     } as unknown as BookingDelivery;
-    const config = { get: jest.fn(() => 'Asia/Ho_Chi_Minh') } as unknown as AppConfig;
+    const config = {
+      get: jest.fn((key: string) =>
+        key === 'TICKET_QR_SECRET'
+          ? 'unit-test-ticket-qr-secret-0123456789abc'
+          : 'Asia/Ho_Chi_Minh',
+      ),
+    } as unknown as AppConfig;
+    storage = new FakeObjectStorage();
 
     processor = new DeliveryProcessor(
       {} as QueueWorkers,
@@ -142,6 +152,7 @@ describe('DeliveryProcessor', () => {
       notifications,
       new NotificationEvents(transport),
       bookings,
+      new TicketPdfStorage(storage),
       config,
     );
     jest.spyOn(processor['logger'], 'error').mockImplementation(() => undefined);
@@ -260,6 +271,49 @@ describe('DeliveryProcessor', () => {
           job(DeliveryAction.NOTIFY, OutboxEventType.SEATS_RELEASED, seatsReleased),
         ),
       ).rejects.toBeInstanceOf(UnrecoverableError);
+    });
+  });
+
+  describe('generate-pdf', () => {
+    const pdfJob = () =>
+      job(DeliveryAction.GENERATE_PDF, OutboxEventType.BOOKING_CONFIRMED, confirmed);
+
+    it('writes the PDF to tickets/{bookingId}.pdf', async () => {
+      await processor.process(pdfJob());
+
+      expect(storage.puts).toHaveLength(1);
+      expect(storage.puts[0]).toMatchObject({
+        key: `tickets/${BOOKING_ID}.pdf`,
+        contentType: 'application/pdf',
+      });
+      expect(storage.bodies.get(`tickets/${BOOKING_ID}.pdf`)?.subarray(0, 5).toString()).toBe(
+        '%PDF-',
+      );
+    });
+
+    it('running it twice overwrites the same key with the same bytes', async () => {
+      await processor.process(pdfJob());
+      const first = storage.bodies.get(`tickets/${BOOKING_ID}.pdf`);
+
+      await processor.process(pdfJob());
+
+      expect(storage.puts).toHaveLength(2);
+      expect(storage.bodies.size).toBe(1);
+      expect(storage.bodies.get(`tickets/${BOOKING_ID}.pdf`)?.equals(first!)).toBe(true);
+    });
+
+    it('fails the job when storage is down, so BullMQ retries it', async () => {
+      storage.down = true;
+
+      await expect(processor.process(pdfJob())).rejects.toThrow(/storage PUT failed/i);
+    });
+
+    it('drops the event when the booking is gone', async () => {
+      jest.spyOn(processor['bookings'], 'read').mockRejectedValue(new BookingGoneError(BOOKING_ID));
+
+      await expect(processor.process(pdfJob())).resolves.toBeUndefined();
+
+      expect(storage.puts).toEqual([]);
     });
   });
 

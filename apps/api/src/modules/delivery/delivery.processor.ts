@@ -18,6 +18,8 @@ import { QueueWorkers } from '../../infra/queue/queue-workers';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationEvents } from '../realtime/notification-events';
 import { SeatEvents } from '../realtime/seat-events';
+import { TicketPdfStorage } from '../tickets/ticket-pdf.storage';
+import { ticketToken } from '../tickets/ticket-token';
 import { BookingDelivery, BookingGoneError } from './booking-delivery';
 import {
   confirmedText,
@@ -26,6 +28,7 @@ import {
   type NotificationText,
   refundRequiredAdminText,
 } from './delivery-text';
+import { renderTicketsPdf } from './ticket-pdf';
 
 /** Delivery jobs one worker process runs at the same time. */
 export const DELIVERY_WORKER_CONCURRENCY = 5;
@@ -35,8 +38,8 @@ export const DELIVERY_WORKER_CONCURRENCY = 5;
  * transaction committed. Fed by the outbox relay, so each step must be idempotent — it may run
  * again after a crash or a lost acknowledgement.
  *
- * Steps are added by the tasks that own them: `broadcast-seats` and `notify` here (4.1, 4.2),
- * `generate-pdf` in 4.4–4.5, `send-email` in 4.6.
+ * Steps are added by the tasks that own them: `broadcast-seats` (4.1), `notify` (4.2) and
+ * `generate-pdf` (4.4–4.5) here; `send-email` in 4.6.
  */
 @Injectable()
 export class DeliveryProcessor implements OnApplicationBootstrap {
@@ -48,6 +51,7 @@ export class DeliveryProcessor implements OnApplicationBootstrap {
     private readonly notifications: NotificationsService,
     private readonly notificationEvents: NotificationEvents,
     private readonly bookings: BookingDelivery,
+    private readonly pdfs: TicketPdfStorage,
     private readonly config: AppConfig,
   ) {}
 
@@ -63,6 +67,8 @@ export class DeliveryProcessor implements OnApplicationBootstrap {
         return this.broadcastSeats(job.data);
       case DeliveryAction.NOTIFY:
         return this.notify(job.data);
+      case DeliveryAction.GENERATE_PDF:
+        return this.generatePdf(job.data);
       default:
         // Nothing retries an unknown action: this build cannot grow a handler mid-job.
         throw new UnrecoverableError(`Unknown delivery action ${job.name}`);
@@ -126,6 +132,29 @@ export class DeliveryProcessor implements OnApplicationBootstrap {
       default:
         throw new UnrecoverableError(`No notification for outbox event type ${data.type}`);
     }
+  }
+
+  /**
+   * `booking.confirmed` → the ticket PDF, written to `tickets/{bookingId}.pdf` (ROADMAP 4.4–4.5).
+   *
+   * Safe to run again: the key is fixed and the drawing is deterministic, so a second run
+   * overwrites the file with the same bytes. Nothing reads the old file in between — an S3 PUT
+   * replaces an object atomically.
+   */
+  private async generatePdf(data: DeliveryJobData): Promise<void> {
+    const payload = this.parse(bookingConfirmedPayloadSchema, data);
+    const booking = await this.booking(payload.bookingId, data);
+    if (!booking) return;
+    const secret = this.config.get('TICKET_QR_SECRET');
+    const pdf = await renderTicketsPdf({
+      booking,
+      timeZone: this.config.get('CINEMA_TZ'),
+      tokenOf: (code) => ticketToken(code, secret),
+    });
+    const key = await this.pdfs.save(booking.id, pdf);
+    this.logger.log(
+      `Booking ${booking.code}: ${booking.tickets.length} ticket(s), ${pdf.length} bytes at ${key}`,
+    );
   }
 
   /** Stores one notification for each user, then pushes exactly the rows that were created. */

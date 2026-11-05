@@ -22,6 +22,7 @@ import { PricingModule } from './modules/pricing/pricing.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
 import { ShowtimesModule } from './modules/showtimes/showtimes.module';
+import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -45,6 +46,7 @@ import { UsersModule } from './modules/users/users.module';
     PaymentsModule,
     RealtimeModule,
     NotificationsModule,
+    TicketsModule,
   ],
   providers: [
     {

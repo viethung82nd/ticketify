@@ -7,6 +7,7 @@ import {
 import { DeliveryQueueProducer } from '../../infra/queue/delivery-queue.producer';
 import { NotificationsWorkerModule } from '../notifications/notifications.module';
 import { RealtimeWorkerModule } from '../realtime/realtime.module';
+import { TicketsWorkerModule } from '../tickets/tickets.module';
 import { BookingDelivery } from './booking-delivery';
 import { DeliveryProcessor } from './delivery.processor';
 
@@ -15,7 +16,7 @@ import { DeliveryProcessor } from './delivery.processor';
  * queue's processor. Not imported by the API — only the worker turns outbox rows into jobs.
  */
 @Module({
-  imports: [RealtimeWorkerModule, NotificationsWorkerModule],
+  imports: [RealtimeWorkerModule, NotificationsWorkerModule, TicketsWorkerModule],
   providers: [
     DeliveryQueueProducer,
     OutboxRelay,

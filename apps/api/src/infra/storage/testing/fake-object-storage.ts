@@ -2,6 +2,7 @@ import {
   type ObjectHead,
   ObjectStorage,
   type PresignUploadInput,
+  type PutObjectInput,
   StorageUnavailableError,
 } from '../object-storage';
 
@@ -11,6 +12,10 @@ import {
  */
 export class FakeObjectStorage extends ObjectStorage {
   readonly objects = new Map<string, ObjectHead>();
+  /** Bytes written by `putObject`, by key: the last write wins, as in S3. */
+  readonly bodies = new Map<string, Buffer>();
+  /** Every `putObject` call, in order, so a test can see a job that ran twice. */
+  readonly puts: PutObjectInput[] = [];
   readonly deleted: string[] = [];
   readonly uploads: PresignUploadInput[] = [];
   down = false;
@@ -19,6 +24,17 @@ export class FakeObjectStorage extends ObjectStorage {
 
   put(key: string, head: { contentType: string; contentLength: number }): void {
     this.objects.set(key, head);
+  }
+
+  putObject(input: PutObjectInput): Promise<void> {
+    if (this.down) return Promise.reject(new StorageUnavailableError('PUT', new Error('down')));
+    this.puts.push(input);
+    this.bodies.set(input.key, input.body);
+    this.objects.set(input.key, {
+      contentType: input.contentType,
+      contentLength: input.body.length,
+    });
+    return Promise.resolve();
   }
 
   presignUpload(input: PresignUploadInput): Promise<string> {
@@ -43,6 +59,7 @@ export class FakeObjectStorage extends ObjectStorage {
       return Promise.reject(new StorageUnavailableError('DELETE', new Error('down')));
     }
     this.objects.delete(key);
+    this.bodies.delete(key);
     this.deleted.push(key);
     return Promise.resolve();
   }

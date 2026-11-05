@@ -4,6 +4,12 @@ export interface ObjectHead {
   contentLength: number | undefined;
 }
 
+export interface PutObjectInput {
+  key: string;
+  body: Buffer;
+  contentType: string;
+}
+
 export interface PresignUploadInput {
   key: string;
   /** Signed into the URL: the PUT must send exactly this `Content-Type`. */
@@ -22,6 +28,14 @@ export interface PresignUploadInput {
  */
 export abstract class ObjectStorage {
   abstract presignUpload(input: PresignUploadInput): Promise<string>;
+
+  /**
+   * Writes an object from the server itself (the ticket PDF, ROADMAP 4.5). Overwrites whatever
+   * was at `key`: S3 PUT is atomic per object, so a reader either gets the whole old version or
+   * the whole new one, never a half-written file. Used with a fixed key per booking, so a job
+   * that runs twice replaces the file with the same bytes.
+   */
+  abstract putObject(input: PutObjectInput): Promise<void>;
 
   abstract presignDownload(key: string, expiresInSeconds: number): Promise<string>;
 

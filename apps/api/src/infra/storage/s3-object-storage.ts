@@ -14,6 +14,7 @@ import {
   type ObjectHead,
   ObjectStorage,
   type PresignUploadInput,
+  type PutObjectInput,
   StorageUnavailableError,
 } from './object-storage';
 
@@ -89,6 +90,22 @@ export class S3ObjectStorage extends ObjectStorage implements OnModuleDestroy {
       signingDate: this.clock.now(),
       signableHeaders: SIGNED_UPLOAD_HEADERS,
     });
+  }
+
+  async putObject(input: PutObjectInput): Promise<void> {
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: input.key,
+          Body: input.body,
+          ContentType: input.contentType,
+          ContentLength: input.body.length,
+        }),
+      );
+    } catch (error) {
+      throw new StorageUnavailableError('PUT', error);
+    }
   }
 
   presignDownload(key: string, expiresInSeconds: number): Promise<string> {
