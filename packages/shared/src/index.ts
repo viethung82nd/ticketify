@@ -12,3 +12,5 @@ export * from './cinema-time.js';
 export * from './schemas/booking.js';
 export * from './schemas/realtime.js';
 export * from './schemas/payment.js';
+export * from './schemas/notification.js';
+export * from './schemas/ticket.js';

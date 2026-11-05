@@ -34,6 +34,16 @@ export function withDatabase(url: string, database: string): string {
   return parsed.toString();
 }
 
+/** Mail server image from docker-compose.yml (started only by the email suite). */
+export const MAILPIT_IMAGE = 'axllent/mailpit:v1.32.0';
+
+/** Optional SMTP server for emails.int-spec instead of a Mailpit container. */
+export const EXTERNAL_SMTP_ENV = {
+  host: 'TEST_SMTP_HOST',
+  port: 'TEST_SMTP_PORT',
+  apiUrl: 'TEST_MAILPIT_API_URL',
+} as const;
+
 /** Object storage image from docker-compose.yml (started only by suites that need it). */
 export const RUSTFS_IMAGE = 'rustfs/rustfs:1.0.4';
 

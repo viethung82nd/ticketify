@@ -11,6 +11,14 @@ export function vnpayDate(instant: Date): string {
   return iso.slice(0, 19).replace(/[-T:]/g, '');
 }
 
+/** `vnp_Amount` is in hundredths of a dong: 10,000 VND is sent (and sent back) as 1000000. */
+export const VNPAY_AMOUNT_FACTOR = 100;
+
+/** `vnp_Amount` for an amount in VND, as the string VNPay sends back in the return URL and IPN. */
+export function vnpayAmount(amount: number): string {
+  return String(amount * VNPAY_AMOUNT_FACTOR);
+}
+
 const TXN_REF_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 export const TXN_REF_LENGTH = 20;
 

@@ -1,0 +1,100 @@
+name: Scenario D — ticket delivery (Linux)
+
+# Delivery survives a worker killed mid-job, an SMTP outage and an unreachable object store
+# (scenario-d.int-spec.ts, ROADMAP 4.9). The suite is opt-in (RUN_SCENARIO_D=1); only this
+# workflow turns it on, because it builds the worker, starts containers and waits out BullMQ's
+# stalled-job recovery (about a minute per hard kill).
+on:
+  pull_request:
+    paths:
+      - 'apps/api/src/infra/outbox/**'
+      - 'apps/api/src/infra/queue/**'
+      - 'apps/api/src/infra/mailer/**'
+      - 'apps/api/src/infra/storage/**'
+      - 'apps/api/src/modules/delivery/**'
+      - 'apps/api/src/modules/tickets/**'
+      - 'apps/api/src/main.worker.ts'
+      - 'apps/api/test/integration/scenario-d.int-spec.ts'
+      - 'apps/api/test/support/worker-preload/**'
+      - '.github/workflows/scenario-d.yml'
+  push:
+    branches: [main]
+  # Weekly, for regressions from changes outside the paths above (Monday 03:00 UTC).
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: scenario-d-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scenario-d:
+    name: delivery under a crash, SMTP and storage outages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUN_SCENARIO_D: '1'
+      # Service containers below instead of Testcontainers for Postgres and Redis; the suite
+      # starts RustFS and Mailpit itself, because it stops and replaces the store mid-test.
+      TEST_DATABASE_URL: postgresql://ticketify:ticketify@localhost:5432/ticketify
+      TEST_REDIS_URL: redis://localhost:6379
+    # Same images as docker-compose.yml and test/support/test-env.ts.
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_USER: ticketify
+          POSTGRES_PASSWORD: ticketify
+          POSTGRES_DB: ticketify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ticketify"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4.12-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Version comes from "packageManager" in package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Also builds packages/shared (prepare) and generates the Prisma client (postinstall).
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # The suite also compiles the worker itself (dist/.scenario-d) from the current sources.
+      - name: Scenario D
+        run: pnpm --filter @ticketify/api test:integration -- scenario-d
+
+      - name: Upload worker logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scenario-d-logs
+          path: artifacts/scenario-d/
+          if-no-files-found: ignore

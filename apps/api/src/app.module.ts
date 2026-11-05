@@ -16,11 +16,13 @@ import { BookingsModule } from './modules/bookings/bookings.module';
 import { CombosModule } from './modules/combos/combos.module';
 import { HealthModule } from './modules/health/health.module';
 import { MoviesModule } from './modules/movies/movies.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PaymentsModule } from './modules/payment/payments.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
 import { ShowtimesModule } from './modules/showtimes/showtimes.module';
+import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -43,6 +45,8 @@ import { UsersModule } from './modules/users/users.module';
     BookingsModule,
     PaymentsModule,
     RealtimeModule,
+    NotificationsModule,
+    TicketsModule,
   ],
   providers: [
     {

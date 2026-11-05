@@ -405,9 +405,12 @@ export class BookingService {
       // 3. A paid booking is never cancelled; one with a payment still open at VNPay waits for its
       //    result. Read after the booking lock of step 1 and never before it: that lock is what
       //    keeps a payment creation (FOR KEY SHARE) from committing between this read and the
-      //    update below. Without a lock on payments: no flow locks payments yet. When
-      //    the IPN (3.4) starts locking Payment → Booking → Seats, a cancel that needs the payment
-      //    locked must take it in that order too, before the booking row (PLAN §4).
+      //    update below, and the IPN (`confirmPayment`, Payment → Booking → Seats) takes the same
+      //    booking row FOR UPDATE before it writes SUCCESS: while this cancel holds the row, a
+      //    payment being confirmed is still PENDING here (→ 409); once the IPN committed, it is
+      //    SUCCESS (→ 409). Without a lock on payments, so this never waits on the IPN's payment
+      //    lock; a cancel that needs the payment locked must take it before the booking row
+      //    (PLAN §4).
       const payments = await tx.$queryRaw<{ status: PaymentStatus }[]>`
         SELECT status::text AS status FROM payments WHERE booking_id = ${bookingId}::uuid`;
       if (payments.some((p) => p.status === PaymentStatus.SUCCESS)) throw notCancellable();

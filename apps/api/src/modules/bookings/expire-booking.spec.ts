@@ -33,6 +33,13 @@ function mockTx(rows: unknown[][], affected: number[] = []) {
       record(strings, values);
       return Promise.resolve(affected.shift() ?? 0);
     }),
+    // The outbox write is the one statement that goes through the Prisma API, not raw SQL.
+    outboxEvent: {
+      create: jest.fn(({ data }: { data: unknown }) => {
+        statements.push({ sql: 'INSERT INTO outbox_events', values: [data] });
+        return Promise.resolve({ id: 'outbox-1' });
+      }),
+    },
   };
   return { tx: tx as unknown as Prisma.TransactionClient, statements };
 }
@@ -105,7 +112,7 @@ describe('expireBooking', () => {
       releasedSeatIds: [SEAT_A, SEAT_B],
     });
 
-    const [, expire, lockSeats, release] = statements;
+    const [, expire, lockSeats, release, outbox] = statements;
     expect(expire?.sql).toBe(
       "UPDATE bookings SET status = 'EXPIRED', updated_at = $ WHERE id = $::uuid",
     );
@@ -121,16 +128,33 @@ describe('expireBooking', () => {
         "WHERE booking_id = $::uuid AND status = 'HELD' RETURNING seat_id",
     );
     expect(release?.values).toEqual([BOOKING_ID]);
-    expect(statements).toHaveLength(4);
+    // And one seats.released event, in the same transaction as the release (ROADMAP 4.1).
+    expect(outbox?.sql).toBe('INSERT INTO outbox_events');
+    expect(outbox?.values[0]).toEqual({
+      type: 'seats.released',
+      aggregateId: BOOKING_ID,
+      payload: {
+        bookingId: BOOKING_ID,
+        showtimeId: SHOWTIME_ID,
+        seatIds: [SEAT_A, SEAT_B],
+        cause: 'booking.expired',
+      },
+      nextRetryAt: now,
+      createdAt: now,
+    });
+    expect(statements).toHaveLength(5);
   });
 
   it('expired with 0 released seats when another booking already took them all', async () => {
-    const { tx } = mockTx([lockedBooking(BookingStatus.PENDING), [], []], [1]);
+    const { tx, statements } = mockTx([lockedBooking(BookingStatus.PENDING), [], []], [1]);
 
     await expect(expireBooking(tx, BOOKING_ID, HOLD_UNTIL)).resolves.toEqual({
       outcome: 'expired',
       showtimeId: SHOWTIME_ID,
       releasedSeatIds: [],
     });
+
+    // Nothing was released, so there is nothing to announce: no outbox event.
+    expect(statements.map((s) => s.sql)).not.toContain('INSERT INTO outbox_events');
   });
 });

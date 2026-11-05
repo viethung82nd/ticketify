@@ -1,0 +1,38 @@
+<h1 style='margin:0 0 8px;font-size:20px'>Đơn {{booking.code}} cần được xem lại</h1>
+<p style='margin:0 0 16px;font-size:14px;color:#444'>
+  Chào
+  {{user.fullName}}, chúng tôi đã nhận
+  {{amount}}
+  cho đơn này, nhưng
+  {{reasonText}}, nên chưa thể phát hành vé. Chúng tôi thành thật xin lỗi vì sự bất tiện.
+</p>
+
+<table role='presentation' cellpadding='0' cellspacing='0' style='width:100%;font-size:14px'>
+  <tr>
+    <td style='padding:6px 0;color:#666;width:120px'>Phim</td>
+    <td style='padding:6px 0;font-weight:600'>{{movie.title}}</td>
+  </tr>
+  <tr>
+    <td style='padding:6px 0;color:#666'>Suất chiếu</td>
+    <td style='padding:6px 0;font-weight:600'>{{showtime.startsAt}}</td>
+  </tr>
+  <tr>
+    <td style='padding:6px 0;color:#666'>Phòng</td>
+    <td style='padding:6px 0;font-weight:600'>{{room.name}}</td>
+  </tr>
+  <tr>
+    <td style='padding:6px 0;color:#666'>Số tiền đã nhận</td>
+    <td style='padding:6px 0;font-weight:600'>{{amount}}</td>
+  </tr>
+</table>
+
+<p style='margin:20px 0 0;font-size:14px;color:#444'>
+  Nhân viên của rạp sẽ liên hệ với bạn và hoàn lại toàn bộ số tiền này. Bạn không cần làm gì thêm.
+</p>
+
+<p style='margin:16px 0 0;font-size:14px'>
+  <a
+    href='{{bookingUrl}}'
+    style='display:inline-block;padding:10px 16px;background:#111;color:#fff;border-radius:999px;text-decoration:none'
+  >Xem đơn của tôi</a>
+</p>

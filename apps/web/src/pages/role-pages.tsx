@@ -1,8 +1,7 @@
-import { ScanLine, ShieldAlert } from 'lucide-react';
+import { ShieldAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
-import { useAuthStore } from '@/features/auth/auth-store';
 
 function Panel({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
   return (
@@ -28,16 +27,6 @@ export function ForbiddenPage() {
       <Button asChild variant="outline" className="rounded-xl">
         <Link to="/">Về trang chủ</Link>
       </Button>
-    </Panel>
-  );
-}
-
-/** STAFF and ADMIN. QR check-in arrives in phase 4. */
-export function StaffPage() {
-  const user = useAuthStore((state) => state.user);
-  return (
-    <Panel icon={<ScanLine className="size-7 text-brand" aria-hidden />} title="Soát vé">
-      <p>Xin chào {user?.fullName}. Màn hình quét mã QR để soát vé sẽ có ở giai đoạn 4.</p>
     </Panel>
   );
 }

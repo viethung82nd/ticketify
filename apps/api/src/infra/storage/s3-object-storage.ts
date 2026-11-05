@@ -14,6 +14,7 @@ import {
   type ObjectHead,
   ObjectStorage,
   type PresignUploadInput,
+  type PutObjectInput,
   StorageUnavailableError,
 } from './object-storage';
 
@@ -91,6 +92,22 @@ export class S3ObjectStorage extends ObjectStorage implements OnModuleDestroy {
     });
   }
 
+  async putObject(input: PutObjectInput): Promise<void> {
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: input.key,
+          Body: input.body,
+          ContentType: input.contentType,
+          ContentLength: input.body.length,
+        }),
+      );
+    } catch (error) {
+      throw new StorageUnavailableError('PUT', error);
+    }
+  }
+
   presignDownload(key: string, expiresInSeconds: number): Promise<string> {
     const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
     return getSignedUrl(this.signer, command, {
@@ -106,6 +123,19 @@ export class S3ObjectStorage extends ObjectStorage implements OnModuleDestroy {
     } catch (error) {
       if (statusOf(error) === 404) return null;
       throw new StorageUnavailableError('HEAD', error);
+    }
+  }
+
+  async getObject(key: string): Promise<Buffer | null> {
+    try {
+      const object = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+      const bytes = await object.Body?.transformToByteArray();
+      return bytes ? Buffer.from(bytes) : null;
+    } catch (error) {
+      if (statusOf(error) === 404) return null;
+      throw new StorageUnavailableError('GET', error);
     }
   }
 

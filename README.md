@@ -132,8 +132,31 @@ pnpm test:integration
 - `POST /payments/vnpay` (đăng nhập, chỉ chủ đơn), body `{ bookingId }` → `201 { paymentId, txnRef, paymentUrl, expiresAt }`: mỗi lần gọi là một lần thử mới, tạo một `Payment` `PENDING` với `txnRef` mới (20 ký tự chữ-số); web chuyển trình duyệt sang `paymentUrl`. `vnp_ExpireDate` = `expiresAt` của đơn, giờ GMT+7.
 - Đơn không `PENDING` (kể cả đã hủy) → `409 BOOKING_NOT_PAYABLE`; quá `expiresAt` → `422 BOOKING_EXPIRED`; đã có `Payment` `SUCCESS` → `409 BOOKING_ALREADY_PAID`; đơn của người khác → `404 BOOKING_NOT_FOUND`; thiếu cấu hình VNPay → `503 PAYMENT_NOT_CONFIGURED`. Rate limit `PAYMENT_RATE_LIMIT_MAX` (10) mỗi user mỗi `PAYMENT_RATE_LIMIT_WINDOW_SECONDS` (60 giây).
 - Khóa dòng `bookings` `FOR KEY SHARE`: nhiều lần tạo thanh toán chạy song song được, nhưng không chạy cùng lúc với hủy đơn hay hết hạn (cả hai `FOR UPDATE`). Hủy thắng thì tạo thanh toán nhận `409 BOOKING_NOT_PAYABLE`; tạo thanh toán thắng thì hủy nhận `409 BOOKING_HAS_PAYMENT_IN_PROGRESS`.
-- `GET /payments/vnpay/return` (công khai, rate limit theo IP `PAYMENT_RETURN_RATE_LIMIT_MAX`): **chỉ để hiển thị**, không đổi trạng thái nào. Sai chữ ký hoặc `vnp_TxnRef` lạ → `{ verified: false }`; ngược lại `{ verified: true, bookingId, paymentStatus, vnpResponseCode, amountMismatch }`, trong đó `paymentStatus` là trạng thái đang lưu. Kết quả thanh toán chỉ được ghi bởi IPN (tuần 12), nên tới lúc đó đơn vẫn `PENDING` dù VNPay trả mã `00`.
+- `GET /payments/vnpay/return` (công khai, rate limit theo IP `PAYMENT_RETURN_RATE_LIMIT_MAX`): **chỉ để hiển thị**, không đổi trạng thái nào. Sai chữ ký hoặc `vnp_TxnRef` lạ → `{ verified: false }`; ngược lại `{ verified: true, bookingId, paymentStatus, vnpResponseCode, amountMismatch }`, trong đó `paymentStatus` là trạng thái đang lưu. Kết quả thanh toán chỉ được ghi bởi IPN, nên đơn vẫn `PENDING` cho tới khi IPN đến, dù VNPay trả mã `00` cho trình duyệt.
 - Trang web `/payment/result` (= `VNPAY_RETURN_URL`) gửi nguyên query cho API; mã `00` thì đọc lại đơn mỗi 3 giây (tối đa 2 phút) tới khi có trạng thái cuối.
+
+**IPN** (tuần 12, PLAN §5): `GET /payments/vnpay/ipn`, công khai, VNPay gọi thẳng từ máy chủ của họ. Luôn trả HTTP 200 với JSON `{ RspCode, Message }`:
+
+| `RspCode` | Khi nào | Ghi gì |
+|---|---|---|
+| `97` | Sai chữ ký (kiểm trước mọi thứ) | Không |
+| `01` | Không có `vnp_TxnRef` hoặc không có `Payment` nào khớp | Không |
+| `04` | `vnp_Amount` ≠ `amount × 100` | Không |
+| `02` | `Payment` đã `SUCCESS`, `FAILED` hoặc `REFUND_REQUIRED` (IPN lặp lại) | Không |
+| `00` | Đã trả, nhưng đơn đã được một `Payment` khác trả (mở hai trang thanh toán, trả cả hai) | `Payment` này `REFUND_REQUIRED` (lưu mã giao dịch VNPay), outbox `payment.refund_required`; đơn, ghế, vé không đổi; hoàn tiền tay |
+| `00` | Chưa trả được (`vnp_ResponseCode` hoặc `vnp_TransactionStatus` khác `00`) | `Payment` `FAILED`; đơn giữ nguyên (`PENDING`, người dùng thử lại được trong hạn) |
+| `00` | Đã trả, ghế còn của đơn (hoặc đơn `EXPIRED` mà mọi ghế còn trống) | `Payment` `SUCCESS`, ghế `SOLD`, đơn `CONFIRMED`, mỗi ghế một `Ticket` `ISSUED`, outbox `booking.confirmed` |
+| `00` | Đã trả nhưng mất ghế (ghế bị giữ hoặc bán cho đơn khác), hoặc suất đã hủy hay đã kết thúc | `Payment` `SUCCESS`, đơn `NEEDS_REVIEW`, không có vé, outbox `booking.needs_review`; ghế của chính đơn còn `HELD` được **nhả ngay** về `AVAILABLE` (outbox `seats.released`, `seat:released`), ghế `SOLD` và ghế của đơn khác không đổi |
+
+Lỗi không lường trước (DB, quá thời gian transaction, thiếu `VNPAY_HASH_SECRET`) → HTTP 500 `{ RspCode: "99" }`, không ghi gì (một transaction duy nhất). VNPay gọi lại với `01`, `04`, `97`, `99` hoặc khi quá thời gian, tối đa 10 lần, cách nhau 5 phút; `00` và `02` kết thúc. Thứ tự khóa `payments` → `bookings` → `showtime_seats` (`ORDER BY seat_id`), giống mọi luồng khác; IPN lặp lại chạy lần lượt trên dòng `payments` và nhận `02`. Không có rate limit (VNPay tự giãn lần gọi; request không có chữ ký đúng chỉ tốn một HMAC).
+
+**Giới hạn đã biết của thanh toán** (tới hết tuần 12):
+
+- Chưa có querydr (tuần 13, 3.7): job hết hạn chưa hỏi VNPay về `Payment` `PENDING`, nên đơn hết hạn đúng `holdUntil` dù tiền có thể đang trên đường; IPN đến muộn đi nhánh giành lại ghế hoặc `NEEDS_REVIEW`.
+- Outbox chỉ được ghi (`PENDING`), chưa có relay (tuần 14, 4.1): chưa gửi email, PDF hay thông báo.
+- `NEEDS_REVIEW` xử lý tay: tiền đã nhận nhưng không giữ được ghế (ghế của đơn đã được nhả cho người khác đặt). **Hoàn tiền thủ công là việc của admin** (qua cổng merchant VNPay hoặc liên hệ khách), với trang admin ở 3.8 (tuần 13); tới lúc đó tìm các đơn này bằng truy vấn ở ROADMAP 3.8. Hoàn tiền tự động nằm ngoài phạm vi.
+- Log request không bao giờ chứa `vnp_SecureHash` (bỏ hẳn khỏi `url` và `query`) hay `VNPAY_HASH_SECRET`.
+- Trả hai lần cho một đơn (hai trang thanh toán): lần sau thành `Payment` `REFUND_REQUIRED`, admin hoàn tay (truy vấn ở ROADMAP 3.8). Suất đã bắt đầu nhưng chưa kết thúc vẫn được xác nhận (khách vào muộn); suất đã kết thúc → `NEEDS_REVIEW`.
 
 **Kịch bản A và B** (PLAN §10, `apps/api/test/scenarios/`): chỉ chạy khi đặt `RUN_SCENARIO_TESTS=1`; không đặt thì mọi suite bị bỏ qua và không khởi động container nào.
 
@@ -220,7 +243,15 @@ Tích hợp VNPay bắt đầu ở giai đoạn 3, nhưng nên đăng ký sớm 
    | `VNPAY_PAYMENT_URL` | `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html` (mặc định) |
    | `VNPAY_RETURN_URL` | URL trang kết quả trên web, ví dụ `http://localhost:5173/payment/result` |
 
-3. `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET` và `VNPAY_RETURN_URL` vẫn tùy chọn để API khởi động được khi chưa có tài khoản; thiếu một trong ba thì `POST /payments/vnpay` và `GET /payments/vnpay/return` trả `503 PAYMENT_NOT_CONFIGURED`. URL IPN cần một tunnel công khai (cloudflared/ngrok), xem PLAN mục 5.
+3. `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET` và `VNPAY_RETURN_URL` vẫn tùy chọn để API khởi động được khi chưa có tài khoản; thiếu một trong ba thì `POST /payments/vnpay` và `GET /payments/vnpay/return` trả `503 PAYMENT_NOT_CONFIGURED`; thiếu `VNPAY_HASH_SECRET` thì IPN trả HTTP 500 `99`.
+4. **URL IPN** không nằm trong URL thanh toán: VNPay lưu nó theo merchant, nên phải gửi URL cho VNPay (hoặc đặt trong trang quản trị merchant sandbox nếu có mục đó) mỗi khi nó đổi. Tài liệu yêu cầu HTTPS. Khi chạy local, mở một tunnel tới API (cổng 3000):
+
+   ```bash
+   cloudflared tunnel --url http://localhost:3000
+   # → https://<tên-ngẫu-nhiên>.trycloudflare.com ; URL IPN = <địa chỉ đó>/payments/vnpay/ipn
+   ```
+
+   Tunnel nhanh của cloudflared (`trycloudflare.com`, không cần tài khoản) đổi tên **mỗi lần chạy**, nên mỗi lần lại phải gửi URL mới cho VNPay. Muốn URL cố định thì dùng named tunnel của cloudflared (cần tài khoản Cloudflare và một domain) hoặc domain tĩnh của ngrok. Kiểm tra tunnel trước khi gửi: `curl https://<địa chỉ>/payments/vnpay/ipn` phải trả `{"RspCode":"97","Message":"Invalid signature"}`. Trang kết quả (`VNPAY_RETURN_URL`) do chính trình duyệt mở nên `http://localhost:5173/payment/result` dùng được khi thanh toán trên cùng máy; chỉ cần tunnel cho web (cổng 5173) khi mở từ máy khác, và khi đó Vite phải cho phép host của tunnel (`server.allowedHosts`).
 
 ## Quyết định đáng chú ý
 

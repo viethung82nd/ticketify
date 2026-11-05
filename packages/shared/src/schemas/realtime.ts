@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { notificationSchema, type Notification } from './notification.js';
 
 /**
  * Socket.IO contract between the API (gateway + worker emitter) and the web (PLAN §8).
@@ -20,6 +21,8 @@ export const RealtimeEvent = {
   SEAT_RELEASED: 'seat:released',
   /** Server → room: seats sold (declared now, emitted from week 12). */
   SEAT_SOLD: 'seat:sold',
+  /** Server → room `user:{id}`: a notification was stored for that user (ROADMAP 4.2). */
+  NOTIFICATION_NEW: 'notification:new',
   /** Server → the one socket whose request failed (also sent in the ack). */
   ERROR: 'error',
 } as const;
@@ -27,6 +30,12 @@ export type RealtimeEvent = (typeof RealtimeEvent)[keyof typeof RealtimeEvent];
 
 /** Room of one showtime. The worker's emitter and the gateway must agree on it. */
 export const showtimeRoom = (showtimeId: string): string => `showtime:${showtimeId}`;
+
+/**
+ * Room of one user: every socket of that user joins it at the handshake, and only that user's
+ * own events (notifications) are sent there.
+ */
+export const userRoom = (userId: string): string => `user:${userId}`;
 
 export const REALTIME_LIMITS = {
   /** Showtime rooms one socket may be in at once. */
@@ -63,6 +72,10 @@ export type SeatReleasedEvent = z.infer<typeof seatReleasedEventSchema>;
 
 export const seatSoldEventSchema = seatReleasedEventSchema;
 export type SeatSoldEvent = z.infer<typeof seatSoldEventSchema>;
+
+/** `notification:new`: the stored notification, exactly as `GET /me/notifications` returns it. */
+export const notificationEventSchema = notificationSchema;
+export type NotificationEvent = Notification;
 
 /**
  * Machine-readable codes of realtime errors (besides the shared auth and validation ones). The two
@@ -117,6 +130,7 @@ export interface ServerToClientEvents {
   'seat:held': (payload: SeatHeldEvent) => void;
   'seat:released': (payload: SeatReleasedEvent) => void;
   'seat:sold': (payload: SeatSoldEvent) => void;
+  'notification:new': (payload: NotificationEvent) => void;
   error: (payload: RealtimeError) => void;
 }
 

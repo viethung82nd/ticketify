@@ -1,8 +1,11 @@
 import {
   bookingAlreadyPendingDetailsSchema,
   type Booking,
+  bookingPageSchema,
   bookingSchema,
+  type BookingStatus,
   type ComboItem,
+  type Page,
   tooManyAttemptsDetailsSchema,
 } from '@ticketify/shared';
 import { useQuery } from '@tanstack/react-query';
@@ -86,3 +89,33 @@ export const retryAfterOf = (error: unknown): number | undefined => {
   const parsed = tooManyAttemptsDetailsSchema.safeParse(apiErrorOf(error)?.details);
   return parsed.success ? parsed.data.retryAfterSeconds : undefined;
 };
+
+// ─── GET /me/bookings (ROADMAP 4.8) ───
+
+export interface MyBookingsQuery {
+  status?: BookingStatus;
+  page?: number;
+  pageSize?: number;
+}
+
+/** The signed-in user's bookings, newest first. */
+export async function listMyBookings(query: MyBookingsQuery = {}): Promise<Page<Booking>> {
+  const res = await apiClient.get<unknown>('/me/bookings', { params: query });
+  return bookingPageSchema.parse(res.data);
+}
+
+export const myBookingKeys = {
+  all: ['me', 'bookings'] as const,
+  list: (query: MyBookingsQuery) => ['me', 'bookings', query] as const,
+};
+
+/**
+ * The user's own bookings. Polled far less often than one booking's detail page: a status change
+ * here also arrives as a notification, which invalidates this list.
+ */
+export const useMyBookings = (query: MyBookingsQuery = {}) =>
+  useQuery({
+    queryKey: myBookingKeys.list(query),
+    queryFn: () => listMyBookings(query),
+    staleTime: 30_000,
+  });
