@@ -166,9 +166,19 @@ Trước khi nhả ghế của một đơn quá `holdUntil`, worker hỏi VNPay 
 
 - Hành vi querydr thật trên sandbox chưa kiểm được (3.6 hoãn): chỉ đối chiếu tài liệu đọc ngày 06/11/2026. Tài liệu không công bố URL production, và chuỗi ký phản hồi của tài liệu thiếu một dấu `+` trước `vnp_BankCode` và không nói dùng gì khi `vnp_PromotionCode`/`vnp_PromotionAmount` vắng — đọc theo cách an toàn (xem ROADMAP "Đã chốt"), nên nếu sai thì phản hồi chỉ bị coi là "không xác định", không bao giờ xác nhận sai một đơn.
 - Outbox chỉ được ghi (`PENDING`), chưa có relay (tuần 14, 4.1): chưa gửi email, PDF hay thông báo.
-- `NEEDS_REVIEW` xử lý tay: tiền đã nhận nhưng không giữ được ghế (ghế của đơn đã được nhả cho người khác đặt). **Hoàn tiền thủ công là việc của admin** (qua cổng merchant VNPay hoặc liên hệ khách), với trang admin ở 3.8 (tuần 13); tới lúc đó tìm các đơn này bằng truy vấn ở ROADMAP 3.8. Hoàn tiền tự động nằm ngoài phạm vi.
+- `NEEDS_REVIEW` xử lý tay: tiền đã nhận nhưng không giữ được ghế (ghế của đơn đã được nhả cho người khác đặt). **Hoàn tiền tự động nằm ngoài phạm vi** — xem mục dưới.
 - Log request không bao giờ chứa `vnp_SecureHash` (bỏ hẳn khỏi `url` và `query`) hay `VNPAY_HASH_SECRET`.
-- Trả hai lần cho một đơn (hai trang thanh toán): lần sau thành `Payment` `REFUND_REQUIRED`, admin hoàn tay (truy vấn ở ROADMAP 3.8). Suất đã bắt đầu nhưng chưa kết thúc vẫn được xác nhận (khách vào muộn); suất đã kết thúc → `NEEDS_REVIEW`.
+- Trả hai lần cho một đơn (hai trang thanh toán): lần sau thành `Payment` `REFUND_REQUIRED`, admin hoàn tay. Suất đã bắt đầu nhưng chưa kết thúc vẫn được xác nhận (khách vào muộn); suất đã kết thúc → `NEEDS_REVIEW`.
+
+### Hàng đợi xử lý tay — đơn `NEEDS_REVIEW` (3.8)
+
+**Hoàn tiền tự động nằm ngoài phạm vi dự án.** Khi IPN thu được tiền nhưng không giữ được ghế, đơn thành `NEEDS_REVIEW` và việc còn lại là của admin: hoàn tiền trên cổng merchant VNPay (cần `vnp_transaction_no`) hoặc liên hệ khách.
+
+- Trang `/admin/review` (ADMIN) liệt kê các đơn đó kèm khách hàng, suất chiếu, ghế, số tiền, `vnp_transaction_no`, `txn_ref` và lý do mất ghế; lọc theo `Chưa xử lý` / `Đã xử lý` / `Tất cả`, phân trang.
+- Nút **"Đã xử lý"** bắt buộc kèm ghi chú (1–1000 ký tự) và **không hoàn tiền, không đổi trạng thái đơn**: đơn vẫn `NEEDS_REVIEW`. Nó chỉ đặt `bookings.review_resolved_at`/`review_resolved_by` và ghi một dòng `audit_logs` (`booking.review_resolved`: ai, lúc nào, ghi chú, trạng thái trước/sau). `audit_logs` chỉ ghi thêm, không bao giờ sửa hay xóa.
+- Mỗi đơn chỉ đánh dấu được một lần; lần hai trả `409 REVIEW_ALREADY_RESOLVED` và ghi chú đầu được giữ nguyên. Hai admin bấm cùng lúc thì chỉ một người thắng (một `UPDATE` có điều kiện).
+- API: `GET /admin/bookings/needs-review?filter=open|resolved|all&page&pageSize`, `POST /admin/bookings/:id/resolve-review` với `{ note }`.
+- Ba truy vấn kiểm tra để chạy tay (hàng chờ hoàn tiền, đơn có hai `Payment` `SUCCESS` — phải rỗng, và `Payment` `REFUND_REQUIRED`): [docs/needs-review-queries.sql](docs/needs-review-queries.sql), ví dụ `psql "$DATABASE_URL" -f docs/needs-review-queries.sql`. Lưu ý: đơn **trả hai lần** vẫn `CONFIRMED` nên **không** nằm trong hàng chờ, chỉ xuất hiện ở truy vấn thứ ba.
 
 **Kịch bản A và B** (PLAN §10, `apps/api/test/scenarios/`): chỉ chạy khi đặt `RUN_SCENARIO_TESTS=1`; không đặt thì mọi suite bị bỏ qua và không khởi động container nào.
 

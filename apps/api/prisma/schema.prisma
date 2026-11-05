@@ -142,6 +142,8 @@ model User {
   bookings         Booking[]
   notifications    Notification[]
   checkedInTickets Ticket[]       @relation("TicketCheckedInBy")
+  auditLogs        AuditLog[]
+  resolvedReviews  Booking[]      @relation("BookingReviewResolver")
 
   @@map("users")
 }
@@ -331,35 +333,41 @@ model ShowtimeSeat {
 }
 
 model Booking {
-  id             String        @id @default(uuid(7)) @db.Uuid
+  id               String        @id @default(uuid(7)) @db.Uuid
   /// Short human-friendly code shown to users.
-  code           String        @unique
-  userId         String        @map("user_id") @db.Uuid
-  showtimeId     String        @map("showtime_id") @db.Uuid
-  status         BookingStatus @default(PENDING)
-  subtotal       Int
-  discount       Int           @default(0)
-  total          Int
+  code             String        @unique
+  userId           String        @map("user_id") @db.Uuid
+  showtimeId       String        @map("showtime_id") @db.Uuid
+  status           BookingStatus @default(PENDING)
+  subtotal         Int
+  discount         Int           @default(0)
+  total            Int
   /// createdAt + HOLD_TTL: countdown shown to the user; last moment to start a payment.
-  expiresAt      DateTime      @map("expires_at") @db.Timestamptz(3)
+  expiresAt        DateTime      @map("expires_at") @db.Timestamptz(3)
   /// expiresAt + PAYMENT_GRACE: seats stay HELD until then to absorb late IPNs.
-  holdUntil      DateTime      @map("hold_until") @db.Timestamptz(3)
-  idempotencyKey String        @map("idempotency_key")
+  holdUntil        DateTime      @map("hold_until") @db.Timestamptz(3)
+  idempotencyKey   String        @map("idempotency_key")
   /// Hash of the normalized request payload (same key + different hash → 422).
-  requestHash    String        @map("request_hash")
-  confirmedAt    DateTime?     @map("confirmed_at") @db.Timestamptz(3)
+  requestHash      String        @map("request_hash")
+  confirmedAt      DateTime?     @map("confirmed_at") @db.Timestamptz(3)
   /// Set by the worker once the confirmation email was sent (at-least-once delivery).
-  emailSentAt    DateTime?     @map("email_sent_at") @db.Timestamptz(3)
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  emailSentAt      DateTime?     @map("email_sent_at") @db.Timestamptz(3)
+  /// When an admin marked a NEEDS_REVIEW booking handled (ROADMAP 3.8). The booking keeps its
+  /// status: this records only that the work outside the system (refund, call) is done. Every
+  /// such action is also an `audit_logs` row; these two columns are the current state.
+  reviewResolvedAt DateTime?     @map("review_resolved_at") @db.Timestamptz(3)
+  reviewResolvedBy String?       @map("review_resolved_by") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user          User           @relation(fields: [userId], references: [id])
-  showtime      Showtime       @relation(fields: [showtimeId], references: [id])
-  seats         BookingSeat[]
-  combos        BookingCombo[]
-  payments      Payment[]
-  tickets       Ticket[]
-  showtimeSeats ShowtimeSeat[]
+  reviewResolver User?          @relation("BookingReviewResolver", fields: [reviewResolvedBy], references: [id])
+  user           User           @relation(fields: [userId], references: [id])
+  showtime       Showtime       @relation(fields: [showtimeId], references: [id])
+  seats          BookingSeat[]
+  combos         BookingCombo[]
+  payments       Payment[]
+  tickets        Ticket[]
+  showtimeSeats  ShowtimeSeat[]
 
   @@unique([userId, idempotencyKey])
   @@index([status, holdUntil])
@@ -485,4 +493,30 @@ model Notification {
 
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+/// Append-only log of an admin action taken by hand (ROADMAP 3.8). Nothing here is ever
+/// updated or deleted: one row per action, with the state before and after it as the
+/// endpoint saw them. The first action logged is `booking.review_resolved`.
+model AuditLog {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  /// Who acted. Nullable only so the log survives a deleted user; never null when written.
+  actorId    String?  @map("actor_id") @db.Uuid
+  /// What was done, e.g. `booking.review_resolved`.
+  action     String
+  /// Table the action was about, e.g. `booking`.
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  /// What the admin wrote about it. Required by the endpoints that log an action.
+  note       String?
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  /// History of one row, newest last; and the whole log by time.
+  @@index([entityType, entityId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
 }
