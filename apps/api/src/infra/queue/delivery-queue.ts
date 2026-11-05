@@ -54,13 +54,13 @@ export const deliveryJobId = (eventId: string, action: DeliveryAction): string =
  * storage outage never keeps the in-app notification from arriving.
  */
 export const DELIVERY_ACTIONS: Readonly<Record<OutboxEventType, readonly DeliveryAction[]>> = {
-  // 4.2 adds NOTIFY, 4.4 adds GENERATE_PDF (which chains SEND_EMAIL in 4.6).
-  [OutboxEventType.BOOKING_CONFIRMED]: [],
-  // 4.2 adds NOTIFY (user + admins), 4.6 adds SEND_EMAIL (apology).
-  [OutboxEventType.BOOKING_NEEDS_REVIEW]: [],
+  // 4.4 adds GENERATE_PDF, which chains SEND_EMAIL in 4.6.
+  [OutboxEventType.BOOKING_CONFIRMED]: [DeliveryAction.NOTIFY],
+  // 4.6 adds SEND_EMAIL (the apology to the user).
+  [OutboxEventType.BOOKING_NEEDS_REVIEW]: [DeliveryAction.NOTIFY],
   [OutboxEventType.SEATS_RELEASED]: [DeliveryAction.BROADCAST_SEATS],
-  // 4.2 adds NOTIFY (admins only: the user paid twice but owes nothing).
-  [OutboxEventType.PAYMENT_REFUND_REQUIRED]: [],
+  // Admins only: the user paid twice but owes nothing, so telling them would only alarm them.
+  [OutboxEventType.PAYMENT_REFUND_REQUIRED]: [DeliveryAction.NOTIFY],
 };
 
 /** Event types this build can deliver; the relay claims nothing else. */

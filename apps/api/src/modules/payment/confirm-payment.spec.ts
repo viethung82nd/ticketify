@@ -5,9 +5,15 @@ import {
   ShowtimeStatus,
 } from '@ticketify/shared';
 import { FakeClock } from '../../infra/clock/testing/fake-clock';
+import {
+  bookingConfirmedPayloadSchema,
+  bookingNeedsReviewPayloadSchema,
+  paymentRefundRequiredPayloadSchema,
+  seatsReleasedPayloadSchema,
+} from '../../infra/outbox/outbox-payloads';
 import { confirmPayment, type ConfirmOutcome } from './confirm-payment';
 import { ipnResponseOf } from './payment.service';
-import { mockTx, type Statement, writes } from './testing/mock-tx';
+import { mockTicketId, mockTx, type Statement, writes } from './testing/mock-tx';
 
 const at = (iso: string): Date => new FakeClock(iso).now();
 const NOW = at('2026-11-01T10:05:00.000Z');
@@ -278,7 +284,7 @@ describe('confirmPayment — branch A (PENDING, seats still HELD)', () => {
       bookingId: BOOKING_ID,
       showtimeId: SHOWTIME_ID,
       seatIds: [SEAT_A, SEAT_B],
-      ticketIds: ['ticket-1', 'ticket-2'],
+      ticketIds: [mockTicketId(1), mockTicketId(2)],
       reclaimed: false,
       showtimeStarted: false,
     });
@@ -319,7 +325,7 @@ describe('confirmPayment — branch A (PENDING, seats still HELD)', () => {
         showtimeId: SHOWTIME_ID,
         paymentId: PAYMENT_ID,
         seatIds: [SEAT_A, SEAT_B],
-        ticketIds: ['ticket-1', 'ticket-2'],
+        ticketIds: [mockTicketId(1), mockTicketId(2)],
         reclaimed: false,
       },
       nextRetryAt: NOW,
@@ -583,5 +589,70 @@ describe('confirmPayment — branch B (EXPIRED booking)', () => {
       'INSERT outbox_events',
     ]);
     expect(mock.ticket.createManyAndReturn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The delivery handlers parse every payload with these schemas (ROADMAP 4.1–4.2), so a writer
+ * that drops or renames a field must fail here rather than in the worker at run time.
+ */
+describe('confirmPayment — outbox payloads match the schemas the worker parses', () => {
+  const SCHEMAS = {
+    'booking.confirmed': bookingConfirmedPayloadSchema,
+    'booking.needs_review': bookingNeedsReviewPayloadSchema,
+    'seats.released': seatsReleasedPayloadSchema,
+    'payment.refund_required': paymentRefundRequiredPayloadSchema,
+  } as const;
+
+  /** Every outbox row the run wrote, checked against the schema of its own type. */
+  const checkEvents = (mock: ReturnType<typeof mockTx>['mock'], expected: string[]) => {
+    const events = mock.outboxEvent.create.mock.calls.map(
+      ([args]) => (args as { data: { type: keyof typeof SCHEMAS; payload: unknown } }).data,
+    );
+    expect(events.map((event) => event.type)).toEqual(expected);
+    for (const event of events) {
+      const result = SCHEMAS[event.type].safeParse(event.payload);
+      expect(result.success ? [] : result.error.issues).toEqual([]);
+    }
+  };
+
+  it('booking.confirmed, branch A', async () => {
+    const { result, mock } = run(
+      [paymentRow(), bookingRow(BookingStatus.PENDING), [], heldByBooking, showtimeRow()],
+      [1, 2, 1],
+    );
+
+    await expect(result).resolves.toMatchObject({ outcome: 'confirmed' });
+    checkEvents(mock, ['booking.confirmed']);
+  });
+
+  it('booking.needs_review and seats.released, branch C', async () => {
+    const { result, mock } = run(
+      [
+        paymentRow(),
+        bookingRow(BookingStatus.PENDING),
+        [],
+        [
+          seatRow(SEAT_A, ShowtimeSeatStatus.SOLD, OTHER_BOOKING_ID, null),
+          seatRow(SEAT_B, ShowtimeSeatStatus.HELD, BOOKING_ID, HELD_UNTIL),
+        ],
+        showtimeRow(),
+        [{ seat_id: SEAT_B }],
+      ],
+      [1, 1],
+    );
+
+    await expect(result).resolves.toMatchObject({ outcome: 'needs_review' });
+    checkEvents(mock, ['booking.needs_review', 'seats.released']);
+  });
+
+  it('payment.refund_required, paid twice', async () => {
+    const { result, mock } = run(
+      [paymentRow(), bookingRow(BookingStatus.CONFIRMED), [{ id: OTHER_PAYMENT_ID }]],
+      [1],
+    );
+
+    await expect(result).resolves.toMatchObject({ outcome: 'paid_twice' });
+    checkEvents(mock, ['payment.refund_required']);
   });
 });

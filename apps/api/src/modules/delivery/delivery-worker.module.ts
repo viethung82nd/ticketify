@@ -5,7 +5,9 @@ import {
   OutboxRelay,
 } from '../../infra/outbox/outbox-relay.service';
 import { DeliveryQueueProducer } from '../../infra/queue/delivery-queue.producer';
+import { NotificationsWorkerModule } from '../notifications/notifications.module';
 import { RealtimeWorkerModule } from '../realtime/realtime.module';
+import { BookingDelivery } from './booking-delivery';
 import { DeliveryProcessor } from './delivery.processor';
 
 /**
@@ -13,11 +15,12 @@ import { DeliveryProcessor } from './delivery.processor';
  * queue's processor. Not imported by the API — only the worker turns outbox rows into jobs.
  */
 @Module({
-  imports: [RealtimeWorkerModule],
+  imports: [RealtimeWorkerModule, NotificationsWorkerModule],
   providers: [
     DeliveryQueueProducer,
     OutboxRelay,
     DeliveryProcessor,
+    BookingDelivery,
     { provide: OUTBOX_POLL_INTERVAL_MS, useValue: DEFAULT_OUTBOX_POLL_INTERVAL_MS },
   ],
   exports: [OutboxRelay],

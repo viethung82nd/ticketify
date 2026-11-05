@@ -34,7 +34,7 @@ export function mockTx(rows: unknown[][], affected: number[] = []) {
       createManyAndReturn: jest.fn(({ data }: CreateArgs) => {
         record('INSERT INTO tickets', [data]);
         const lines = Array.isArray(data) ? data : [data];
-        return Promise.resolve(lines.map((_, i) => ({ id: `ticket-${i + 1}` })));
+        return Promise.resolve(lines.map((_, i) => ({ id: mockTicketId(i + 1) })));
       }),
     },
     outboxEvent: {
@@ -46,6 +46,13 @@ export function mockTx(rows: unknown[][], affected: number[] = []) {
   };
   return { tx: tx as unknown as Prisma.TransactionClient, statements, mock: tx };
 }
+
+/**
+ * Id the mock gives the n-th ticket (1-based). A real uuid v7, not `ticket-1`: the outbox payload
+ * it ends up in is parsed as uuids by the delivery worker (ROADMAP 4.1).
+ */
+export const mockTicketId = (n: number): string =>
+  `01a17e75-7100-7679-b8b1-${String(n).padStart(12, '0')}`;
 
 /** The statements that write (raw UPDATE/INSERT and the recorded Prisma inserts). */
 export const writes = (statements: readonly Statement[]): Statement[] =>

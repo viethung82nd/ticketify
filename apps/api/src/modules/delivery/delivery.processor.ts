@@ -1,14 +1,31 @@
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { type Job, UnrecoverableError } from 'bullmq';
 import type { z } from 'zod';
-import { seatsReleasedPayloadSchema } from '../../infra/outbox/outbox-payloads';
+import { AppConfig } from '../../config/app-config.service';
+import { OutboxEventType } from '../../infra/outbox/outbox-events';
+import {
+  bookingConfirmedPayloadSchema,
+  bookingNeedsReviewPayloadSchema,
+  paymentRefundRequiredPayloadSchema,
+  seatsReleasedPayloadSchema,
+} from '../../infra/outbox/outbox-payloads';
 import {
   DELIVERY_QUEUE,
   DeliveryAction,
   type DeliveryJobData,
 } from '../../infra/queue/delivery-queue';
 import { QueueWorkers } from '../../infra/queue/queue-workers';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationEvents } from '../realtime/notification-events';
 import { SeatEvents } from '../realtime/seat-events';
+import { BookingDelivery, BookingGoneError } from './booking-delivery';
+import {
+  confirmedText,
+  needsReviewAdminText,
+  needsReviewUserText,
+  type NotificationText,
+  refundRequiredAdminText,
+} from './delivery-text';
 
 /** Delivery jobs one worker process runs at the same time. */
 export const DELIVERY_WORKER_CONCURRENCY = 5;
@@ -18,7 +35,7 @@ export const DELIVERY_WORKER_CONCURRENCY = 5;
  * transaction committed. Fed by the outbox relay, so each step must be idempotent — it may run
  * again after a crash or a lost acknowledgement.
  *
- * Steps are added by the tasks that own them: `broadcast-seats` here (4.1), `notify` in 4.2,
+ * Steps are added by the tasks that own them: `broadcast-seats` and `notify` here (4.1, 4.2),
  * `generate-pdf` in 4.4–4.5, `send-email` in 4.6.
  */
 @Injectable()
@@ -28,6 +45,10 @@ export class DeliveryProcessor implements OnApplicationBootstrap {
   constructor(
     private readonly workers: QueueWorkers,
     private readonly seatEvents: SeatEvents,
+    private readonly notifications: NotificationsService,
+    private readonly notificationEvents: NotificationEvents,
+    private readonly bookings: BookingDelivery,
+    private readonly config: AppConfig,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -40,6 +61,8 @@ export class DeliveryProcessor implements OnApplicationBootstrap {
     switch (job.name) {
       case DeliveryAction.BROADCAST_SEATS:
         return this.broadcastSeats(job.data);
+      case DeliveryAction.NOTIFY:
+        return this.notify(job.data);
       default:
         // Nothing retries an unknown action: this build cannot grow a handler mid-job.
         throw new UnrecoverableError(`Unknown delivery action ${job.name}`);
@@ -58,6 +81,82 @@ export class DeliveryProcessor implements OnApplicationBootstrap {
     const payload = this.parse(seatsReleasedPayloadSchema, data);
     this.seatEvents.released(payload.showtimeId, payload.seatIds);
     return Promise.resolve();
+  }
+
+  /**
+   * Stores the notifications of one event and pushes the ones it really created (ROADMAP 4.2).
+   *
+   * Who hears about what: a confirmed booking goes to the user alone; a booking under review goes
+   * to the user (an apology) and to every admin (something to fix); a double payment goes to the
+   * admins alone, because the user owes nothing and would only be alarmed.
+   */
+  private async notify(data: DeliveryJobData): Promise<void> {
+    const timeZone = this.config.get('CINEMA_TZ');
+    switch (data.type) {
+      case OutboxEventType.BOOKING_CONFIRMED: {
+        const payload = this.parse(bookingConfirmedPayloadSchema, data);
+        const booking = await this.booking(payload.bookingId, data);
+        if (!booking) return;
+        await this.push(data, [payload.userId], confirmedText(booking, timeZone));
+        return;
+      }
+      case OutboxEventType.BOOKING_NEEDS_REVIEW: {
+        const payload = this.parse(bookingNeedsReviewPayloadSchema, data);
+        const booking = await this.booking(payload.bookingId, data);
+        if (!booking) return;
+        // The user first: an admin who booked for themselves gets the user's wording, because
+        // the unique index allows one notification per user per event.
+        await this.push(data, [payload.userId], needsReviewUserText(booking, payload, timeZone));
+        await this.push(
+          data,
+          await this.notifications.adminIds(),
+          needsReviewAdminText(booking, payload, timeZone),
+        );
+        return;
+      }
+      case OutboxEventType.PAYMENT_REFUND_REQUIRED: {
+        const payload = this.parse(paymentRefundRequiredPayloadSchema, data);
+        await this.push(
+          data,
+          await this.notifications.adminIds(),
+          refundRequiredAdminText(payload),
+        );
+        return;
+      }
+      default:
+        throw new UnrecoverableError(`No notification for outbox event type ${data.type}`);
+    }
+  }
+
+  /** Stores one notification for each user, then pushes exactly the rows that were created. */
+  private async push(
+    data: DeliveryJobData,
+    userIds: readonly string[],
+    text: NotificationText,
+  ): Promise<void> {
+    const stored = await this.notifications.store({ ...text, userIds, eventId: data.eventId });
+    for (const { userId, ...notification } of stored) {
+      this.notificationEvents.created(userId, notification);
+    }
+    if (stored.length < userIds.length) {
+      this.logger.debug(
+        `Event ${data.eventId}: ${userIds.length - stored.length} notification(s) already stored`,
+      );
+    }
+  }
+
+  /**
+   * The booking of an event, or `undefined` when it is gone — a booking deleted after the event
+   * was written (test data, an admin cleanup) must not make a job retry forever.
+   */
+  private async booking(bookingId: string, data: DeliveryJobData) {
+    try {
+      return await this.bookings.read(bookingId);
+    } catch (error) {
+      if (!(error instanceof BookingGoneError)) throw error;
+      this.logger.warn(`Event ${data.eventId} (${data.type}) dropped: ${error.message}`);
+      return undefined;
+    }
   }
 
   /** Parses a payload, or gives up on the job for good (a bad row is not a transient failure). */

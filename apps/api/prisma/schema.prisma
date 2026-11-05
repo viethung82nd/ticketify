@@ -478,11 +478,15 @@ model Notification {
   title     String
   body      String
   data      Json?
+  /// Outbox event this came from; NULL for a notification created by hand. The partial unique
+  /// index (user_id, event_id) is what makes the worker's at-least-once delivery harmless.
+  eventId   String?   @map("event_id") @db.Uuid
   readAt    DateTime? @map("read_at") @db.Timestamptz(3)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  /// List of one user, newest first.
   @@index([userId, createdAt])
   @@map("notifications")
 }

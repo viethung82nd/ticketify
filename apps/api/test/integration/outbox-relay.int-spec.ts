@@ -19,11 +19,8 @@ import { DeliveryQueueProducer } from '../../src/infra/queue/delivery-queue.prod
 import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
 import { BookingExpiryService } from '../../src/modules/bookings/booking-expiry.service';
 import { DeliveryProcessor } from '../../src/modules/delivery/delivery.processor';
-import {
-  SeatEvents,
-  type SeatEventName,
-  type SeatEventPayload,
-} from '../../src/modules/realtime/seat-events';
+import { RealtimeTransport } from '../../src/modules/realtime/realtime-transport';
+import { RecordingTransport } from '../../src/modules/realtime/testing/recording-transport';
 import { appTestEnv } from '../support/app-env';
 import { createTestDatabase, type TestDatabase } from '../support/database';
 import { createFixtures, type Fixtures } from '../support/fixtures';
@@ -33,15 +30,6 @@ const NOW = '2026-11-05T10:00:00.000Z';
 const A_BOOKING = '01a3a1aa-7100-7679-b8b1-000000000001';
 const A_SHOWTIME = '01a3a1aa-7100-7679-b8b1-0000000000a1';
 const A_SEAT = '01a3a1aa-7100-7679-b8b1-0000000000c1';
-
-/** Records what the worker would have published to the showtime rooms. */
-class RecordingSeatEvents extends SeatEvents {
-  readonly sent: { room: string; event: SeatEventName; payload: SeatEventPayload }[] = [];
-
-  protected emit(room: string, event: SeatEventName, payload: SeatEventPayload): void {
-    this.sent.push({ room, event, payload });
-  }
-}
 
 interface OutboxRow {
   status: string;
@@ -59,7 +47,7 @@ describe('Outbox relay — claim, backoff, abandoned claims, delivery (real Post
   let relay: OutboxRelay;
   let producer: DeliveryQueueProducer;
   let processor: DeliveryProcessor;
-  let seatEvents: RecordingSeatEvents;
+  let transport: RecordingTransport;
   let fixtures: Fixtures;
   let expiry: BookingExpiryService;
   const clock = new FakeClock(NOW);
@@ -68,7 +56,7 @@ describe('Outbox relay — claim, backoff, abandoned claims, delivery (real Post
     [db, redis] = await Promise.all([createTestDatabase(), createTestRedis()]);
     Object.assign(process.env, appTestEnv({ databaseUrl: db.url, redisUrl: redis.url }));
     fixtures = createFixtures(db.prisma);
-    seatEvents = new RecordingSeatEvents();
+    transport = new RecordingTransport();
 
     // A worker context like `main.worker.ts` boots, with both loops off: the test drives them.
     const { WorkerModule } = await import('../../src/worker.module.js');
@@ -79,8 +67,8 @@ describe('Outbox relay — claim, backoff, abandoned claims, delivery (real Post
       .useValue(0)
       .overrideProvider(OUTBOX_POLL_INTERVAL_MS)
       .useValue(0)
-      .overrideProvider(SeatEvents)
-      .useValue(seatEvents)
+      .overrideProvider(RealtimeTransport)
+      .useValue(transport)
       .compile();
     relay = workerRef.get(OutboxRelay);
     producer = workerRef.get(DeliveryQueueProducer);
@@ -95,7 +83,7 @@ describe('Outbox relay — claim, backoff, abandoned claims, delivery (real Post
 
   beforeEach(async () => {
     clock.set(NOW);
-    seatEvents.sent.length = 0;
+    transport.clear();
     await db.prisma.outboxEvent.deleteMany();
     await producer.queue.obliterate({ force: true });
   });
@@ -112,7 +100,8 @@ describe('Outbox relay — claim, backoff, abandoned claims, delivery (real Post
   });
 
   interface EventOverrides {
-    type?: OutboxEventType;
+    /** A string, not only a known type: a newer API may write one this worker cannot deliver. */
+    type?: string;
     nextRetryAt?: Date;
     status?: 'PENDING' | 'PROCESSING';
     lockedAt?: Date;
@@ -192,7 +181,8 @@ describe('Outbox relay — claim, backoff, abandoned claims, delivery (real Post
   });
 
   it('leaves an event type this build cannot deliver PENDING instead of dropping it', async () => {
-    const id = await event({ type: OutboxEventType.BOOKING_CONFIRMED });
+    // What an older worker sees of an event type a newer API introduced.
+    const id = await event({ type: 'booking.rescheduled' });
 
     expect((await relay.pollOnce()).claimed).toBe(0);
 
@@ -345,15 +335,11 @@ describe('Outbox relay — claim, backoff, abandoned claims, delivery (real Post
     expect(job).toBeDefined();
 
     // The durable copy: the same event, rebuilt from the row by the delivery worker.
-    seatEvents.sent.length = 0;
+    transport.clear();
     await processor.process(job as Job<DeliveryJobData>);
 
-    expect(seatEvents.sent).toEqual([
-      {
-        room: `showtime:${showtime.id}`,
-        event: 'seat:released',
-        payload: { showtimeId: showtime.id, seatIds: [seat.id] },
-      },
+    expect(transport.triples()).toEqual([
+      [`showtime:${showtime.id}`, 'seat:released', { showtimeId: showtime.id, seatIds: [seat.id] }],
     ]);
   });
 });
