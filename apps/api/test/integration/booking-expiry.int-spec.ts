@@ -82,6 +82,7 @@ const emptyOutcomes = (): Record<ExpireOutcomeKind, number> => ({
   skipped: 0,
   noop: 0,
   early: 0,
+  paid: 0,
 });
 
 describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real Postgres + Redis)', () => {
@@ -351,6 +352,7 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
         outcome: 'expired',
         showtimeId: st.id,
         releasedSeatIds: [seat('A1'), seat('A2')].sort(),
+        expiredPaymentIds: [],
       });
       await expect(expiry.expire(booking.id)).resolves.toEqual({ outcome: 'noop' });
 
@@ -420,6 +422,7 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
         outcome: 'expired',
         showtimeId: st.id,
         releasedSeatIds: [seat('A2')],
+        expiredPaymentIds: [],
       });
 
       expect(await bookingStatus(a.id)).toBe('EXPIRED');
@@ -450,6 +453,7 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
         outcome: 'expired',
         showtimeId: st.id,
         releasedSeatIds: [seat('A2')],
+        expiredPaymentIds: [],
       });
 
       expect(await seatRow(st.id, seat('A1'))).toEqual({

@@ -150,9 +150,21 @@ pnpm test:integration
 
 Lỗi không lường trước (DB, quá thời gian transaction, thiếu `VNPAY_HASH_SECRET`) → HTTP 500 `{ RspCode: "99" }`, không ghi gì (một transaction duy nhất). VNPay gọi lại với `01`, `04`, `97`, `99` hoặc khi quá thời gian, tối đa 10 lần, cách nhau 5 phút; `00` và `02` kết thúc. Thứ tự khóa `payments` → `bookings` → `showtime_seats` (`ORDER BY seat_id`), giống mọi luồng khác; IPN lặp lại chạy lần lượt trên dòng `payments` và nhận `02`. Không có rate limit (VNPay tự giãn lần gọi; request không có chữ ký đúng chỉ tốn một HMAC).
 
-**Giới hạn đã biết của thanh toán** (tới hết tuần 12):
+### Hỏi lại VNPay trước khi hết hạn — querydr (3.7)
 
-- Chưa có querydr (tuần 13, 3.7): job hết hạn chưa hỏi VNPay về `Payment` `PENDING`, nên đơn hết hạn đúng `holdUntil` dù tiền có thể đang trên đường; IPN đến muộn đi nhánh giành lại ghế hoặc `NEEDS_REVIEW`.
+Trước khi nhả ghế của một đơn quá `holdUntil`, worker hỏi VNPay xem lần thanh toán còn `PENDING` có thành công hay không: `POST` tới `VNPAY_API_URL` (`vnp_Command=querydr`, mặc định `https://sandbox.vnpayment.vn/merchant_webapi/api/transaction`, timeout `VNPAY_QUERYDR_TIMEOUT_MS`). Lời gọi HTTP nằm **ngoài** transaction (PLAN §4); sau đó transaction khóa lại đúng những dòng đó và kiểm tra lại mọi điều kiện, nên kết quả HTTP một mình không bao giờ đổi được trạng thái.
+
+- Chuỗi ký của querydr **khác** IPN: nối bằng `|` theo thứ tự tài liệu quy định, không sort, không urlencode (`vnp_RequestId|vnp_Version|vnp_Command|vnp_TmnCode|vnp_TxnRef|vnp_TransactionDate|vnp_CreateDate|vnp_IpAddr|vnp_OrderInfo`). `vnp_TransactionDate` là `vnp_CreateDate` của chính yêu cầu thanh toán.
+- **Đã trả** = `vnp_ResponseCode` `00` (truy vấn thành công) **và** `vnp_TransactionStatus` `00`. Khi đó đơn **không** hết hạn: kết quả được ghi bằng đúng `confirmPayment()` của IPN, nên đi đúng nhánh A (ghế còn giữ → `CONFIRMED` + vé), B (đơn đã `EXPIRED` mà ghế còn trống → giành lại rồi bán) hoặc C (`NEEDS_REVIEW`, nhả ghế của chính đơn). `raw_payload` lưu nguyên phản hồi querydr.
+- **Không trả** (`vnp_ResponseCode` `91`; `vnp_TransactionStatus` `02`/`09`) và **không xác định** (lỗi mạng, timeout, HTTP lỗi, body không phải JSON, chữ ký phản hồi không khớp, `vnp_TxnRef` khác, `vnp_TransactionStatus` `01`/`04`/`05`/`06`/`07`, `vnp_ResponseCode` `02`/`03`/`94`/`97`/`99`) → hết hạn **đúng như trước 3.7**, kèm log `warn`. querydr không bao giờ làm job lỗi.
+- Thiếu `VNPAY_TMN_CODE` hoặc `VNPAY_HASH_SECRET` → không gọi HTTP, log `warn`, hết hạn như cũ. Credentials sandbox đăng ký bằng tay, không nằm trong repo; test dùng HTTP giả với chữ ký thật.
+- Đơn có nhiều lần thanh toán `PENDING`: hỏi tối đa 5 lần mới nhất, dừng ở lần đầu tiên được báo đã trả; các lần còn lại để IPN của chúng xử lý (log `warn` nếu nhiều hơn 5).
+- Hết hạn nay cũng chuyển mọi `Payment` `PENDING` của đơn sang `EXPIRED` (PLAN §4). `EXPIRED` **không** phải trạng thái cuối: IPN đến muộn (VNPay gọi lại tới ~45 phút) vẫn ghi được kết quả.
+- Thứ tự khóa của `expireBooking` giờ là `payments` (`FOR UPDATE`) → `bookings` (`FOR UPDATE SKIP LOCKED`) → `showtime_seats` (`ORDER BY seat_id`), giống IPN (PLAN §4).
+
+**Giới hạn đã biết của thanh toán** (tới hết tuần 13):
+
+- Hành vi querydr thật trên sandbox chưa kiểm được (3.6 hoãn): chỉ đối chiếu tài liệu đọc ngày 06/11/2026. Tài liệu không công bố URL production, và chuỗi ký phản hồi của tài liệu thiếu một dấu `+` trước `vnp_BankCode` và không nói dùng gì khi `vnp_PromotionCode`/`vnp_PromotionAmount` vắng — đọc theo cách an toàn (xem ROADMAP "Đã chốt"), nên nếu sai thì phản hồi chỉ bị coi là "không xác định", không bao giờ xác nhận sai một đơn.
 - Outbox chỉ được ghi (`PENDING`), chưa có relay (tuần 14, 4.1): chưa gửi email, PDF hay thông báo.
 - `NEEDS_REVIEW` xử lý tay: tiền đã nhận nhưng không giữ được ghế (ghế của đơn đã được nhả cho người khác đặt). **Hoàn tiền thủ công là việc của admin** (qua cổng merchant VNPay hoặc liên hệ khách), với trang admin ở 3.8 (tuần 13); tới lúc đó tìm các đơn này bằng truy vấn ở ROADMAP 3.8. Hoàn tiền tự động nằm ngoài phạm vi.
 - Log request không bao giờ chứa `vnp_SecureHash` (bỏ hẳn khỏi `url` và `query`) hay `VNPAY_HASH_SECRET`.

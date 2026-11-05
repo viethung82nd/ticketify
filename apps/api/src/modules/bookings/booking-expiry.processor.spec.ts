@@ -14,6 +14,7 @@ const EXPIRED: ExpireOutcome = {
   outcome: 'expired',
   showtimeId: SHOWTIME_ID,
   releasedSeatIds: [SEAT_ID],
+  expiredPaymentIds: [],
 };
 
 /** What Prisma throws when `lock_timeout` ends a wait (driver-adapter error, SQLSTATE 55P03). */
@@ -43,11 +44,7 @@ describe('BookingExpiryProcessor (expire-booking job)', () => {
   it('returns the outcome of expireBooking for the booking of the job', async () => {
     const { processor, expire, job } = setup(EXPIRED);
 
-    await expect(processor.process(job, 'token')).resolves.toEqual({
-      outcome: 'expired',
-      showtimeId: SHOWTIME_ID,
-      releasedSeatIds: [SEAT_ID],
-    });
+    await expect(processor.process(job, 'token')).resolves.toEqual(EXPIRED);
     expect(expire).toHaveBeenCalledWith(BOOKING_ID);
   });
 

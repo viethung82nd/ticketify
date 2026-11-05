@@ -610,6 +610,7 @@ describe('Realtime — gateway, rooms, seat events, multi-instance (real Postgre
         outcome: 'expired',
         showtimeId: showtime.id,
         releasedSeatIds: [seat('A1'), seat('A2')].sort(),
+        expiredPaymentIds: [],
       });
       await expect(expiry.expire(first.id)).resolves.toEqual({ outcome: 'noop' });
       // Barrier: one more expiry that does release seats.
@@ -642,6 +643,7 @@ describe('Realtime — gateway, rooms, seat events, multi-instance (real Postgre
         outcome: 'expired',
         showtimeId: showtime.id,
         releasedSeatIds: [],
+        expiredPaymentIds: [],
       });
       clock.advance({ minutes: HOLD_MINUTES });
       await expiry.expire(barrier.id);
