@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
+import { CheckInController } from './check-in.controller';
+import { CheckInService } from './check-in.service';
 import { TicketPdfStorage } from './ticket-pdf.storage';
 import { TicketsController } from './tickets.controller';
 
-/** Tickets on the API: downloading a booking's PDF (ROADMAP 4.5); check-in comes in 4.7. */
+/** Tickets on the API: downloading a booking's PDF (4.5) and check-in at the door (4.7). */
 @Module({
-  controllers: [TicketsController],
-  providers: [TicketPdfStorage],
+  controllers: [TicketsController, CheckInController],
+  providers: [TicketPdfStorage, CheckInService],
   exports: [TicketPdfStorage],
 })
 export class TicketsModule {}
