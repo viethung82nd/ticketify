@@ -1,5 +1,10 @@
 import { BookingStatus } from '@ticketify/shared';
 import type { Prisma } from '../../generated/prisma/client';
+import {
+  OutboxEventType,
+  SeatsReleasedCause,
+  writeOutboxEvent,
+} from '../../infra/outbox/outbox-events';
 
 type Tx = Prisma.TransactionClient;
 
@@ -39,6 +44,9 @@ interface BookingRow {
  * 2. the booking's own HELD seats `FOR UPDATE ORDER BY seat_id`.
  * A hold never waits on a lock (NOWAIT) and a showtime cancel never locks `bookings`, so no flow
  * can wait on this one in a cycle.
+ *
+ * Seats that went back are announced through the outbox (`seats.released`), written here so it
+ * commits with them: a row that exists is a change that happened.
  */
 export async function expireBooking(tx: Tx, bookingId: string, now: Date): Promise<ExpireOutcome> {
   // 1. Lock the booking. No row: either it does not exist or another transaction has it.
@@ -86,12 +94,29 @@ export async function expireBooking(tx: Tx, bookingId: string, now: Date): Promi
     SET status = 'AVAILABLE', booking_id = NULL, held_until = NULL
     WHERE booking_id = ${bookingId}::uuid AND status = 'HELD'
     RETURNING seat_id`;
+  const releasedSeatIds = released.map((row) => row.seat_id).sort();
 
-  // (phase 4) INSERT outbox(seats.released); (phase 5) VoucherUsage RESERVED → RELEASED.
-  // Until then the caller emits `seat:released` itself, once this transaction has committed.
-  return {
-    outcome: 'expired',
-    showtimeId: booking.showtime_id,
-    releasedSeatIds: released.map((row) => row.seat_id).sort(),
-  };
+  // 8. One `seats.released` event, in this transaction, only when seats really went back
+  //    (ROADMAP 4.1). The relay turns it into the `seat:released` every browser watching the
+  //    showtime gets, so the news survives this worker being killed right after the commit. The
+  //    caller still emits the same event itself for speed; receiving it twice changes nothing.
+  //    (phase 5) VoucherUsage RESERVED → RELEASED goes here too.
+  if (releasedSeatIds.length > 0) {
+    await writeOutboxEvent(
+      tx,
+      {
+        type: OutboxEventType.SEATS_RELEASED,
+        aggregateId: bookingId,
+        payload: {
+          bookingId,
+          showtimeId: booking.showtime_id,
+          seatIds: releasedSeatIds,
+          cause: SeatsReleasedCause.BOOKING_EXPIRED,
+        },
+      },
+      now,
+    );
+  }
+
+  return { outcome: 'expired', showtimeId: booking.showtime_id, releasedSeatIds };
 }

@@ -1,6 +1,10 @@
 import { BookingStatus, PaymentStatus, TicketStatus } from '@ticketify/shared';
 import type { Prisma } from '../../generated/prisma/client';
-import { OutboxEventType, writeOutboxEvent } from '../../infra/outbox/outbox-events';
+import {
+  OutboxEventType,
+  SeatsReleasedCause,
+  writeOutboxEvent,
+} from '../../infra/outbox/outbox-events';
 import { lockSeatsOfBooking, type ShowtimeState, showtimeOf } from './booking-seats';
 import { reclaimSeatsForExpiredBooking } from './reclaim-seats';
 import { heldSeatsProblem, type SeatProblem, showtimeProblem } from './seat-settlement';
@@ -421,7 +425,7 @@ async function sendToReview(
           bookingId: booking.id,
           showtimeId: booking.showtime_id,
           seatIds: releasedSeatIds,
-          cause: OutboxEventType.BOOKING_NEEDS_REVIEW,
+          cause: SeatsReleasedCause.BOOKING_NEEDS_REVIEW,
         },
       },
       now,

@@ -366,14 +366,29 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
   ) => paid.seatIds.map((seatId) => ({ seatId, status, bookingId }));
 
   /**
+   * The booking's outbox events written by the IPN, i.e. without the `seats.released` that
+   * `expireBooking` wrote before it (ROADMAP 4.1): it is checked where the expiry happens.
+   */
+  const ipnEvents = <T extends { type: string; payload: unknown }>(events: readonly T[]): T[] =>
+    events.filter(
+      (event) =>
+        !(
+          event.type === 'seats.released' &&
+          (event.payload as { cause?: string }).cause === 'booking.expired'
+        ),
+    );
+
+  /**
    * The rules that must hold after every test and every race round, over the whole database:
    * one live ticket per seat; a CONFIRMED booking owns all of its seats SOLD and one ticket per
    * seat; a SOLD seat belongs to a CONFIRMED/NEEDS_REVIEW booking; tickets only for CONFIRMED
    * bookings; a SUCCESS payment only for CONFIRMED/NEEDS_REVIEW; no seat HELD by an EXPIRED,
    * CONFIRMED or NEEDS_REVIEW booking (a booking sent to review releases its own seats); one outbox
    * event per CONFIRMED / NEEDS_REVIEW booking and none for others; at most one seats.released
-   * per booking, and only for a NEEDS_REVIEW one; a REFUND_REQUIRED payment exactly when there is
-   * one payment.refund_required event for it, and only next to a SUCCESS payment of its booking.
+   * per cause per booking — `booking.needs_review` only for a booking under review,
+   * `booking.expired` at most once because a booking expires once (ROADMAP 4.1) — and no other
+   * cause; a REFUND_REQUIRED payment exactly when there is one payment.refund_required event for
+   * it, and only next to a SUCCESS payment of its booking.
    */
   async function violations() {
     const q = <T>(sql: TemplateStringsArray) => db.prisma.$queryRaw<T[]>(sql);
@@ -409,15 +424,26 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       q`SELECT b.id, b.status::text AS status,
                count(o.id) FILTER (WHERE o.type = 'booking.confirmed')::int AS confirmed,
                count(o.id) FILTER (WHERE o.type = 'booking.needs_review')::int AS review,
-               count(o.id) FILTER (WHERE o.type = 'seats.released')::int AS released
+               count(o.id) FILTER (WHERE o.type = 'seats.released'
+                 AND o.payload->>'cause' = 'booking.needs_review')::int AS released_by_review,
+               count(o.id) FILTER (WHERE o.type = 'seats.released'
+                 AND o.payload->>'cause' = 'booking.expired')::int AS released_by_expiry,
+               count(o.id) FILTER (WHERE o.type = 'seats.released'
+                 AND o.payload->>'cause' NOT IN ('booking.needs_review', 'booking.expired'))::int
+                 AS released_other
         FROM bookings b LEFT JOIN outbox_events o ON o.aggregate_id = b.id::text
         GROUP BY b.id, b.status
         HAVING count(o.id) FILTER (WHERE o.type = 'booking.confirmed')
                  <> CASE WHEN b.status = 'CONFIRMED' THEN 1 ELSE 0 END
             OR count(o.id) FILTER (WHERE o.type = 'booking.needs_review')
                  <> CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END
-            OR count(o.id) FILTER (WHERE o.type = 'seats.released')
-                 > CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END`,
+            OR count(o.id) FILTER (WHERE o.type = 'seats.released'
+                 AND o.payload->>'cause' = 'booking.needs_review')
+                 > CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END
+            OR count(o.id) FILTER (WHERE o.type = 'seats.released'
+                 AND o.payload->>'cause' = 'booking.expired') > 1
+            OR count(o.id) FILTER (WHERE o.type = 'seats.released'
+                 AND o.payload->>'cause' NOT IN ('booking.needs_review', 'booking.expired')) > 0`,
       q`SELECT p.id FROM payments p
         WHERE (SELECT count(*) FROM outbox_events o
                WHERE o.aggregate_id = p.id::text AND o.type = 'payment.refund_required')
@@ -717,11 +743,28 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
   // ─── 3.5: EXPIRED booking — take the seats back, or review ───
 
   describe('6 — paid after the booking EXPIRED (branches B and C)', () => {
-    /** A paid booking that expired before the IPN: seats AVAILABLE again. */
+    /**
+     * A paid booking that expired before the IPN: seats AVAILABLE again. The expiry writes a
+     * `seats.released` event of its own (ROADMAP 4.1), checked here once; the assertions below
+     * are about what the IPN wrote, so they read `ipnEvents(state.events)`.
+     */
     async function expiredPaid(seats = 2) {
       const paid = await paidBooking(seats);
       clock.advance({ minutes: HOLD_MINUTES });
       await expect(expiry.expire(paid.booking.id)).resolves.toMatchObject({ outcome: 'expired' });
+      const state = await stateOf(paid);
+      expect(state.events).toEqual([
+        {
+          type: 'seats.released',
+          status: 'PENDING',
+          payload: {
+            bookingId: paid.booking.id,
+            showtimeId: paid.showtimeId,
+            seatIds: [...paid.seatIds].sort(),
+            cause: 'booking.expired',
+          },
+        },
+      ]);
       return paid;
     }
 
@@ -734,7 +777,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       expect(state.payments.map((p) => p.status)).toEqual(['SUCCESS']);
       expect(state.seats).toEqual(seatsOf(paid, 'SOLD', paid.booking.id));
       expect(state.tickets).toHaveLength(2);
-      expect(state.events).toEqual([
+      expect(ipnEvents(state.events)).toEqual([
         expect.objectContaining({
           type: 'booking.confirmed',
           payload: expect.objectContaining({ reclaimed: true }) as unknown,
@@ -771,7 +814,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
         { seatId: paid.seatIds[1], status: 'HELD', bookingId: rivalBooking.id },
       ]);
       expect(state.tickets).toEqual([]);
-      expect(state.events).toEqual([
+      expect(ipnEvents(state.events)).toEqual([
         {
           type: 'booking.needs_review',
           status: 'PENDING',
@@ -796,9 +839,9 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       const state = await stateOf(paid);
       expect(state.booking.status).toBe('NEEDS_REVIEW');
       expect(state.tickets).toEqual([]);
-      expect(state.events.map((e) => [e.type, (e.payload as { reason: string }).reason])).toEqual([
-        ['booking.needs_review', 'SEAT_SOLD'],
-      ]);
+      expect(
+        ipnEvents(state.events).map((e) => [e.type, (e.payload as { reason: string }).reason]),
+      ).toEqual([['booking.needs_review', 'SEAT_SOLD']]);
       expect(state.seats).toEqual([
         { seatId: paid.seatIds[0], status: 'SOLD', bookingId: other.booking.id },
         { seatId: paid.seatIds[1], status: 'AVAILABLE', bookingId: null },
@@ -815,7 +858,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       const state = await stateOf(paid);
       expect(state.booking.status).toBe('NEEDS_REVIEW');
       expect(state.seats).toEqual(seatsOf(paid, 'AVAILABLE', null));
-      expect(state.events.map((e) => (e.payload as { reason: string }).reason)).toEqual([
+      expect(ipnEvents(state.events).map((e) => (e.payload as { reason: string }).reason)).toEqual([
         'SHOWTIME_CANCELLED',
       ]);
     });
@@ -835,10 +878,11 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
         { seatId: paid.seatIds[1], status: 'AVAILABLE', bookingId: null },
       ]);
       expect(state.tickets).toEqual([]);
-      expect(state.events.map((e) => e.type).sort()).toEqual([
-        'booking.needs_review',
-        'seats.released',
-      ]);
+      expect(
+        ipnEvents(state.events)
+          .map((e) => e.type)
+          .sort(),
+      ).toEqual(['booking.needs_review', 'seats.released']);
     });
 
     it('C: a PENDING booking with one seat SOLD to another booking → NEEDS_REVIEW, its other seat released, the SOLD seat untouched', async () => {
@@ -1224,7 +1268,9 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
           expect(ipn.status).toBe(200);
           expect(ipn.body).toEqual(OK);
           const state = await stateOf(paid);
-          const reclaimed = (state.events[0]?.payload as { reclaimed?: boolean } | undefined)
+          // The expiry may have written a seats.released of its own before the IPN ran.
+          const confirmedEvent = state.events.find((e) => e.type === 'booking.confirmed');
+          const reclaimed = (confirmedEvent?.payload as { reclaimed?: boolean } | undefined)
             ?.reclaimed;
           const label = `${overdue ? 'overdue' : 'live'}: expire ${expired.outcome}${reclaimed ? ', reclaimed' : ''}`;
           outcomes.set(label, (outcomes.get(label) ?? 0) + 1);

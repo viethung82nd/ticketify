@@ -48,3 +48,16 @@ export async function settlesWithin(work: Promise<boolean>, ms: number): Promise
     clearTimeout(timer);
   }
 }
+
+/** Rejects when `work` has not settled within `ms`, so a caller never hangs on Redis. */
+export async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Redis did not answer within ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
