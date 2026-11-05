@@ -56,8 +56,8 @@ export const deliveryJobId = (eventId: string, action: DeliveryAction): string =
 export const DELIVERY_ACTIONS: Readonly<Record<OutboxEventType, readonly DeliveryAction[]>> = {
   // GENERATE_PDF chains SEND_EMAIL once the file is in place (4.6).
   [OutboxEventType.BOOKING_CONFIRMED]: [DeliveryAction.NOTIFY, DeliveryAction.GENERATE_PDF],
-  // 4.6 adds SEND_EMAIL (the apology to the user).
-  [OutboxEventType.BOOKING_NEEDS_REVIEW]: [DeliveryAction.NOTIFY],
+  // The apology needs no file, so its SEND_EMAIL is enqueued straight away.
+  [OutboxEventType.BOOKING_NEEDS_REVIEW]: [DeliveryAction.NOTIFY, DeliveryAction.SEND_EMAIL],
   [OutboxEventType.SEATS_RELEASED]: [DeliveryAction.BROADCAST_SEATS],
   // Admins only: the user paid twice but owes nothing, so telling them would only alarm them.
   [OutboxEventType.PAYMENT_REFUND_REQUIRED]: [DeliveryAction.NOTIFY],

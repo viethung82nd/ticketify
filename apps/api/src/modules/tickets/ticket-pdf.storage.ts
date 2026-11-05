@@ -49,6 +49,14 @@ export class TicketPdfStorage {
     return (await this.guard(() => this.storage.headObject(ticketPdfKey(bookingId)))) !== null;
   }
 
+  /**
+   * The stored PDF of one booking, or `null` when it is not there. Used by `send-email` to attach
+   * exactly the file the download link serves, rather than a second rendering of it.
+   */
+  read(bookingId: string): Promise<Buffer | null> {
+    return this.guard(() => this.storage.getObject(ticketPdfKey(bookingId)));
+  }
+
   /** A short-lived presigned GET of the booking's PDF. The caller has checked who is asking. */
   async link(bookingId: string): Promise<TicketPdfLink> {
     const expiresIn = TICKET_LIMITS.pdfUrlTtlSeconds;

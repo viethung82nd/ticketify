@@ -126,6 +126,19 @@ export class S3ObjectStorage extends ObjectStorage implements OnModuleDestroy {
     }
   }
 
+  async getObject(key: string): Promise<Buffer | null> {
+    try {
+      const object = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+      const bytes = await object.Body?.transformToByteArray();
+      return bytes ? Buffer.from(bytes) : null;
+    } catch (error) {
+      if (statusOf(error) === 404) return null;
+      throw new StorageUnavailableError('GET', error);
+    }
+  }
+
   async deleteObject(key: string): Promise<void> {
     try {
       await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));

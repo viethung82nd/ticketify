@@ -49,6 +49,11 @@ export class FakeObjectStorage extends ObjectStorage {
     return Promise.resolve(`https://fake-storage.test/${key}?expires=${expiresInSeconds}`);
   }
 
+  getObject(key: string): Promise<Buffer | null> {
+    if (this.down) return Promise.reject(new StorageUnavailableError('GET', new Error('down')));
+    return Promise.resolve(this.bodies.get(key) ?? null);
+  }
+
   headObject(key: string): Promise<ObjectHead | null> {
     if (this.down) return Promise.reject(new StorageUnavailableError('HEAD', new Error('down')));
     return Promise.resolve(this.objects.get(key) ?? null);

@@ -13,6 +13,10 @@ import type {
 import { NotificationEvents } from '../realtime/notification-events';
 import { SeatEvents } from '../realtime/seat-events';
 import { RecordingTransport } from '../realtime/testing/recording-transport';
+import { FakeClock } from '../../infra/clock/testing/fake-clock';
+import { FakeMailer } from '../../infra/mailer/testing/fake-mailer';
+import type { DeliveryQueueProducer } from '../../infra/queue/delivery-queue.producer';
+import type { PrismaService } from '../../infra/prisma/prisma.service';
 import { FakeObjectStorage } from '../../infra/storage/testing/fake-object-storage';
 import { TicketPdfStorage } from '../tickets/ticket-pdf.storage';
 import { BookingDelivery, BookingGoneError, type DeliveryBooking } from './booking-delivery';
@@ -27,6 +31,7 @@ const USER_ID = '01a3a1aa-7100-7679-b8b1-000000000011';
 const ADMIN_ID = '01a3a1aa-7100-7679-b8b1-000000000012';
 const TICKET_ID = '01a3a1aa-7100-7679-b8b1-0000000000d1';
 const SEAT_A = '01a3a1aa-7100-7679-b8b1-0000000000c1';
+const NOW = '2026-11-05T10:00:00.000Z';
 
 const booking: DeliveryBooking = {
   id: BOOKING_ID,
@@ -112,6 +117,10 @@ describe('DeliveryProcessor', () => {
   let stored: NewNotification[];
   let admins: string[];
   let storage: FakeObjectStorage;
+  let mailer: FakeMailer;
+  let enqueued: DeliveryAction[][];
+  let marked: { id: string; at: Date }[];
+  let emailSentAt: Date | null;
 
   beforeEach(() => {
     transport = new RecordingTransport();
@@ -138,13 +147,33 @@ describe('DeliveryProcessor', () => {
       read: jest.fn(() => Promise.resolve(booking)),
     } as unknown as BookingDelivery;
     const config = {
-      get: jest.fn((key: string) =>
-        key === 'TICKET_QR_SECRET'
-          ? 'unit-test-ticket-qr-secret-0123456789abc'
-          : 'Asia/Ho_Chi_Minh',
-      ),
+      get: jest.fn((key: string) => {
+        if (key === 'TICKET_QR_SECRET') return 'unit-test-ticket-qr-secret-0123456789abc';
+        if (key === 'CORS_ORIGINS') return ['http://localhost:5173'];
+        return 'Asia/Ho_Chi_Minh';
+      }),
     } as unknown as AppConfig;
     storage = new FakeObjectStorage();
+    mailer = new FakeMailer();
+    enqueued = [];
+    marked = [];
+    emailSentAt = null;
+    const producer = {
+      enqueue: jest.fn((_data: DeliveryJobData, actions: readonly DeliveryAction[]) => {
+        enqueued.push([...actions]);
+        return Promise.resolve();
+      }),
+    } as unknown as DeliveryQueueProducer;
+    const prisma = {
+      booking: {
+        updateMany: jest.fn(
+          ({ where, data }: { where: { id: string }; data: { emailSentAt: Date } }) => {
+            marked.push({ id: where.id, at: data.emailSentAt });
+            return Promise.resolve({ count: emailSentAt === null ? 1 : 0 });
+          },
+        ),
+      },
+    } as unknown as PrismaService;
 
     processor = new DeliveryProcessor(
       {} as QueueWorkers,
@@ -153,6 +182,10 @@ describe('DeliveryProcessor', () => {
       new NotificationEvents(transport),
       bookings,
       new TicketPdfStorage(storage),
+      mailer,
+      prisma,
+      producer,
+      new FakeClock(NOW),
       config,
     );
     jest.spyOn(processor['logger'], 'error').mockImplementation(() => undefined);
@@ -317,6 +350,117 @@ describe('DeliveryProcessor', () => {
     });
   });
 
+  describe('send-email', () => {
+    const confirmedJob = () =>
+      job(DeliveryAction.SEND_EMAIL, OutboxEventType.BOOKING_CONFIRMED, confirmed);
+    const reviewJob = () =>
+      job(DeliveryAction.SEND_EMAIL, OutboxEventType.BOOKING_NEEDS_REVIEW, needsReview);
+
+    it('generate-pdf enqueues it, so the email always has a file to attach', async () => {
+      await processor.process(
+        job(DeliveryAction.GENERATE_PDF, OutboxEventType.BOOKING_CONFIRMED, confirmed),
+      );
+
+      expect(enqueued).toEqual([[DeliveryAction.SEND_EMAIL]]);
+    });
+
+    it('sends the tickets to the owner of the booking with the stored PDF attached', async () => {
+      await processor.process(
+        job(DeliveryAction.GENERATE_PDF, OutboxEventType.BOOKING_CONFIRMED, confirmed),
+      );
+
+      await processor.process(confirmedJob());
+
+      expect(mailer.sent).toHaveLength(1);
+      const sent = mailer.sent[0]!;
+      expect(sent.to).toBe('khach@test.local');
+      expect(sent.subject).toContain('Mắt Biếc');
+      expect(sent.subject).toContain(booking.code);
+      expect(sent.html).toContain('19:30 ngày 05/11/2026');
+      expect(sent.html).toContain('Phòng 1');
+      expect(sent.text).toContain('Ghế: A1');
+      // The link points at the web app, taken from CORS_ORIGINS.
+      expect(sent.html).toContain(`http://localhost:5173/bookings/${BOOKING_ID}`);
+      expect(sent.attachments).toEqual([
+        {
+          filename: `ticketify-${booking.code}.pdf`,
+          contentType: 'application/pdf',
+          content: storage.bodies.get(`tickets/${BOOKING_ID}.pdf`),
+        },
+      ]);
+    });
+
+    it('marks the booking only after SMTP accepted the message (at-least-once)', async () => {
+      await processor.process(confirmedJob());
+
+      expect(marked).toEqual([{ id: BOOKING_ID, at: new Date(NOW) }]);
+    });
+
+    it('writes nothing when SMTP fails, so the job is retried and no copy is lost', async () => {
+      mailer.down = true;
+
+      await expect(processor.process(confirmedJob())).rejects.toThrow(/could not send/i);
+
+      expect(marked).toEqual([]);
+    });
+
+    it('skips a booking whose email already went out', async () => {
+      jest.spyOn(processor['bookings'], 'read').mockResolvedValue({
+        ...booking,
+        emailSentAt: new Date('2026-11-05T09:00:00.000Z'),
+      });
+
+      await processor.process(confirmedJob());
+
+      expect(mailer.sent).toEqual([]);
+      expect(marked).toEqual([]);
+    });
+
+    it('sends the apology of a booking under review, with no attachment', async () => {
+      await processor.process(reviewJob());
+
+      expect(mailer.sent).toHaveLength(1);
+      const sent = mailer.sent[0]!;
+      expect(sent.subject).toContain('cần được xem lại');
+      expect(sent.html).toContain('có ghế đã được bán cho đơn khác');
+      expect(sent.html).toContain('90.000 đ');
+      expect(sent.attachments).toBeUndefined();
+    });
+
+    it('still sends the confirmation when the PDF is missing from storage', async () => {
+      await processor.process(confirmedJob());
+
+      expect(mailer.sent).toHaveLength(1);
+      expect(mailer.sent[0]?.attachments).toBeUndefined();
+    });
+
+    it('fails the job when storage cannot be read, rather than sending a ticketless email', async () => {
+      await processor.process(
+        job(DeliveryAction.GENERATE_PDF, OutboxEventType.BOOKING_CONFIRMED, confirmed),
+      );
+      storage.down = true;
+
+      await expect(processor.process(confirmedJob())).rejects.toThrow();
+
+      expect(mailer.sent).toEqual([]);
+    });
+
+    it('gives up for good on an event type that has no email', async () => {
+      await expect(
+        processor.process(
+          job(DeliveryAction.SEND_EMAIL, OutboxEventType.SEATS_RELEASED, seatsReleased),
+        ),
+      ).rejects.toBeInstanceOf(UnrecoverableError);
+    });
+
+    it('drops the event when the booking is gone', async () => {
+      jest.spyOn(processor['bookings'], 'read').mockRejectedValue(new BookingGoneError(BOOKING_ID));
+
+      await expect(processor.process(confirmedJob())).resolves.toBeUndefined();
+
+      expect(mailer.sent).toEqual([]);
+    });
+  });
   it('gives up for good on an action it does not know', async () => {
     await expect(
       processor.process(

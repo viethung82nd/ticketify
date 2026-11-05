@@ -2,6 +2,9 @@ import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common'
 import { type Job, UnrecoverableError } from 'bullmq';
 import type { z } from 'zod';
 import { AppConfig } from '../../config/app-config.service';
+import { ClockService } from '../../infra/clock/clock.service';
+import { type MailAttachment, Mailer } from '../../infra/mailer/mailer';
+import { PrismaService } from '../../infra/prisma/prisma.service';
 import { OutboxEventType } from '../../infra/outbox/outbox-events';
 import {
   bookingConfirmedPayloadSchema,
@@ -14,13 +17,15 @@ import {
   DeliveryAction,
   type DeliveryJobData,
 } from '../../infra/queue/delivery-queue';
+import { DeliveryQueueProducer } from '../../infra/queue/delivery-queue.producer';
 import { QueueWorkers } from '../../infra/queue/queue-workers';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationEvents } from '../realtime/notification-events';
 import { SeatEvents } from '../realtime/seat-events';
 import { TicketPdfStorage } from '../tickets/ticket-pdf.storage';
 import { ticketToken } from '../tickets/ticket-token';
-import { BookingDelivery, BookingGoneError } from './booking-delivery';
+import { BookingDelivery, BookingGoneError, type DeliveryBooking } from './booking-delivery';
+import { confirmedEmail, needsReviewEmail } from './email-templates';
 import {
   confirmedText,
   needsReviewAdminText,
@@ -33,13 +38,17 @@ import { renderTicketsPdf } from './ticket-pdf';
 /** Delivery jobs one worker process runs at the same time. */
 export const DELIVERY_WORKER_CONCURRENCY = 5;
 
+const PDF_TYPE = 'application/pdf';
+
 /**
  * Worker side of the `delivery` queue (PLAN §7): every step that happens after a payment
  * transaction committed. Fed by the outbox relay, so each step must be idempotent — it may run
  * again after a crash or a lost acknowledgement.
  *
- * Steps are added by the tasks that own them: `broadcast-seats` (4.1), `notify` (4.2) and
- * `generate-pdf` (4.4–4.5) here; `send-email` in 4.6.
+ * Steps: `broadcast-seats` (4.1), `notify` (4.2), `generate-pdf` (4.4–4.5) and `send-email`
+ * (4.6). `generate-pdf` enqueues `send-email` itself once the file is in storage, because the
+ * confirmation email attaches it; the apology of a booking under review needs no file, so the
+ * relay enqueues that one straight away.
  */
 @Injectable()
 export class DeliveryProcessor implements OnApplicationBootstrap {
@@ -52,6 +61,10 @@ export class DeliveryProcessor implements OnApplicationBootstrap {
     private readonly notificationEvents: NotificationEvents,
     private readonly bookings: BookingDelivery,
     private readonly pdfs: TicketPdfStorage,
+    private readonly mailer: Mailer,
+    private readonly prisma: PrismaService,
+    private readonly producer: DeliveryQueueProducer,
+    private readonly clock: ClockService,
     private readonly config: AppConfig,
   ) {}
 
@@ -69,6 +82,8 @@ export class DeliveryProcessor implements OnApplicationBootstrap {
         return this.notify(job.data);
       case DeliveryAction.GENERATE_PDF:
         return this.generatePdf(job.data);
+      case DeliveryAction.SEND_EMAIL:
+        return this.sendEmail(job.data);
       default:
         // Nothing retries an unknown action: this build cannot grow a handler mid-job.
         throw new UnrecoverableError(`Unknown delivery action ${job.name}`);
@@ -155,6 +170,91 @@ export class DeliveryProcessor implements OnApplicationBootstrap {
     this.logger.log(
       `Booking ${booking.code}: ${booking.tickets.length} ticket(s), ${pdf.length} bytes at ${key}`,
     );
+    // Only now, with the file really in storage, is there something to attach to the email.
+    await this.producer.enqueue(data, [DeliveryAction.SEND_EMAIL]);
+  }
+
+  /**
+   * The email about one booking's outcome: the tickets, or the apology (ROADMAP 4.6).
+   *
+   * `bookings.email_sent_at` is both the guard and the record: a booking that has it is skipped,
+   * and it is written right after SMTP accepted the message. Delivery is therefore
+   * **at-least-once** — a crash between those two points sends a second copy. That is the
+   * accepted trade-off (PLAN §7): writing it first would risk a paying customer never getting
+   * their tickets, and a duplicate email is an annoyance, not a loss.
+   */
+  private async sendEmail(data: DeliveryJobData): Promise<void> {
+    const confirmation = data.type === OutboxEventType.BOOKING_CONFIRMED;
+    if (!confirmation && data.type !== OutboxEventType.BOOKING_NEEDS_REVIEW) {
+      throw new UnrecoverableError(`No email for outbox event type ${data.type}`);
+    }
+    const review = confirmation ? undefined : this.parse(bookingNeedsReviewPayloadSchema, data);
+    const bookingId = confirmation
+      ? this.parse(bookingConfirmedPayloadSchema, data).bookingId
+      : review!.bookingId;
+
+    const booking = await this.booking(bookingId, data);
+    if (!booking) return;
+    if (booking.emailSentAt) {
+      this.logger.debug(
+        `Booking ${booking.code}: email already sent at ${booking.emailSentAt.toISOString()}`,
+      );
+      return;
+    }
+
+    const context = {
+      booking,
+      timeZone: this.config.get('CINEMA_TZ'),
+      webBaseUrl: this.webBaseUrl(),
+    };
+    const email = confirmation
+      ? confirmedEmail(context)
+      : needsReviewEmail({ ...context, payload: review! });
+    const attachments = confirmation ? await this.ticketAttachment(booking) : [];
+
+    await this.mailer.send({
+      to: booking.user.email,
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+      ...(attachments.length > 0 ? { attachments } : {}),
+    });
+    // Written only after SMTP accepted the message, never before (see the note above).
+    const marked = await this.prisma.booking.updateMany({
+      where: { id: booking.id, emailSentAt: null },
+      data: { emailSentAt: this.clock.now() },
+    });
+    this.logger.log(
+      `Booking ${booking.code}: email sent to ${booking.user.email}` +
+        (attachments.length > 0 ? ' with the ticket PDF' : '') +
+        (marked.count === 0 ? ' (another run marked it first)' : ''),
+    );
+  }
+
+  /**
+   * The stored PDF as one attachment, or none of it.
+   *
+   * A confirmed booking whose file is missing (storage wiped, an old booking) still gets its
+   * email: the booking page can produce the tickets again, and withholding the message would be
+   * worse than sending it without the attachment.
+   */
+  private async ticketAttachment(booking: DeliveryBooking): Promise<MailAttachment[]> {
+    const pdf = await this.pdfs.read(booking.id);
+    if (!pdf) {
+      this.logger.warn(
+        `Booking ${booking.code}: no ticket PDF in storage; sending the email without it`,
+      );
+      return [];
+    }
+    return [{ filename: `ticketify-${booking.code}.pdf`, content: pdf, contentType: PDF_TYPE }];
+  }
+
+  /**
+   * Origin of the web app, for the link in an email: the first `CORS_ORIGINS` entry, which is by
+   * definition where the browsers that use this API come from.
+   */
+  private webBaseUrl(): string {
+    return this.config.get('CORS_ORIGINS')[0] ?? '';
   }
 
   /** Stores one notification for each user, then pushes exactly the rows that were created. */

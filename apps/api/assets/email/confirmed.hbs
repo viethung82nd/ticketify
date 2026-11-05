@@ -1,0 +1,42 @@
+<h1 style='margin:0 0 8px;font-size:20px'>Đơn {{booking.code}} đã được xác nhận</h1>
+<p style='margin:0 0 16px;font-size:14px;color:#444'>
+  Cảm ơn
+  {{user.fullName}}
+  đã đặt vé tại Ticketify. Vé của bạn được đính kèm trong email này dưới dạng PDF — mỗi vé một
+  trang, mỗi trang một mã QR.
+</p>
+
+<table role='presentation' cellpadding='0' cellspacing='0' style='width:100%;font-size:14px'>
+  <tr>
+    <td style='padding:6px 0;color:#666;width:120px'>Phim</td>
+    <td style='padding:6px 0;font-weight:600'>{{movie.title}}</td>
+  </tr>
+  <tr>
+    <td style='padding:6px 0;color:#666'>Suất chiếu</td>
+    <td style='padding:6px 0;font-weight:600'>{{showtime.startsAt}}</td>
+  </tr>
+  <tr>
+    <td style='padding:6px 0;color:#666'>Phòng</td>
+    <td style='padding:6px 0;font-weight:600'>{{room.name}}</td>
+  </tr>
+  <tr>
+    <td style='padding:6px 0;color:#666'>Ghế</td>
+    <td style='padding:6px 0;font-weight:600'>{{seats}}</td>
+  </tr>
+  <tr>
+    <td style='padding:6px 0;color:#666'>Tổng tiền</td>
+    <td style='padding:6px 0;font-weight:600'>{{total}}</td>
+  </tr>
+</table>
+
+<p style='margin:20px 0 0;font-size:14px'>
+  <a
+    href='{{bookingUrl}}'
+    style='display:inline-block;padding:10px 16px;background:#111;color:#fff;border-radius:999px;text-decoration:none'
+  >Xem đơn của tôi</a>
+</p>
+
+<p style='margin:16px 0 0;font-size:13px;color:#666'>
+  Vui lòng đến trước giờ chiếu 15 phút và xuất trình mã QR tại cửa vào. Mỗi mã vé chỉ dùng được một
+  lần.
+</p>
