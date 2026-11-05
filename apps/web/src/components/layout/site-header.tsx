@@ -18,6 +18,7 @@ const PUBLIC_NAV: NavItem[] = [{ to: '/movies', label: 'Phim' }];
 function useNavItems(): NavItem[] {
   const role = useAuthStore((state) => state.user?.role);
   const items = [...PUBLIC_NAV];
+  if (role) items.push({ to: '/me/bookings', label: 'Vé của tôi' });
   if (role === Role.STAFF || role === Role.ADMIN) items.push({ to: '/staff', label: 'Soát vé' });
   if (role === Role.ADMIN) items.push({ to: '/admin/movies', label: 'Quản trị' });
   return items;
