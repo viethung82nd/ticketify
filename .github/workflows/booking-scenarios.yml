@@ -1,12 +1,14 @@
 name: Booking scenarios
 
-# Concurrency scenarios A (500 holds of one seat, 10 runs) and B (overlapping seat groups,
-# 50 random rounds) from PLAN §10 / ROADMAP 2.14–2.15. The suites are opt-in
-# (RUN_SCENARIO_TESTS=1); only this workflow turns them on.
+# Concurrency scenarios from PLAN §10: A (500 holds of one seat, 10 runs; ROADMAP 2.14), B
+# (overlapping seat groups, 50 random rounds; ROADMAP 2.15) and C (the VNPay IPN under stress —
+# duplicates, forgeries, wrong amounts, the grace period, a sold seat, and a race with the expiry;
+# ROADMAP 3.9). The suites are opt-in (RUN_SCENARIO_TESTS=1); only this workflow turns them on.
 on:
   pull_request:
     paths:
       - 'apps/api/src/modules/bookings/**'
+      - 'apps/api/src/modules/payment/**'
       - 'apps/api/src/modules/rooms/**'
       - 'apps/api/src/modules/showtimes/**'
       - 'apps/api/src/infra/queue/**'
@@ -27,7 +29,7 @@ permissions:
 
 jobs:
   scenarios:
-    name: scenarios A and B
+    name: scenarios A, B and C
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -79,7 +81,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Numbers per run and per round: artifacts/scenarios/scenario-{a,b}.json and the log.
-      - name: Scenarios A and B
+      - name: Scenarios A, B and C
         shell: bash
         run: |
           mkdir -p artifacts/scenarios
