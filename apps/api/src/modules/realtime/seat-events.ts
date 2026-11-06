@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   RealtimeEvent,
   type SeatHeldEvent,
@@ -6,6 +6,7 @@ import {
   type SeatSoldEvent,
   showtimeRoom,
 } from '@ticketify/shared';
+import { RealtimeTransport, sendBestEffort } from './realtime-transport';
 
 export type SeatEventName =
   | typeof RealtimeEvent.SEAT_HELD
@@ -15,16 +16,19 @@ export type SeatEventPayload = SeatHeldEvent | SeatReleasedEvent | SeatSoldEvent
 
 /**
  * Tells the browsers watching a showtime (room `showtime:{id}`) that some of its seats changed.
- * The API sends through its Socket.IO server (Redis adapter), the worker through the Redis
- * emitter; both publish on the same channels.
+ * The transport decides how: the API sends through its Socket.IO server (Redis adapter), the
+ * worker through the Redis emitter; both publish on the same channels.
  *
  * Call only AFTER the transaction that changed the seats has committed: a rolled-back change must
  * never be announced. Never throws: an event that cannot be sent is logged (`warn`) and dropped —
  * realtime is best-effort, `GET /showtimes/:id/seats` is the source of truth and clients reload it
  * when they reconnect or get a `409`.
  */
-export abstract class SeatEvents {
-  protected readonly logger = new Logger(SeatEvents.name);
+@Injectable()
+export class SeatEvents {
+  private readonly logger = new Logger(SeatEvents.name);
+
+  constructor(private readonly transport: RealtimeTransport) {}
 
   /** After `POST /bookings` committed a new hold. */
   held(showtimeId: string, seatIds: readonly string[], heldUntil: Date): void {
@@ -35,7 +39,7 @@ export abstract class SeatEvents {
     });
   }
 
-  /** After an expiry committed and gave seats back. */
+  /** After an expiry, a cancel or a booking sent to review gave seats back. */
   released(showtimeId: string, seatIds: readonly string[]): void {
     this.send(RealtimeEvent.SEAT_RELEASED, { showtimeId, seatIds: [...seatIds] });
   }
@@ -47,17 +51,13 @@ export abstract class SeatEvents {
 
   private send(event: SeatEventName, payload: SeatEventPayload): void {
     if (payload.seatIds.length === 0) return;
-    try {
-      this.emit(showtimeRoom(payload.showtimeId), event, payload);
-    } catch (error) {
-      this.logger.warn(
-        `${event} not sent for showtime ${payload.showtimeId} (best-effort): ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
+    sendBestEffort(
+      this.transport,
+      this.logger,
+      showtimeRoom(payload.showtimeId),
+      event,
+      // The event name and the payload are chosen together by the methods above.
+      payload as never,
+    );
   }
-
-  /** Sends one event to one room. May throw; `send` turns that into a warning. */
-  protected abstract emit(room: string, event: SeatEventName, payload: SeatEventPayload): void;
 }

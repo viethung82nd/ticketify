@@ -124,7 +124,7 @@ describe('expireBooking', () => {
       expiredPaymentIds: [],
     });
 
-    const [, , expire, lockSeats, release] = statements;
+    const [, , expire, lockSeats, release, outbox] = statements;
     expect(expire?.sql).toBe(
       "UPDATE bookings SET status = 'EXPIRED', updated_at = $ WHERE id = $::uuid",
     );
@@ -140,11 +140,25 @@ describe('expireBooking', () => {
         "WHERE booking_id = $::uuid AND status = 'HELD' RETURNING seat_id",
     );
     expect(release?.values).toEqual([BOOKING_ID]);
-    expect(statements).toHaveLength(5);
+    // And one seats.released event, in the same transaction as the release (ROADMAP 4.1).
+    expect(outbox?.sql).toBe('INSERT INTO outbox_events');
+    expect(outbox?.values[0]).toEqual({
+      type: 'seats.released',
+      aggregateId: BOOKING_ID,
+      payload: {
+        bookingId: BOOKING_ID,
+        showtimeId: SHOWTIME_ID,
+        seatIds: [SEAT_A, SEAT_B],
+        cause: 'booking.expired',
+      },
+      nextRetryAt: now,
+      createdAt: now,
+    });
+    expect(statements).toHaveLength(6);
   });
 
   it('expired with 0 released seats when another booking already took them all', async () => {
-    const { tx } = mockTx([[], lockedBooking(BookingStatus.PENDING), [], []], [1]);
+    const { tx, statements } = mockTx([[], lockedBooking(BookingStatus.PENDING), [], []], [1]);
 
     await expect(expireBooking(tx, BOOKING_ID, HOLD_UNTIL)).resolves.toEqual({
       outcome: 'expired',
@@ -152,6 +166,9 @@ describe('expireBooking', () => {
       releasedSeatIds: [],
       expiredPaymentIds: [],
     });
+
+    // Nothing was released, so there is nothing to announce: no outbox event.
+    expect(statements.map((s) => s.sql)).not.toContain('INSERT INTO outbox_events');
   });
 
   // ─── Unfinished payment attempts (ROADMAP 3.7, PLAN §4 step 4) ───
@@ -181,6 +198,7 @@ describe('expireBooking', () => {
       'UPDATE payments',
       'SELECT showtime_seats FOR UPDATE',
       'UPDATE showtime_seats',
+      'INSERT outbox_events',
     ]);
     expect(statements[3]?.sql).toBe(
       "UPDATE payments SET status = 'EXPIRED', updated_at = $ " +
@@ -264,6 +282,7 @@ describe('expireBooking', () => {
       'UPDATE bookings SET',
       'UPDATE payments SET',
       'UPDATE showtime_seats SET',
+      'INSERT INTO outbox_events',
     ]);
   });
 

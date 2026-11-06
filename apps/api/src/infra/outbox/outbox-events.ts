@@ -24,6 +24,18 @@ export const OutboxEventType = {
 } as const;
 export type OutboxEventType = (typeof OutboxEventType)[keyof typeof OutboxEventType];
 
+/**
+ * Why a `seats.released` event exists. The seats are back either way; the cause only explains
+ * the row in a log or an admin screen.
+ */
+export const SeatsReleasedCause = {
+  /** The hold ran out and `expireBooking` gave the seats back (ROADMAP 4.1). */
+  BOOKING_EXPIRED: 'booking.expired',
+  /** A paid booking went to review, so its own held seats were let go (ROADMAP 3.5). */
+  BOOKING_NEEDS_REVIEW: 'booking.needs_review',
+} as const;
+export type SeatsReleasedCause = (typeof SeatsReleasedCause)[keyof typeof SeatsReleasedCause];
+
 export interface OutboxEventInput {
   type: OutboxEventType;
   /** Id of the row the event is about: the booking, or the payment for `payment.refund_required`. */

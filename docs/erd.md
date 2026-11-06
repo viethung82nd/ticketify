@@ -238,6 +238,7 @@ erDiagram
         text title
         text body
         jsonb data "nullable"
+        uuid event_id "nullable, unique per user"
         timestamptz read_at "nullable"
         timestamptz created_at
     }

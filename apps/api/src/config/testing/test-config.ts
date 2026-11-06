@@ -15,6 +15,7 @@ const BASE_ENV: Record<string, string> = {
   SMTP_PORT: '1025',
   SMTP_FROM: 'test@ticketify.local',
   JWT_ACCESS_SECRET: 'unit-test-access-secret-0123456789abcdef',
+  TICKET_QR_SECRET: 'unit-test-ticket-qr-secret-0123456789abc',
   BOOKING_RATE_LIMIT_MAX: '10',
   BOOKING_RATE_LIMIT_WINDOW_SECONDS: '60',
 };

@@ -9,7 +9,7 @@ import {
   type ExpireBookingJobData,
   expireBookingJobId,
 } from './booking-queue';
-import { closeConnection, createQueueConnection } from './queue-connection';
+import { closeConnection, createQueueConnection, withTimeout } from './queue-connection';
 
 /** Longest a hold request waits for Redis to accept a job before giving up on it. */
 const ENQUEUE_TIMEOUT_MS = 1_000;
@@ -65,17 +65,5 @@ export class BookingQueueProducer implements OnModuleInit, OnApplicationShutdown
   async onApplicationShutdown(): Promise<void> {
     await this.queue.close().catch(() => undefined);
     await closeConnection(this.connection);
-  }
-}
-
-async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Redis did not answer within ${ms}ms`)), ms);
-  });
-  try {
-    return await Promise.race([work, timeout]);
-  } finally {
-    clearTimeout(timer);
   }
 }

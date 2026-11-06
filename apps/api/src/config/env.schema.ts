@@ -134,6 +134,14 @@ export const envSchema = z.object({
   S3_BUCKET: z.string().min(3),
   S3_FORCE_PATH_STYLE: booleanString.default(true),
 
+  /**
+   * HS256 key the ticket QR tokens are signed with (ROADMAP 4.4, 4.7). Its own key, not
+   * JWT_ACCESS_SECRET: a ticket token lives as long as the showtime and is printed on paper, so
+   * rotating the login secret must not invalidate tickets and the reverse. Generate with
+   * `openssl rand -base64 48`.
+   */
+  TICKET_QR_SECRET: z.string().min(32, { error: 'must be at least 32 characters' }),
+
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: port,
   SMTP_FROM: z.string().min(1),

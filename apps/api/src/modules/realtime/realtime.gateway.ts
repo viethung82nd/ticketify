@@ -2,6 +2,7 @@ import { HttpException, Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
+  type OnGatewayConnection,
   type OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
@@ -22,6 +23,7 @@ import {
   ShowtimeStatus,
   showtimeRoom,
   showtimeSubscriptionSchema,
+  userRoom,
 } from '@ticketify/shared';
 import type { ExtendedError, Server, Socket } from 'socket.io';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -79,11 +81,14 @@ const failure = (
  *   The token is checked once, at the handshake; the room events carry no personal data.
  * - `showtime:join` / `showtime:leave` put the socket in room `showtime:{id}`, where seat events
  *   are sent (`SeatEvents`). Every failure answers in the ack AND as an `error` event.
+ * - Every socket also joins room `user:{id}` as soon as it connects, without asking: that is
+ *   where its owner's notifications are sent (`NotificationEvents`, ROADMAP 4.2). Nothing else
+ *   is published there, so one user never sees another's.
  *
  * CORS, the transport and the Redis adapter are set by `RealtimeIoAdapter` (main.ts).
  */
 @WebSocketGateway()
-export class RealtimeGateway implements OnGatewayInit {
+export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
   private readonly logger = new Logger(RealtimeGateway.name);
 
   @WebSocketServer()
@@ -97,6 +102,16 @@ export class RealtimeGateway implements OnGatewayInit {
 
   afterInit(server: Server): void {
     server.use((socket, next) => next(this.authenticate(socket as RealtimeSocket)));
+  }
+
+  /**
+   * Called once the handshake passed, so `data.user` is set: the socket joins its own room and
+   * receives the notifications stored for that user from then on.
+   */
+  async handleConnection(socket: RealtimeSocket): Promise<void> {
+    // A socket that failed authentication is disconnected by Socket.IO before this runs.
+    const user = socket.data.user;
+    if (user) await socket.join(userRoom(user.id));
   }
 
   /** Handshake check; `undefined` lets the socket in with `data.user` set. */

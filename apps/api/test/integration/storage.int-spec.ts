@@ -9,10 +9,17 @@ import {
 } from '@aws-sdk/client-s3';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { type AdminMovie, type Movie, type PosterUpload, Role } from '@ticketify/shared';
+import {
+  type AdminMovie,
+  type Movie,
+  type PosterUpload,
+  Role,
+  TICKET_LIMITS,
+} from '@ticketify/shared';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
+import { TicketPdfStorage } from '../../src/modules/tickets/ticket-pdf.storage';
 import { appTestEnv } from '../support/app-env';
 import { accessTokenFor } from '../support/auth';
 import { createTestDatabase, type TestDatabase } from '../support/database';
@@ -193,7 +200,13 @@ describe('Poster storage (real RustFS)', () => {
   // ─── Tests ───
 
   it('exercises S3_PUBLIC_ENDPOINT against our own container', () => {
-    if (rustfs) expect(publicEndpoint).toBeDefined();
+    // Only when the store is reachable under a second name: `otherHostFor` swaps localhost and
+    // 127.0.0.1, which needs the Testcontainers host to be one of them. It is on a developer
+    // machine and in CI; it is not when the suite itself runs inside a container
+    // (TESTCONTAINERS_HOST_OVERRIDE), and there the signing path below simply goes unexercised.
+    if (rustfs && !process.env.TESTCONTAINERS_HOST_OVERRIDE) {
+      expect(publicEndpoint).toBeDefined();
+    }
   });
 
   it('presign → PUT → save movie → posterUrl serves the same bytes', async () => {
@@ -255,6 +268,52 @@ describe('Poster storage (real RustFS)', () => {
 
     expect((await admin().delete(`/admin/movies/${movie.id}`)).status).toBe(204);
     expect(await exists(second.key)).toBe(false);
+  });
+
+  /**
+   * The ticket PDF goes the other way round from a poster: the server writes it itself
+   * (`putObject`), at a fixed key, and only the presigned GET is handed out (ROADMAP 4.5).
+   */
+  describe('ticket PDF (server-side PUT, fixed key)', () => {
+    const bookingId = randomUUID();
+    const key = `tickets/${bookingId}.pdf`;
+
+    const pdfs = () => app.get(TicketPdfStorage);
+
+    it('writes the file, then serves exactly those bytes over the presigned URL', async () => {
+      const pdf = Buffer.concat([Buffer.from('%PDF-1.3'), randomBytes(2048)]);
+
+      expect(await pdfs().save(bookingId, pdf)).toBe(key);
+
+      expect(await exists(key)).toBe(true);
+      const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      expect(head.ContentType).toBe('application/pdf');
+      expect(head.ContentLength).toBe(pdf.length);
+      expect(await pdfs().exists(bookingId)).toBe(true);
+
+      const link = await pdfs().link(bookingId);
+      expect(link.expiresIn).toBe(TICKET_LIMITS.pdfUrlTtlSeconds);
+      const res = await fetch(link.url);
+      expect(res.status).toBe(200);
+      expect(Buffer.from(await res.arrayBuffer()).equals(pdf)).toBe(true);
+    });
+
+    it('a second write replaces the file in place, under the same key', async () => {
+      const again = Buffer.concat([Buffer.from('%PDF-1.3'), randomBytes(4096)]);
+
+      await pdfs().save(bookingId, again);
+
+      const listed = await s3.send(
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: `tickets/${bookingId}` }),
+      );
+      expect((listed.Contents ?? []).map((item) => item.Key)).toEqual([key]);
+      const res = await fetch((await pdfs().link(bookingId)).url);
+      expect(Buffer.from(await res.arrayBuffer()).equals(again)).toBe(true);
+    });
+
+    it('reports a booking with no PDF as missing, without failing', async () => {
+      expect(await pdfs().exists(randomUUID())).toBe(false);
+    });
   });
 
   // Keep last: it takes the store down for the rest of the suite.

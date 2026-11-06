@@ -11,6 +11,7 @@ import {
   DayType,
   type HandshakeErrorData,
   type JoinShowtimeAck,
+  type Notification,
   REALTIME_LIMITS,
   RealtimeErrorCode,
   type RealtimeError,
@@ -28,13 +29,14 @@ import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.is
 import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
 import { BookingExpiryService } from '../../src/modules/bookings/booking-expiry.service';
 import { BookingService } from '../../src/modules/bookings/booking.service';
-import { EmitterSeatEvents } from '../../src/modules/realtime/emitter-seat-events';
+import { EmitterTransport } from '../../src/modules/realtime/emitter-transport';
 import {
   type RealtimeIoAdapter,
   setupRealtime,
 } from '../../src/modules/realtime/realtime-io.adapter';
 import { REALTIME_CHANNEL_KEY } from '../../src/modules/realtime/realtime-redis';
-import { SeatEvents } from '../../src/modules/realtime/seat-events';
+import { NotificationEvents } from '../../src/modules/realtime/notification-events';
+import { RealtimeTransport } from '../../src/modules/realtime/realtime-transport';
 import { appTestEnv } from '../support/app-env';
 import { accessTokenFor } from '../support/auth';
 import { createTestDatabase, type TestDatabase } from '../support/database';
@@ -215,12 +217,24 @@ describe('Realtime — gateway, rooms, seat events, multi-instance (real Postgre
 
   /** A connected socket of a new user, on instance `url`. */
   async function connect(url = urlA): Promise<ClientSocket> {
-    const socket = socketTo(url, { token: (await newUser()).token });
+    return (await connectUser(await newUser(), url)).socket;
+  }
+
+  /** A connected socket of a user the test knows, so it can address room `user:{id}`. */
+  async function connectUser(user: TestUser, url = urlA) {
+    const socket = socketTo(url, { token: user.token });
     await new Promise<void>((resolve, reject) => {
       socket.once('connect', resolve);
       socket.once('connect_error', reject);
     });
-    return socket;
+    return { user, socket };
+  }
+
+  /** Every `notification:new` one socket received, in order. */
+  function notificationRecorder(socket: ClientSocket) {
+    const received: Notification[] = [];
+    socket.on('notification:new', (payload) => received.push(payload));
+    return received;
   }
 
   /** The `connect_error` a refused handshake ends with. */
@@ -699,6 +713,51 @@ describe('Realtime — gateway, rooms, seat events, multi-instance (real Postgre
 
   // ─── Best-effort ───
 
+  describe('notification:new in room user:{id}', () => {
+    const notification = (id: string): Notification => ({
+      id,
+      type: 'BOOKING_CONFIRMED',
+      title: 'Đơn BK1 đã được xác nhận',
+      body: 'Vé của bạn đã sẵn sàng.',
+      data: { bookingId: '01a17e75-7100-7679-b8b1-000000000001' },
+      readAt: null,
+      createdAt: '2026-11-01T10:00:00.000Z',
+    });
+
+    it('a socket joins its own room at the handshake, and gets only its own notifications', async () => {
+      const mine = await connectUser(await newUser());
+      const theirs = await connectUser(await newUser());
+      const toMe = notificationRecorder(mine.socket);
+      const toThem = notificationRecorder(theirs.socket);
+
+      appA.get(NotificationEvents).created(mine.user.id, notification('n-1'));
+
+      await eventually(() => toMe.length === 1);
+      expect(toMe).toEqual([notification('n-1')]);
+      expect(toThem).toEqual([]);
+    });
+
+    it('reaches a socket on another API instance (Redis adapter)', async () => {
+      const mine = await connectUser(await newUser(), urlB);
+      const toMe = notificationRecorder(mine.socket);
+
+      appA.get(NotificationEvents).created(mine.user.id, notification('n-2'));
+
+      await eventually(() => toMe.length === 1);
+      expect(toMe[0]?.id).toBe('n-2');
+    });
+
+    it('reaches it from the worker too (Redis emitter)', async () => {
+      const mine = await connectUser(await newUser());
+      const toMe = notificationRecorder(mine.socket);
+
+      workerRef.get(NotificationEvents).created(mine.user.id, notification('n-3'));
+
+      await eventually(() => toMe.length === 1);
+      expect(toMe[0]?.id).toBe('n-3');
+    });
+  });
+
   describe('best-effort delivery', () => {
     it('Redis publisher down on B: POST /bookings still 201, a warning, B’s own clients still told', async () => {
       const { showtime, seat } = await scene();
@@ -729,7 +788,7 @@ describe('Realtime — gateway, rooms, seat events, multi-instance (real Postgre
       const { showtime, seat } = await scene();
       const booking = await held(showtime.id, [seat('A1')]);
       clock.advance({ minutes: HOLD_MINUTES });
-      const emitter = workerRef.get<SeatEvents, EmitterSeatEvents>(SeatEvents);
+      const emitter = workerRef.get<RealtimeTransport, EmitterTransport>(RealtimeTransport);
       const warn = jest.spyOn(Logger.prototype, 'warn');
 
       emitter.connection.disconnect();

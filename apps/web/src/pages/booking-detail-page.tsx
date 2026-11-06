@@ -1,5 +1,5 @@
 import { type Booking, BookingStatus, formatVnd } from '@ticketify/shared';
-import { AlertTriangle, CircleCheck, Clock, Info, TimerOff } from 'lucide-react';
+import { AlertTriangle, CircleCheck, Clock, Download, Info, TimerOff } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import { EmptyState, ErrorState } from '@/components/catalog/query-states';
@@ -10,6 +10,7 @@ import { formatCountdown, useCountdown } from '@/features/bookings/use-countdown
 import { errorCodeOf } from '@/features/catalog/catalog-errors';
 import { PayWithVnpayButton } from '@/features/payments/pay-with-vnpay-button';
 import { SEAT_TYPE_NAMES } from '@/features/seats/seat-selection';
+import { useTicketPdf } from '@/features/tickets/tickets-api';
 import { cinemaDate, cinemaTime, longDayLabel } from '@/lib/cinema-time';
 import type { BookingPageState } from './booking-page';
 
@@ -83,6 +84,36 @@ function ExpiredScreen({ booking }: { booking: Booking }) {
       <Button asChild className="h-11 rounded-xl px-6 font-semibold">
         <Link to={`/showtimes/${booking.showtimeId}/book`}>Chọn lại ghế</Link>
       </Button>
+    </div>
+  );
+}
+
+/**
+ * The ticket PDF of a confirmed booking (ROADMAP 4.8). Right after the payment the worker may
+ * still be drawing it, so a 409 TICKET_PDF_NOT_READY is an ordinary answer here, not an error to
+ * apologise for: the notification that arrives when it is done tells the page to reload anyway.
+ */
+function TicketPdfButton({ bookingId }: { bookingId: string }) {
+  const pdf = useTicketPdf();
+  const notReady = errorCodeOf(pdf.error) === 'TICKET_PDF_NOT_READY';
+
+  return (
+    <div className="space-y-1.5">
+      <Button
+        className="h-11 w-full rounded-xl font-semibold sm:w-auto sm:px-6"
+        disabled={pdf.isPending}
+        onClick={() => pdf.mutate(bookingId)}
+      >
+        <Download className="size-4" aria-hidden />
+        {pdf.isPending ? 'Đang lấy vé…' : 'Tải vé PDF'}
+      </Button>
+      {pdf.isError && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {notReady
+            ? 'Vé đang được chuẩn bị, vui lòng thử lại sau một lát.'
+            : 'Chưa tải được vé. Vui lòng thử lại.'}
+        </p>
+      )}
     </div>
   );
 }
@@ -189,6 +220,8 @@ export function BookingDetailPage() {
           Trạng thái: {STATUS_LABELS[booking.status]}
         </p>
       )}
+
+      {booking.status === BookingStatus.CONFIRMED && <TicketPdfButton bookingId={booking.id} />}
 
       <section
         aria-label="Chi tiết đơn"
