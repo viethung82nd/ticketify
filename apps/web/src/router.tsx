@@ -7,6 +7,7 @@ import { AdminGenresPage } from '@/pages/admin/admin-genres-page';
 import { AdminMoviesPage } from '@/pages/admin/admin-movies-page';
 import { AdminPricingPage } from '@/pages/admin/admin-pricing-page';
 import { AdminRoomsPage } from '@/pages/admin/admin-rooms-page';
+import { AdminReviewPage } from '@/pages/admin/admin-review-page';
 import { AdminShowtimesPage } from '@/pages/admin/admin-showtimes-page';
 import { EditMoviePage, NewMoviePage } from '@/pages/admin/movie-form-page';
 import { RoomEditorPage } from '@/pages/admin/room-editor-page';
@@ -57,6 +58,7 @@ export const router = createBrowserRouter([
           { path: 'admin/showtimes', element: <AdminShowtimesPage /> },
           { path: 'admin/showtimes/new', element: <NewShowtimePage /> },
           { path: 'admin/combos', element: <AdminCombosPage /> },
+          { path: 'admin/review', element: <AdminReviewPage /> },
         ],
       },
       {

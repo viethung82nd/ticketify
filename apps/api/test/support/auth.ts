@@ -13,6 +13,16 @@ export async function accessTokenFor(
   prisma: PrismaClient,
   role: Role,
 ): Promise<string> {
+  const id = await userIdWithRole(prisma, role);
+  return app.get(AccessTokenIssuer).issue({ id, role }).token;
+}
+
+/**
+ * Creates a user with `role` and returns its id, for a suite that must sign a **fresh** token per
+ * call: a token lives 15 minutes on the app's clock, and a suite that moves a `FakeClock` past
+ * that (the payment grace period, an expiry) would otherwise get `401 TOKEN_EXPIRED`.
+ */
+export async function userIdWithRole(prisma: PrismaClient, role: Role): Promise<string> {
   const user = await prisma.user.create({
     data: {
       email: `${role.toLowerCase()}-${randomUUID()}@test.local`,
@@ -21,5 +31,5 @@ export async function accessTokenFor(
       role,
     },
   });
-  return app.get(AccessTokenIssuer).issue(user).token;
+  return user.id;
 }

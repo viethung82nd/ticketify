@@ -58,7 +58,7 @@ API **không khởi động** nếu biến môi trường thiếu hoặc sai: l�
 | `pnpm typecheck` | `tsc --noEmit` cho mọi package |
 | `pnpm test:unit` | Unit test (không cần Docker) |
 | `pnpm test:integration` | Integration test với Postgres + Redis thật (Testcontainers) |
-| `RUN_SCENARIO_TESTS=1 pnpm --filter @ticketify/api test:scenarios` | Kịch bản A và B (500 request giữ một ghế; nhóm ghế giao nhau), xem mục "Giữ ghế (API)" |
+| `RUN_SCENARIO_TESTS=1 pnpm --filter @ticketify/api test:scenarios` | Kịch bản A, B và C (500 request giữ một ghế; nhóm ghế giao nhau; IPN dưới tải), xem mục "Giữ ghế (API)" |
 | `pnpm build` | Build shared, API, web |
 | `pnpm db:migrate` | `prisma migrate dev` (tạo migration mới khi đổi schema) |
 | `pnpm db:deploy` / `pnpm db:seed` | Áp dụng migration / seed dữ liệu mẫu |
@@ -150,29 +150,53 @@ pnpm test:integration
 
 Lỗi không lường trước (DB, quá thời gian transaction, thiếu `VNPAY_HASH_SECRET`) → HTTP 500 `{ RspCode: "99" }`, không ghi gì (một transaction duy nhất). VNPay gọi lại với `01`, `04`, `97`, `99` hoặc khi quá thời gian, tối đa 10 lần, cách nhau 5 phút; `00` và `02` kết thúc. Thứ tự khóa `payments` → `bookings` → `showtime_seats` (`ORDER BY seat_id`), giống mọi luồng khác; IPN lặp lại chạy lần lượt trên dòng `payments` và nhận `02`. Không có rate limit (VNPay tự giãn lần gọi; request không có chữ ký đúng chỉ tốn một HMAC).
 
-**Giới hạn đã biết của thanh toán** (tới hết tuần 12):
+### Hỏi lại VNPay trước khi hết hạn — querydr (3.7)
 
-- Chưa có querydr (tuần 13, 3.7): job hết hạn chưa hỏi VNPay về `Payment` `PENDING`, nên đơn hết hạn đúng `holdUntil` dù tiền có thể đang trên đường; IPN đến muộn đi nhánh giành lại ghế hoặc `NEEDS_REVIEW`.
+Trước khi nhả ghế của một đơn quá `holdUntil`, worker hỏi VNPay xem lần thanh toán còn `PENDING` có thành công hay không: `POST` tới `VNPAY_API_URL` (`vnp_Command=querydr`, mặc định `https://sandbox.vnpayment.vn/merchant_webapi/api/transaction`, timeout `VNPAY_QUERYDR_TIMEOUT_MS`). Lời gọi HTTP nằm **ngoài** transaction (PLAN §4); sau đó transaction khóa lại đúng những dòng đó và kiểm tra lại mọi điều kiện, nên kết quả HTTP một mình không bao giờ đổi được trạng thái.
+
+- Chuỗi ký của querydr **khác** IPN: nối bằng `|` theo thứ tự tài liệu quy định, không sort, không urlencode (`vnp_RequestId|vnp_Version|vnp_Command|vnp_TmnCode|vnp_TxnRef|vnp_TransactionDate|vnp_CreateDate|vnp_IpAddr|vnp_OrderInfo`). `vnp_TransactionDate` là `vnp_CreateDate` của chính yêu cầu thanh toán.
+- **Đã trả** = `vnp_ResponseCode` `00` (truy vấn thành công) **và** `vnp_TransactionStatus` `00`. Khi đó đơn **không** hết hạn: kết quả được ghi bằng đúng `confirmPayment()` của IPN, nên đi đúng nhánh A (ghế còn giữ → `CONFIRMED` + vé), B (đơn đã `EXPIRED` mà ghế còn trống → giành lại rồi bán) hoặc C (`NEEDS_REVIEW`, nhả ghế của chính đơn). `raw_payload` lưu nguyên phản hồi querydr.
+- **Không trả** (`vnp_ResponseCode` `91`; `vnp_TransactionStatus` `02`/`09`) và **không xác định** (lỗi mạng, timeout, HTTP lỗi, body không phải JSON, chữ ký phản hồi không khớp, `vnp_TxnRef` khác, `vnp_TransactionStatus` `01`/`04`/`05`/`06`/`07`, `vnp_ResponseCode` `02`/`03`/`94`/`97`/`99`) → hết hạn **đúng như trước 3.7**, kèm log `warn`. querydr không bao giờ làm job lỗi.
+- Thiếu `VNPAY_TMN_CODE` hoặc `VNPAY_HASH_SECRET` → không gọi HTTP, log `warn`, hết hạn như cũ. Credentials sandbox đăng ký bằng tay, không nằm trong repo; test dùng HTTP giả với chữ ký thật.
+- Đơn có nhiều lần thanh toán `PENDING`: hỏi tối đa 5 lần mới nhất, dừng ở lần đầu tiên được báo đã trả; các lần còn lại để IPN của chúng xử lý (log `warn` nếu nhiều hơn 5).
+- Hết hạn nay cũng chuyển mọi `Payment` `PENDING` của đơn sang `EXPIRED` (PLAN §4). `EXPIRED` **không** phải trạng thái cuối: IPN đến muộn (VNPay gọi lại tới ~45 phút) vẫn ghi được kết quả.
+- Thứ tự khóa của `expireBooking` giờ là `payments` (`FOR UPDATE`) → `bookings` (`FOR UPDATE SKIP LOCKED`) → `showtime_seats` (`ORDER BY seat_id`), giống IPN (PLAN §4).
+
+**Giới hạn đã biết của thanh toán** (tới hết tuần 13):
+
+- Hành vi querydr thật trên sandbox chưa kiểm được (3.6 hoãn): chỉ đối chiếu tài liệu đọc ngày 06/11/2026. Tài liệu không công bố URL production, và chuỗi ký phản hồi của tài liệu thiếu một dấu `+` trước `vnp_BankCode` và không nói dùng gì khi `vnp_PromotionCode`/`vnp_PromotionAmount` vắng — đọc theo cách an toàn (xem ROADMAP "Đã chốt"), nên nếu sai thì phản hồi chỉ bị coi là "không xác định", không bao giờ xác nhận sai một đơn.
 - Outbox chỉ được ghi (`PENDING`), chưa có relay (tuần 14, 4.1): chưa gửi email, PDF hay thông báo.
-- `NEEDS_REVIEW` xử lý tay: tiền đã nhận nhưng không giữ được ghế (ghế của đơn đã được nhả cho người khác đặt). **Hoàn tiền thủ công là việc của admin** (qua cổng merchant VNPay hoặc liên hệ khách), với trang admin ở 3.8 (tuần 13); tới lúc đó tìm các đơn này bằng truy vấn ở ROADMAP 3.8. Hoàn tiền tự động nằm ngoài phạm vi.
+- `NEEDS_REVIEW` xử lý tay: tiền đã nhận nhưng không giữ được ghế (ghế của đơn đã được nhả cho người khác đặt). **Hoàn tiền tự động nằm ngoài phạm vi** — xem mục dưới.
 - Log request không bao giờ chứa `vnp_SecureHash` (bỏ hẳn khỏi `url` và `query`) hay `VNPAY_HASH_SECRET`.
-- Trả hai lần cho một đơn (hai trang thanh toán): lần sau thành `Payment` `REFUND_REQUIRED`, admin hoàn tay (truy vấn ở ROADMAP 3.8). Suất đã bắt đầu nhưng chưa kết thúc vẫn được xác nhận (khách vào muộn); suất đã kết thúc → `NEEDS_REVIEW`.
+- Trả hai lần cho một đơn (hai trang thanh toán): lần sau thành `Payment` `REFUND_REQUIRED`, admin hoàn tay. Suất đã bắt đầu nhưng chưa kết thúc vẫn được xác nhận (khách vào muộn); suất đã kết thúc → `NEEDS_REVIEW`.
 
-**Kịch bản A và B** (PLAN §10, `apps/api/test/scenarios/`): chỉ chạy khi đặt `RUN_SCENARIO_TESTS=1`; không đặt thì mọi suite bị bỏ qua và không khởi động container nào.
+### Hàng đợi xử lý tay — đơn `NEEDS_REVIEW` (3.8)
+
+**Hoàn tiền tự động nằm ngoài phạm vi dự án.** Khi IPN thu được tiền nhưng không giữ được ghế, đơn thành `NEEDS_REVIEW` và việc còn lại là của admin: hoàn tiền trên cổng merchant VNPay (cần `vnp_transaction_no`) hoặc liên hệ khách.
+
+- Trang `/admin/review` (ADMIN) liệt kê các đơn đó kèm khách hàng, suất chiếu, ghế, số tiền, `vnp_transaction_no`, `txn_ref` và lý do mất ghế; lọc theo `Chưa xử lý` / `Đã xử lý` / `Tất cả`, phân trang.
+- Nút **"Đã xử lý"** bắt buộc kèm ghi chú (1–1000 ký tự) và **không hoàn tiền, không đổi trạng thái đơn**: đơn vẫn `NEEDS_REVIEW`. Nó chỉ đặt `bookings.review_resolved_at`/`review_resolved_by` và ghi một dòng `audit_logs` (`booking.review_resolved`: ai, lúc nào, ghi chú, trạng thái trước/sau). `audit_logs` chỉ ghi thêm, không bao giờ sửa hay xóa.
+- Mỗi đơn chỉ đánh dấu được một lần; lần hai trả `409 REVIEW_ALREADY_RESOLVED` và ghi chú đầu được giữ nguyên. Hai admin bấm cùng lúc thì chỉ một người thắng (một `UPDATE` có điều kiện).
+- API: `GET /admin/bookings/needs-review?filter=open|resolved|all&page&pageSize`, `POST /admin/bookings/:id/resolve-review` với `{ note }`.
+- Ba truy vấn kiểm tra để chạy tay (hàng chờ hoàn tiền, đơn có hai `Payment` `SUCCESS` — phải rỗng, và `Payment` `REFUND_REQUIRED`): [docs/needs-review-queries.sql](docs/needs-review-queries.sql), ví dụ `psql "$DATABASE_URL" -f docs/needs-review-queries.sql`. Lưu ý: đơn **trả hai lần** vẫn `CONFIRMED` nên **không** nằm trong hàng chờ, chỉ xuất hiện ở truy vấn thứ ba.
+
+**Kịch bản A, B và C** (PLAN §10, `apps/api/test/scenarios/`): chỉ chạy khi đặt `RUN_SCENARIO_TESTS=1`; không đặt thì mọi suite bị bỏ qua và không khởi động container nào.
 
 ```bash
 RUN_SCENARIO_TESTS=1 pnpm --filter @ticketify/api test:scenarios
 # Chỉ một kịch bản, ít lần hơn, hoặc phát lại một vòng của B:
 RUN_SCENARIO_TESTS=1 SCENARIO_A_RUNS=3 pnpm --filter @ticketify/api test:scenarios -- scenario-a
 RUN_SCENARIO_TESTS=1 SCENARIO_B_ONLY=17 pnpm --filter @ticketify/api test:scenarios -- scenario-b
+RUN_SCENARIO_TESTS=1 SCENARIO_C_ROUNDS=6 pnpm --filter @ticketify/api test:scenarios -- scenario-c
 ```
 
 - **A**: 500 user khác nhau cùng giữ một ghế, `SCENARIO_A_RUNS` lần (mặc định 10), mỗi lần một suất mới. Mỗi lần phải có đúng 1 `201`, 499 `409` (`SEAT_LOCKED`/`SEAT_UNAVAILABLE`), 0 `5xx`, 0 lỗi kết nối, đúng một `BookingSeat` cho ghế, và `pg_stat_activity` (lấy mẫu mỗi 50 ms) không lần nào thấy cả 40 connection của pool đều bận.
 - **B**: mỗi vòng 40–60 request cùng lúc, mỗi request 1–6 ghế lấy từ cùng 24 ghế (A5–A12, B5–B12, C5–C12 của phòng 10×12, có 3 cặp ghế đôi chọn đủ cặp), seed cố định theo vòng; `SCENARIO_B_ROUNDS` vòng (mặc định 50). Sau mỗi vòng kiểm bằng SQL: không ghế nào thuộc hai đơn còn hiệu lực, mỗi `201` có đúng tập ghế đã yêu cầu trong `booking_seats` và đúng các ghế `HELD` với `held_until = holdUntil`, request `409` không để lại đơn nào và không đổi ghế nào, 0 `5xx`.
-- Cấu hình: `DATABASE_POOL_MAX` = 40 (xem giới hạn pool bên dưới); client `node:http` một agent keep-alive, `maxSockets` 500 trên Linux, 200 trên Windows (backlog của Windows khoảng 200; đổi bằng `SCENARIO_MAX_SOCKETS`); từng suite chạy riêng (`maxWorkers: 1`); `FakeClock` cố định.
-- Số liệu từng lần/vòng in ra console và ghi vào `artifacts/scenarios/scenario-a.json`, `scenario-b.json` (không commit). Workflow `Booking scenarios` chạy cho PR đụng `modules/bookings`, `rooms`, `showtimes`, `realtime`, `infra/queue`, `packages/shared/src`, `test/scenarios`; cho push lên `main` và khi chạy tay. Số `deadlock detected` trong log Postgres là số liệu chính (job fail nếu khác 0); `pg_stat_database.deadlocks` trong báo cáo chỉ để tham khảo.
+- **C**: IPN của VNPay dưới các điều kiện hay sai trong thực tế (ROADMAP 3.9). Sáu ca: `SCENARIO_C_DUPLICATES` IPN **giống nhau** gửi cùng lúc (mặc định 40, VNPay gọi lại tối đa 10 lần); IPN giả (ký bằng secret khác, đổi `vnp_ResponseCode` hoặc `vnp_Amount` sau khi ký); số tiền sai (không ×100, lệch một đồng, số 0 đứng đầu, số thập phân); IPN đến **trong grace period** (sau `expiresAt`, trước `holdUntil`); IPN đến **sau khi ghế đã bán cho đơn khác**; và IPN **chạy song song với job hết hạn**, `SCENARIO_C_ROUNDS` vòng (mặc định 20, nửa số vòng cho job hết hạn chạy trước). Mỗi ca assert **trạng thái cuối trong DB** chứ không chỉ câu trả lời: toàn bộ bất biến của `support/payment-checks.ts` (một vé sống mỗi ghế, đơn `CONFIRMED` sở hữu đủ ghế `SOLD`, ghế `SOLD` thuộc đơn đã chốt, không ghế `HELD` của đơn đã kết thúc, đúng một outbox mỗi đơn đã chốt, không `Payment` `PENDING` sót trên đơn `EXPIRED`) được kiểm sau mỗi ca và mỗi vòng. Không request nào ra khỏi máy: IPN tự ký bằng secret test, và `fetch` bị stub nên querydr (3.7) lỗi ngay thay vì gọi VNPay.
+- Cấu hình: `DATABASE_POOL_MAX` = 40 (xem giới hạn pool bên dưới); client `node:http` một agent keep-alive, `maxSockets` 500 trên Linux, 200 trên Windows (backlog của Windows khoảng 200; đổi bằng `SCENARIO_MAX_SOCKETS`); từng suite chạy riêng (`maxWorkers: 1`); `FakeClock` cố định với A và B, còn C **dịch đồng hồ** để chạm grace period và job hết hạn (vì vậy token admin và token user được ký lại ở từng lần gọi, xem `scenario-app.ts`).
+- Số liệu từng lần/vòng in ra console và ghi vào `artifacts/scenarios/scenario-a.json`, `scenario-b.json`, `scenario-c.json` (không commit). Workflow `Booking scenarios` chạy cho PR đụng `modules/bookings`, `modules/payment`, `rooms`, `showtimes`, `realtime`, `infra/queue`, `packages/shared/src`, `test/scenarios`; cho push lên `main` và khi chạy tay. Số `deadlock detected` trong log Postgres là số liệu chính (job fail nếu khác 0); `pg_stat_database.deadlocks` trong báo cáo chỉ để tham khảo.
 - **Giới hạn pool**: pool 40 chỉ dùng trong kịch bản A (và các suite đặt riêng `DATABASE_POOL_MAX`). Mặc định production vẫn là **10** (`.env.example`, `env.schema.ts`). Với pool 10, tải thật vượt sức pool không làm request chậm mãi: transaction chờ connection tối đa `maxWait` (5 giây với giữ ghế, `HOLD_TX`) rồi trả `503 DATABASE_BUSY` (không ghi gì, client thử lại được). Số liệu của kịch bản A vì vậy không phải số liệu production.
-- **Chạy trên Windows**: kịch bản A bị bỏ qua (`RUN_SCENARIO_TESTS=1` và không phải `win32`, như suite shutdown). Node chạy trên host và Postgres trong Docker Desktop làm pool chạm 40/40 connection bận (chỉ ≤ 6 `active`, còn lại `idle in transaction`, tức chờ API gửi câu lệnh tiếp theo); kết quả vẫn đúng nhưng assertion về pool không ổn định. Trên Linux pool bận tối đa 11/40 (container cục bộ) và 13/40 (CI); nghiệm thu A lấy trên Linux (CI), xem ROADMAP 2.14. Kịch bản B vẫn chạy trên Windows vì chỉ kiểm câu trả lời và dữ liệu, không kiểm pool hay thời gian.
+- **Chạy trên Windows**: kịch bản A bị bỏ qua (`RUN_SCENARIO_TESTS=1` và không phải `win32`, như suite shutdown). Node chạy trên host và Postgres trong Docker Desktop làm pool chạm 40/40 connection bận (chỉ ≤ 6 `active`, còn lại `idle in transaction`, tức chờ API gửi câu lệnh tiếp theo); kết quả vẫn đúng nhưng assertion về pool không ổn định. Trên Linux pool bận tối đa 11/40 (container cục bộ) và 13/40 (CI); nghiệm thu A lấy trên Linux (CI), xem ROADMAP 2.14. Kịch bản B và C vẫn chạy trên Windows vì chỉ kiểm câu trả lời và dữ liệu; riêng phần assert về pool của ca IPN trùng trong C bị gate theo nền tảng (`POOL_ASSERTED`), số liệu pool vẫn in ra ở mọi nền tảng.
 
 **Hết hạn** (worker, `pnpm --filter @ticketify/api start:worker`): `holdUntil` trong DB là mốc chuẩn; job và cron chỉ dọn dẹp. Trong lúc chờ, luồng giữ ghế đã coi ghế `HELD` quá `held_until` là ghế trống (hết hạn lười).
 

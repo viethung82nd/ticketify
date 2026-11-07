@@ -17,6 +17,8 @@ erDiagram
     users ||--o{ bookings : "places"
     users ||--o{ notifications : "receives"
     users |o--o{ tickets : "checks in"
+    users |o--o{ audit_logs : "acts"
+    users |o--o{ bookings : "resolved review of"
 
     movies ||--o{ movie_genres : ""
     genres ||--o{ movie_genres : ""
@@ -164,6 +166,8 @@ erDiagram
         text request_hash
         timestamptz confirmed_at "nullable"
         timestamptz email_sent_at "nullable"
+        timestamptz review_resolved_at "nullable, admin handled it (3.8)"
+        uuid review_resolved_by FK "nullable"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -238,6 +242,18 @@ erDiagram
         timestamptz read_at "nullable"
         timestamptz created_at
     }
+
+    audit_logs {
+        uuid id PK
+        uuid actor_id FK "nullable, the admin who acted"
+        text action "booking.review_resolved"
+        text entity_type "index (entity_type, entity_id, created_at)"
+        text entity_id
+        text note "nullable, required by the endpoint"
+        jsonb before "nullable"
+        jsonb after "nullable"
+        timestamptz created_at "index"
+    }
 ```
 
 ## Notes
@@ -246,3 +262,4 @@ erDiagram
 - `booking_seats` and `tickets` reference `showtime_seats` through the composite key `(showtime_id, seat_id)`.
 - `payments` has one row per payment attempt; `tickets` has one row per seat and is created in the same transaction that confirms the booking.
 - `outbox_events` and `notifications` are written by the API and consumed by the worker (phase 4).
+- `audit_logs` is append-only: one row per admin action taken by hand (ROADMAP 3.8). `bookings.review_resolved_at` is the current state, the log is the history; marking a NEEDS_REVIEW booking handled changes neither the booking status nor the payment, because refunds are manual.

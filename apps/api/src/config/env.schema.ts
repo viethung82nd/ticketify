@@ -152,6 +152,20 @@ export const envSchema = z.object({
   VNPAY_HASH_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   VNPAY_PAYMENT_URL: z.url().default('https://sandbox.vnpayment.vn/paymentv2/vpcpay.html'),
   VNPAY_RETURN_URL: z.preprocess(blankAsUndefined, z.url().optional()),
+  /**
+   * Merchant web API (`vnp_Command=querydr`, ROADMAP 3.7). The documentation read 06/11/2026
+   * gives only this sandbox address and no production one, so the production value has to be
+   * filled in by hand when the merchant account goes live.
+   */
+  VNPAY_API_URL: z
+    .url({ protocol: /^https?$/ })
+    .default('https://sandbox.vnpayment.vn/merchant_webapi/api/transaction'),
+  /**
+   * How long the expiry waits for a querydr answer. Past it the answer counts as unknown and the
+   * booking expires as it did before 3.7, so the bound only has to stay well inside the expiry's
+   * own job timeout.
+   */
+  VNPAY_QUERYDR_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(5_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

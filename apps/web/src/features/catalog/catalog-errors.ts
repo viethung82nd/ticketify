@@ -3,6 +3,7 @@ import {
   ComboErrorCode,
   fieldErrorSchema,
   PricingErrorCode,
+  ReviewErrorCode,
   RoomErrorCode,
   ShowtimeErrorCode,
 } from '@ticketify/shared';
@@ -53,6 +54,11 @@ const MESSAGES: Record<string, string> = {
     'Đã có combo cùng tên (không phân biệt chữ hoa, chữ thường và dấu).',
   [ComboErrorCode.COMBO_IN_USE]:
     'Combo đã có trong đơn đặt vé nên không thể xóa. Hãy tắt combo để ẩn khỏi khách hàng.',
+  // Bookings under review (admin, ROADMAP 3.8).
+  [ReviewErrorCode.BOOKING_NOT_IN_REVIEW]:
+    'Đơn này không còn ở trạng thái cần xử lý. Hãy tải lại danh sách.',
+  [ReviewErrorCode.REVIEW_ALREADY_RESOLVED]:
+    'Đơn này đã được đánh dấu đã xử lý (có thể bởi một admin khác). Hãy tải lại danh sách.',
   FORBIDDEN: 'Bạn không có quyền thực hiện thao tác này.',
   UNAUTHORIZED: 'Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.',
   VALIDATION_FAILED: 'Thông tin chưa hợp lệ. Vui lòng kiểm tra lại các trường được đánh dấu.',

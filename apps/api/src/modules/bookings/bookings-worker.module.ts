@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PaymentsWorkerModule } from '../payment/payments-worker.module';
 import { RealtimeWorkerModule } from '../realtime/realtime.module';
 import {
   BookingExpiryProcessor,
@@ -9,10 +10,11 @@ import { BookingExpiryService } from './booking-expiry.service';
 
 /**
  * Booking jobs of the worker process: hold expiry and the sweep (which announce released seats
- * through the Redis emitter). No HTTP controller.
+ * through the Redis emitter). No HTTP controller. The expiry asks VNPay about an unfinished
+ * payment before giving a booking's seats up (querydr, ROADMAP 3.7), hence `PaymentsWorkerModule`.
  */
 @Module({
-  imports: [RealtimeWorkerModule],
+  imports: [RealtimeWorkerModule, PaymentsWorkerModule],
   providers: [
     BookingExpiryService,
     BookingExpiryProcessor,
