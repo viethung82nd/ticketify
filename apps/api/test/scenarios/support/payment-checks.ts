@@ -8,6 +8,10 @@ import type { PrismaClient } from '../../../src/generated/prisma/client';
  *
  * Scenario C asserts on these rather than on responses: an IPN that answers `00` while leaving two
  * live tickets on one seat is a failure, however correct its answer looked.
+ *
+ * `payment-ipn.int-spec.ts` keeps its own copy of these queries. The two drifted once — 4.1 taught
+ * that copy that `expireBooking` also writes `seats.released` while 3.9 wrote this one from the
+ * older rule, and the merge of the two branches broke scenario C — so change both together.
  */
 export interface PaymentViolations {
   /** Two live tickets for one seat. The partial unique index should make this impossible. */
@@ -24,7 +28,11 @@ export interface PaymentViolations {
   successNotSettled: unknown[];
   /** A seat still HELD by a booking that is over (EXPIRED, CONFIRMED, NEEDS_REVIEW). */
   heldByOver: unknown[];
-  /** Not exactly one outbox event per settled booking, or a stray `seats.released`. */
+  /**
+   * Not exactly one outbox event per settled booking, or a `seats.released` its cause cannot
+   * explain: more than one per flow, a review one on a booking not under review, or an unknown
+   * cause.
+   */
   outboxMismatch: unknown[];
   /** A REFUND_REQUIRED payment without its event, or without a SUCCESS payment beside it. */
   refundMismatch: unknown[];
@@ -86,8 +94,23 @@ export async function paymentViolations(prisma: PrismaClient): Promise<PaymentVi
                <> CASE WHEN b.status = 'CONFIRMED' THEN 1 ELSE 0 END
           OR count(o.id) FILTER (WHERE o.type = 'booking.needs_review')
                <> CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END
-          OR count(o.id) FILTER (WHERE o.type = 'seats.released')
-               > CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END`,
+          -- seats.released is judged by its cause, because two different flows write it.
+          -- Review (ROADMAP 3.5): at most one, and only for a booking under review; a booking
+          -- with no held seat left of its own goes to review without one.
+          OR count(o.id) FILTER (WHERE o.type = 'seats.released'
+                 AND o.payload->>'cause' = 'booking.needs_review')
+               > CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END
+          -- Expiry (ROADMAP 4.1): at most one, whatever the booking's final status. It is NOT
+          -- limited to EXPIRED bookings: money that arrives after the hold ran out still settles
+          -- the booking (3.7 branch B), so a CONFIRMED or NEEDS_REVIEW booking may carry the
+          -- event of the expiry it went through earlier. expireBooking is idempotent (it stops at
+          -- a booking that is no longer PENDING), so a second one would be a real bug.
+          OR count(o.id) FILTER (WHERE o.type = 'seats.released'
+                 AND o.payload->>'cause' = 'booking.expired') > 1
+          -- Any other cause, or none, is a bug: SeatsReleasedCause has exactly these two.
+          OR count(o.id) FILTER (WHERE o.type = 'seats.released'
+                 AND coalesce(o.payload->>'cause', '')
+                       NOT IN ('booking.needs_review', 'booking.expired')) > 0`,
     q`SELECT p.id FROM payments p
       WHERE (SELECT count(*) FROM outbox_events o
              WHERE o.aggregate_id = p.id::text AND o.type = 'payment.refund_required')
