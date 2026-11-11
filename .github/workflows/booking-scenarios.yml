@@ -16,13 +16,33 @@ on:
       - 'packages/shared/src/**'
       - 'apps/api/test/scenarios/**'
       - '.github/workflows/booking-scenarios.yml'
+  # The same paths as the PR trigger: a merge commit is re-validated only when it actually carries
+  # a change to the booking, payment or queue code these scenarios cover. CI (lint, typecheck, unit,
+  # integration, build) still runs on every push to main, filtered by nothing.
   push:
     branches: [main]
+    paths:
+      - 'apps/api/src/modules/bookings/**'
+      - 'apps/api/src/modules/payment/**'
+      - 'apps/api/src/modules/rooms/**'
+      - 'apps/api/src/modules/showtimes/**'
+      - 'apps/api/src/infra/queue/**'
+      - 'apps/api/src/modules/realtime/**'
+      - 'packages/shared/src/**'
+      - 'apps/api/test/scenarios/**'
+      - '.github/workflows/booking-scenarios.yml'
   workflow_dispatch:
 
 concurrency:
-  group: booking-scenarios-${{ github.ref }}
-  cancel-in-progress: true
+  # Per PR (pull_request.number) or per branch/tag (github.ref): two different PRs never share a
+  # group, so they cannot cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A new commit on a PR cancels that PR's stale run. A push to main, a schedule or a manual run is
+  # never cancelled: every commit on main keeps its own validation, and a second merge queues behind
+  # the first instead of killing it. Cancelling a PR run is safe here because the scenarios send no
+  # request off the machine: scenario C signs its own IPNs and stubs fetch, so a cancelled run
+  # leaves no state behind.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -115,3 +135,6 @@ jobs:
           name: booking-scenarios
           path: artifacts/scenarios/
           if-no-files-found: ignore
+          # The numbers are copied into ROADMAP on acceptance; the upload is a short-term reference,
+          # so it need not sit in Actions storage for the default 90 days.
+          retention-days: 14
