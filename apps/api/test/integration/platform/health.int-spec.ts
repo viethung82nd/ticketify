@@ -4,10 +4,10 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Redis } from 'ioredis';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { PrismaClient } from '../../src/generated/prisma/client';
-import { appTestEnv } from '../support/app-env';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { createTestRedis, type TestRedis } from '../support/redis';
+import { PrismaClient } from '../../../src/generated/prisma/client';
+import { appTestEnv } from '../../support/app-env';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 /** Nothing listens on port 1, so connections are refused immediately. */
 const DEAD_POSTGRES = 'postgresql://nobody:nothing@127.0.0.1:1/none';
@@ -31,9 +31,9 @@ describe('GET /health (real Postgres + Redis)', () => {
     [db, redis] = await Promise.all([createTestDatabase(), createTestRedis()]);
     // ConfigModule reads process.env when the module graph is first imported.
     Object.assign(process.env, appTestEnv({ databaseUrl: db.url, redisUrl: redis.url }));
-    ({ AppModule } = await import('../../src/app.module.js'));
-    ({ REDIS } = await import('../../src/infra/redis/redis.module.js'));
-    ({ PrismaService } = await import('../../src/infra/prisma/prisma.service.js'));
+    ({ AppModule } = await import('../../../src/app.module.js'));
+    ({ REDIS } = await import('../../../src/infra/redis/redis.module.js'));
+    ({ PrismaService } = await import('../../../src/infra/prisma/prisma.service.js'));
   });
 
   afterAll(async () => {

@@ -12,19 +12,19 @@ import {
 } from '@ticketify/shared';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
-import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
-import { BookingExpiryService } from '../../src/modules/bookings/booking-expiry.service';
-import type { ExpireOutcome } from '../../src/modules/bookings/expire-booking';
-import { VnpayService } from '../../src/modules/payment/vnpay/vnpay.service';
-import { querydrResponseHashData } from '../../src/modules/payment/vnpay/vnpay-querydr';
-import { REALTIME_CHANNEL_KEY } from '../../src/modules/realtime/realtime-redis';
-import { appTestEnv } from '../support/app-env';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { bodyOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import { SWEEP_INTERVAL_MS } from '../../../src/modules/bookings/booking-expiry.processor';
+import { BookingExpiryService } from '../../../src/modules/bookings/booking-expiry.service';
+import type { ExpireOutcome } from '../../../src/modules/bookings/expire-booking';
+import { VnpayService } from '../../../src/modules/payment/vnpay/vnpay.service';
+import { querydrResponseHashData } from '../../../src/modules/payment/vnpay/vnpay-querydr';
+import { REALTIME_CHANNEL_KEY } from '../../../src/modules/realtime/realtime-redis';
+import { appTestEnv } from '../../support/app-env';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { bodyOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 /**
  * querydr in the booking expiry (ROADMAP 3.7, PLAN §4 "Luồng hết hạn"): before giving a booking's
@@ -106,7 +106,7 @@ describe('querydr in the booking expiry (real Postgres + Redis, VNPay stubbed)',
         },
       ),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)
@@ -131,7 +131,7 @@ describe('querydr in the booking expiry (real Postgres + Redis, VNPay stubbed)',
       ),
     });
 
-    const { WorkerModule } = await import('../../src/worker.module.js');
+    const { WorkerModule } = await import('../../../src/worker.module.js');
     workerRef = await Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(ClockService)
       .useValue(clock)

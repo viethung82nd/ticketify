@@ -18,15 +18,15 @@ import {
 } from '@ticketify/shared';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { appTestEnv } from '../support/app-env';
-import { accessTokenFor } from '../support/auth';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { createFixtures, type Fixtures } from '../support/fixtures';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
-import { captureServerErrors, formatServerErrors } from '../support/server-errors';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { appTestEnv } from '../../support/app-env';
+import { accessTokenFor } from '../../support/auth';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { createFixtures, type Fixtures } from '../../support/fixtures';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
+import { captureServerErrors, formatServerErrors } from '../../support/server-errors';
 
 type Method = 'get' | 'post' | 'put' | 'patch';
 
@@ -83,7 +83,7 @@ describe('Showtimes, schedule and seat map (real Postgres + Redis)', () => {
         { SHOWTIME_CLEANUP_MINUTES: String(CLEANUP_MINUTES) },
       ),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)

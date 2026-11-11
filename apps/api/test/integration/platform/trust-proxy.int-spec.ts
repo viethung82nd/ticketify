@@ -2,10 +2,10 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { appTestEnv } from '../support/app-env';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+import { appTestEnv } from '../../support/app-env';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 const LOGIN_MAX = 2;
 const IP_MAX = LOGIN_MAX * 4;
@@ -29,7 +29,7 @@ describe('TRUST_PROXY (real Postgres + Redis)', () => {
         { TRUST_PROXY: 'loopback', LOGIN_RATE_LIMIT_MAX: String(LOGIN_MAX) },
       ),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication<INestApplication<App>>({ logger: false });
     await app.listen(0, '127.0.0.1');

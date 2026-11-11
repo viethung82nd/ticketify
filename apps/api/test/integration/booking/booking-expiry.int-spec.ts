@@ -14,27 +14,30 @@ import {
 import { Client } from 'pg';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { expireBookingJobId } from '../../src/infra/queue/booking-queue';
-import { BookingQueueProducer } from '../../src/infra/queue/booking-queue.producer';
-import { QueueWorkers } from '../../src/infra/queue/queue-workers';
-import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
-import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { expireBookingJobId } from '../../../src/infra/queue/booking-queue';
+import { BookingQueueProducer } from '../../../src/infra/queue/booking-queue.producer';
+import { QueueWorkers } from '../../../src/infra/queue/queue-workers';
+import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import { SWEEP_INTERVAL_MS } from '../../../src/modules/bookings/booking-expiry.processor';
 import {
   BookingExpiryService,
   isLockTimeout,
   SWEEP_BATCH_SIZE,
   type SweepReport,
   WORKER_LOCK_TIMEOUT_MS,
-} from '../../src/modules/bookings/booking-expiry.service';
-import { bookingCode } from '../../src/modules/bookings/booking-rules';
-import type { ExpireOutcome, ExpireOutcomeKind } from '../../src/modules/bookings/expire-booking';
-import { appTestEnv } from '../support/app-env';
-import { accessTokenFor } from '../support/auth';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+} from '../../../src/modules/bookings/booking-expiry.service';
+import { bookingCode } from '../../../src/modules/bookings/booking-rules';
+import type {
+  ExpireOutcome,
+  ExpireOutcomeKind,
+} from '../../../src/modules/bookings/expire-booking';
+import { appTestEnv } from '../../support/app-env';
+import { accessTokenFor } from '../../support/auth';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 /** 17:00 Sunday 2026-11-01 in Vietnam. */
 const NOW = '2026-11-01T10:00:00.000Z';
@@ -97,7 +100,7 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
 
   /** A worker context like `main.worker.ts` boots (no sweep scheduler: tests call sweep()). */
   async function workerModule(): Promise<TestingModule> {
-    const { WorkerModule } = await import('../../src/worker.module.js');
+    const { WorkerModule } = await import('../../../src/worker.module.js');
     return Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(ClockService)
       .useValue(clock)
@@ -119,7 +122,7 @@ describe('Booking expiry — job, sweep, lazy release, reads, rate limit (real P
         },
       ),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)

@@ -14,17 +14,17 @@ import {
 } from '@ticketify/shared';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { AppConfig } from '../../src/config/app-config.service';
-import type { Env } from '../../src/config/env.schema';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
-import { type VnpayParams, VnpayService } from '../../src/modules/payment/vnpay/vnpay.service';
-import { appTestEnv } from '../support/app-env';
-import { accessTokenFor } from '../support/auth';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+import { AppConfig } from '../../../src/config/app-config.service';
+import type { Env } from '../../../src/config/env.schema';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import { type VnpayParams, VnpayService } from '../../../src/modules/payment/vnpay/vnpay.service';
+import { appTestEnv } from '../../support/app-env';
+import { accessTokenFor } from '../../support/auth';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 /** 17:00 Sunday 2026-11-01 in Vietnam. */
 const NOW = '2026-11-01T10:00:00.000Z';
@@ -64,7 +64,7 @@ describe('Payment return — GET /payments/vnpay/return (real Postgres + Redis)'
         },
       ),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)

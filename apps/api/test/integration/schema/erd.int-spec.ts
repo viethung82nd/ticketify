@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createTestDatabase, type TestDatabase } from '../support/database';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
 
-const ERD_PATH = join(__dirname, '..', '..', '..', '..', 'docs', 'erd.md');
+const ERD_PATH = join(__dirname, '..', '..', '..', '..', '..', 'docs', 'erd.md');
 
 /** Parses `name { type column ... }` blocks of the Mermaid erDiagram in docs/erd.md. */
 function erdTables(markdown: string): Map<string, string[]> {

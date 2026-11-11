@@ -15,20 +15,20 @@ import {
 import { io, type Socket } from 'socket.io-client';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
-import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
-import { BookingExpiryService } from '../../src/modules/bookings/booking-expiry.service';
-import { setupRealtime } from '../../src/modules/realtime/realtime-io.adapter';
-import { REALTIME_CHANNEL_KEY } from '../../src/modules/realtime/realtime-redis';
-import { SeatEvents } from '../../src/modules/realtime/seat-events';
-import { appTestEnv } from '../support/app-env';
-import { accessTokenFor } from '../support/auth';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
-import { captureServerErrors, formatServerErrors } from '../support/server-errors';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import { SWEEP_INTERVAL_MS } from '../../../src/modules/bookings/booking-expiry.processor';
+import { BookingExpiryService } from '../../../src/modules/bookings/booking-expiry.service';
+import { setupRealtime } from '../../../src/modules/realtime/realtime-io.adapter';
+import { REALTIME_CHANNEL_KEY } from '../../../src/modules/realtime/realtime-redis';
+import { SeatEvents } from '../../../src/modules/realtime/seat-events';
+import { appTestEnv } from '../../support/app-env';
+import { accessTokenFor } from '../../support/auth';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
+import { captureServerErrors, formatServerErrors } from '../../support/server-errors';
 
 /** 17:00 Sunday 2026-11-01 in Vietnam. */
 const NOW = '2026-11-01T10:00:00.000Z';
@@ -114,7 +114,7 @@ describe('Booking cancel — DELETE /bookings/:id (real Postgres + Redis)', () =
         },
       ),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)
@@ -132,7 +132,7 @@ describe('Booking cancel — DELETE /bookings/:id (real Postgres + Redis)', () =
       ),
     });
 
-    const { WorkerModule } = await import('../../src/worker.module.js');
+    const { WorkerModule } = await import('../../../src/worker.module.js');
     workerRef = await Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(ClockService)
       .useValue(clock)

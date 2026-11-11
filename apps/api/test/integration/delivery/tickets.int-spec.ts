@@ -5,29 +5,32 @@ import { Role, TICKET_LIMITS, type TicketPdfLink, ticketPdfKey } from '@ticketif
 import type { Job } from 'bullmq';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { OutboxEventType } from '../../src/infra/outbox/outbox-events';
-import { OUTBOX_POLL_INTERVAL_MS, OutboxRelay } from '../../src/infra/outbox/outbox-relay.service';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { OutboxEventType } from '../../../src/infra/outbox/outbox-events';
+import {
+  OUTBOX_POLL_INTERVAL_MS,
+  OutboxRelay,
+} from '../../../src/infra/outbox/outbox-relay.service';
 import {
   DeliveryAction,
   type DeliveryJobData,
   deliveryJobId,
-} from '../../src/infra/queue/delivery-queue';
-import { DeliveryQueueProducer } from '../../src/infra/queue/delivery-queue.producer';
-import { ObjectStorage } from '../../src/infra/storage/object-storage';
-import { FakeObjectStorage } from '../../src/infra/storage/testing/fake-object-storage';
-import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
-import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
-import { DeliveryProcessor } from '../../src/modules/delivery/delivery.processor';
-import { RealtimeTransport } from '../../src/modules/realtime/realtime-transport';
-import { RecordingTransport } from '../../src/modules/realtime/testing/recording-transport';
-import { readTicketToken } from '../../src/modules/tickets/ticket-token';
-import { appTestEnv } from '../support/app-env';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { createFixtures, type Fixtures } from '../support/fixtures';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+} from '../../../src/infra/queue/delivery-queue';
+import { DeliveryQueueProducer } from '../../../src/infra/queue/delivery-queue.producer';
+import { ObjectStorage } from '../../../src/infra/storage/object-storage';
+import { FakeObjectStorage } from '../../../src/infra/storage/testing/fake-object-storage';
+import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import { SWEEP_INTERVAL_MS } from '../../../src/modules/bookings/booking-expiry.processor';
+import { DeliveryProcessor } from '../../../src/modules/delivery/delivery.processor';
+import { RealtimeTransport } from '../../../src/modules/realtime/realtime-transport';
+import { RecordingTransport } from '../../../src/modules/realtime/testing/recording-transport';
+import { readTicketToken } from '../../../src/modules/tickets/ticket-token';
+import { appTestEnv } from '../../support/app-env';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { createFixtures, type Fixtures } from '../../support/fixtures';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 const NOW = '2026-11-05T10:00:00.000Z';
 const QR_SECRET = 'integration-test-ticket-qr-secret-0123456789';
@@ -52,7 +55,7 @@ describe('Ticket PDF — generate-pdf and GET /bookings/:id/ticket-pdf (real Pos
     // One in-memory store shared by the API and the worker, as RustFS is in production.
     storage = new FakeObjectStorage();
 
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)
@@ -62,7 +65,7 @@ describe('Ticket PDF — generate-pdf and GET /bookings/:id/ticket-pdf (real Pos
     app = moduleRef.createNestApplication<INestApplication<App>>({ logger: false });
     await app.init();
 
-    const { WorkerModule } = await import('../../src/worker.module.js');
+    const { WorkerModule } = await import('../../../src/worker.module.js');
     workerRef = await Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(ClockService)
       .useValue(clock)
@@ -237,7 +240,7 @@ describe('Ticket PDF — generate-pdf and GET /bookings/:id/ticket-pdf (real Pos
       await generatePdf(current, user.id);
 
       // The same token the PDF drew; what matters is that this secret validates it.
-      const { ticketToken } = await import('../../src/modules/tickets/ticket-token.js');
+      const { ticketToken } = await import('../../../src/modules/tickets/ticket-token.js');
       expect(readTicketToken(ticketToken(code, QR_SECRET), QR_SECRET)).toBe(code);
       expect(
         readTicketToken(ticketToken(code, 'another-secret-0123456789abcdefgh'), QR_SECRET),

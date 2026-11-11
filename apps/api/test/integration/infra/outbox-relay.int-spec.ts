@@ -1,30 +1,33 @@
 import { randomUUID } from 'node:crypto';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { Job } from 'bullmq';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { OutboxEventType, SeatsReleasedCause } from '../../src/infra/outbox/outbox-events';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { OutboxEventType, SeatsReleasedCause } from '../../../src/infra/outbox/outbox-events';
 import {
   OUTBOX_BATCH_SIZE,
   OUTBOX_MAX_ATTEMPTS,
   OUTBOX_STALE_CLAIM_MS,
-} from '../../src/infra/outbox/outbox-relay';
-import { OUTBOX_POLL_INTERVAL_MS, OutboxRelay } from '../../src/infra/outbox/outbox-relay.service';
+} from '../../../src/infra/outbox/outbox-relay';
+import {
+  OUTBOX_POLL_INTERVAL_MS,
+  OutboxRelay,
+} from '../../../src/infra/outbox/outbox-relay.service';
 import {
   DeliveryAction,
   type DeliveryJobData,
   deliveryJobId,
-} from '../../src/infra/queue/delivery-queue';
-import { DeliveryQueueProducer } from '../../src/infra/queue/delivery-queue.producer';
-import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
-import { BookingExpiryService } from '../../src/modules/bookings/booking-expiry.service';
-import { DeliveryProcessor } from '../../src/modules/delivery/delivery.processor';
-import { RealtimeTransport } from '../../src/modules/realtime/realtime-transport';
-import { RecordingTransport } from '../../src/modules/realtime/testing/recording-transport';
-import { appTestEnv } from '../support/app-env';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { createFixtures, type Fixtures } from '../support/fixtures';
-import { createTestRedis, type TestRedis } from '../support/redis';
+} from '../../../src/infra/queue/delivery-queue';
+import { DeliveryQueueProducer } from '../../../src/infra/queue/delivery-queue.producer';
+import { SWEEP_INTERVAL_MS } from '../../../src/modules/bookings/booking-expiry.processor';
+import { BookingExpiryService } from '../../../src/modules/bookings/booking-expiry.service';
+import { DeliveryProcessor } from '../../../src/modules/delivery/delivery.processor';
+import { RealtimeTransport } from '../../../src/modules/realtime/realtime-transport';
+import { RecordingTransport } from '../../../src/modules/realtime/testing/recording-transport';
+import { appTestEnv } from '../../support/app-env';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { createFixtures, type Fixtures } from '../../support/fixtures';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 const NOW = '2026-11-05T10:00:00.000Z';
 const A_BOOKING = '01a3a1aa-7100-7679-b8b1-000000000001';
@@ -59,7 +62,7 @@ describe('Outbox relay — claim, backoff, abandoned claims, delivery (real Post
     transport = new RecordingTransport();
 
     // A worker context like `main.worker.ts` boots, with both loops off: the test drives them.
-    const { WorkerModule } = await import('../../src/worker.module.js');
+    const { WorkerModule } = await import('../../../src/worker.module.js');
     workerRef = await Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(ClockService)
       .useValue(clock)
