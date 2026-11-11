@@ -634,7 +634,10 @@ describe('querydr in the booking expiry (real Postgres + Redis, VNPay stubbed)',
         paid.seatIds.map(() => ['AVAILABLE', null, null]),
       );
       expect(state.tickets).toEqual([]);
-      expect(state.events).toEqual([]);
+      // The seats really went back, so the expiry announces them (ROADMAP 4.1, `expireBooking`
+      // step 10) — and nothing else: no booking.confirmed, no booking.needs_review. The event's
+      // full payload, `cause: booking.expired` included, is pinned in expire-booking.spec.ts.
+      expect(state.events).toEqual([{ type: 'seats.released' }]);
       expect(sent).toHaveLength(asks);
       return paid;
     };

@@ -389,6 +389,11 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
    * `booking.expired` at most once because a booking expires once (ROADMAP 4.1) — and no other
    * cause; a REFUND_REQUIRED payment exactly when there is one payment.refund_required event for
    * it, and only next to a SUCCESS payment of its booking.
+   *
+   * The same rules live in `test/scenarios/support/payment-checks.ts` for scenario C. The two
+   * drifted once — 4.1 taught this copy that `expireBooking` also writes `seats.released` while
+   * 3.9 wrote the other copy from the older rule, and the merge of the two branches broke
+   * scenario C — so change both together.
    */
   async function violations() {
     const q = <T>(sql: TemplateStringsArray) => db.prisma.$queryRaw<T[]>(sql);
@@ -443,7 +448,8 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
             OR count(o.id) FILTER (WHERE o.type = 'seats.released'
                  AND o.payload->>'cause' = 'booking.expired') > 1
             OR count(o.id) FILTER (WHERE o.type = 'seats.released'
-                 AND o.payload->>'cause' NOT IN ('booking.needs_review', 'booking.expired')) > 0`,
+                 AND coalesce(o.payload->>'cause', '')
+                       NOT IN ('booking.needs_review', 'booking.expired')) > 0`,
       q`SELECT p.id FROM payments p
         WHERE (SELECT count(*) FROM outbox_events o
                WHERE o.aggregate_id = p.id::text AND o.type = 'payment.refund_required')
