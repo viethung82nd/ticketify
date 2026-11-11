@@ -17,16 +17,37 @@ on:
       - 'apps/api/test/integration/scenario-d.int-spec.ts'
       - 'apps/api/test/support/worker-preload/**'
       - '.github/workflows/scenario-d.yml'
+  # The same paths as the PR trigger: a merge commit is re-validated only when it actually carries
+  # a change to delivery, the outbox, the mailer or storage. CI still runs on every push to main,
+  # filtered by nothing.
   push:
     branches: [main]
+    paths:
+      - 'apps/api/src/infra/outbox/**'
+      - 'apps/api/src/infra/queue/**'
+      - 'apps/api/src/infra/mailer/**'
+      - 'apps/api/src/infra/storage/**'
+      - 'apps/api/src/modules/delivery/**'
+      - 'apps/api/src/modules/tickets/**'
+      - 'apps/api/src/main.worker.ts'
+      - 'apps/api/test/integration/scenario-d.int-spec.ts'
+      - 'apps/api/test/support/worker-preload/**'
+      - '.github/workflows/scenario-d.yml'
   # Weekly, for regressions from changes outside the paths above (Monday 03:00 UTC).
   schedule:
     - cron: '0 3 * * 1'
   workflow_dispatch:
 
 concurrency:
-  group: scenario-d-${{ github.ref }}
-  cancel-in-progress: true
+  # Per PR (pull_request.number) or per branch/tag (github.ref): two different PRs never share a
+  # group, so they cannot cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A new commit on a PR cancels that PR's stale run. A push to main, a schedule or a manual run is
+  # never cancelled: every commit on main keeps its own validation, and a second merge queues behind
+  # the first instead of killing it. Cancelling a PR run is safe here because the suite starts its
+  # own RustFS and Mailpit containers and kills its own worker; a cancelled run leaves nothing
+  # behind outside the runner.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -84,10 +105,10 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Build
-        run: pnpm build
-
-      # The suite also compiles the worker itself (dist/.scenario-d) from the current sources.
+      # No build step: the suite compiles the worker itself (tsc -p tsconfig.build.json --outDir
+      # dist/.scenario-d) from the current sources, and packages/shared/dist already exists from
+      # install (prepare). Nothing here reads apps/api/dist or apps/web/dist, so `pnpm build` only
+      # repeated CI's work — including a full Vite build of the React app.
       - name: Scenario D
         run: pnpm --filter @ticketify/api test:integration -- scenario-d
 
@@ -98,3 +119,5 @@ jobs:
           name: scenario-d-logs
           path: artifacts/scenario-d/
           if-no-files-found: ignore
+          # A debugging reference for the crash, SMTP and storage rounds, not an archive.
+          retention-days: 14

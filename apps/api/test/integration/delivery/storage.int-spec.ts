@@ -19,13 +19,13 @@ import {
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
-import { TicketPdfStorage } from '../../src/modules/tickets/ticket-pdf.storage';
-import { appTestEnv } from '../support/app-env';
-import { accessTokenFor } from '../support/auth';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
-import { EXTERNAL_S3_ENV, RUSTFS_IMAGE } from '../support/test-env';
+import { TicketPdfStorage } from '../../../src/modules/tickets/ticket-pdf.storage';
+import { appTestEnv } from '../../support/app-env';
+import { accessTokenFor } from '../../support/auth';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
+import { EXTERNAL_S3_ENV, RUSTFS_IMAGE } from '../../support/test-env';
 
 const ACCESS_KEY = process.env[EXTERNAL_S3_ENV.accessKey] ?? 'ticketify';
 const SECRET_KEY = process.env[EXTERNAL_S3_ENV.secretKey] ?? 'ticketify-secret';
@@ -109,7 +109,7 @@ describe('Poster storage (real RustFS)', () => {
         },
       ),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication<INestApplication<App>>({ logger: false });
     await app.init();
@@ -332,11 +332,11 @@ describe('Poster storage (real RustFS)', () => {
         target = app;
       } else {
         // Cannot stop a shared server: point a second app at a dead endpoint instead.
-        const { AppModule } = await import('../../src/app.module.js');
-        const { ObjectStorage } = await import('../../src/infra/storage/object-storage.js');
-        const { S3ObjectStorage } = await import('../../src/infra/storage/s3-object-storage.js');
-        const { testConfig } = await import('../../src/config/testing/test-config.js');
-        const { SystemClock } = await import('../../src/infra/clock/system-clock.js');
+        const { AppModule } = await import('../../../src/app.module.js');
+        const { ObjectStorage } = await import('../../../src/infra/storage/object-storage.js');
+        const { S3ObjectStorage } = await import('../../../src/infra/storage/s3-object-storage.js');
+        const { testConfig } = await import('../../../src/config/testing/test-config.js');
+        const { SystemClock } = await import('../../../src/infra/clock/system-clock.js');
         const deadStorage = new S3ObjectStorage(
           testConfig({ S3_ENDPOINT: DEAD_ENDPOINT, S3_BUCKET: bucket }),
           new SystemClock(),

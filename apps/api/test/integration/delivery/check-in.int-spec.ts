@@ -4,16 +4,16 @@ import { Test } from '@nestjs/testing';
 import { type CheckInResponse, CheckInResult, Role } from '@ticketify/shared';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
-import { ticketToken } from '../../src/modules/tickets/ticket-token';
-import { appTestEnv } from '../support/app-env';
-import { accessTokenFor } from '../support/auth';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { createFixtures, type Fixtures } from '../support/fixtures';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import { ticketToken } from '../../../src/modules/tickets/ticket-token';
+import { appTestEnv } from '../../support/app-env';
+import { accessTokenFor } from '../../support/auth';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { createFixtures, type Fixtures } from '../../support/fixtures';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 const NOW = '2026-11-05T12:20:00.000Z';
 const QR_SECRET = 'integration-test-ticket-qr-secret-0123456789';
@@ -35,7 +35,7 @@ describe('Check-in — POST /tickets/check-in (real Postgres + Redis)', () => {
     Object.assign(process.env, appTestEnv({ databaseUrl: db.url, redisUrl: redis.url }));
     fixtures = createFixtures(db.prisma);
 
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)

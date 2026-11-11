@@ -4,16 +4,16 @@ import { type AdminRoom, DayType, Role, SeatType } from '@ticketify/shared';
 import { Client } from 'pg';
 import request, { type Response } from 'supertest';
 import type { App } from 'supertest/types';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { SHOWTIME_TX } from '../../src/modules/showtimes/showtimes.service';
-import { appTestEnv } from '../support/app-env';
-import { accessTokenFor } from '../support/auth';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { createFixtures, type Fixtures } from '../support/fixtures';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
-import { captureServerErrors, formatServerErrors } from '../support/server-errors';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { SHOWTIME_TX } from '../../../src/modules/showtimes/showtimes.service';
+import { appTestEnv } from '../../support/app-env';
+import { accessTokenFor } from '../../support/auth';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { createFixtures, type Fixtures } from '../../support/fixtures';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
+import { captureServerErrors, formatServerErrors } from '../../support/server-errors';
 
 /** 17:00 Sunday 2026-11-01 in Vietnam. */
 const NOW = '2026-11-01T10:00:00.000Z';
@@ -42,7 +42,7 @@ describe('Showtime creates under connection pressure (pool of 2, real Postgres)'
         { DATABASE_POOL_MAX: String(POOL_MAX), SHOWTIME_CLEANUP_MINUTES: '15' },
       ),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(new FakeClock(NOW))

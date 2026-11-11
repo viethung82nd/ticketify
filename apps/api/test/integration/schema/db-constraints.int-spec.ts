@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { PrismaClient } from '../../src/generated/prisma/client';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { expectViolation, SQLSTATE } from '../support/db-errors';
-import { createFixtures, type Fixtures } from '../support/fixtures';
+import type { PrismaClient } from '../../../src/generated/prisma/client';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { expectViolation, SQLSTATE } from '../../support/db-errors';
+import { createFixtures, type Fixtures } from '../../support/fixtures';
 
 /**
  * Proves every hand-written constraint (prisma/migrations/*_db_constraints) blocks what it

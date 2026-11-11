@@ -6,6 +6,22 @@
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) and are checked by commitlint in the `commit-msg` hook.
 - The `pre-commit` hook runs ESLint + Prettier on staged files (lint-staged), then leaves out of the commit any file lint-staged staged that you had not (a lint-staged 17.6.0 bug, see `.husky/pre-commit`). Never bypass hooks with `--no-verify`.
 
+## Where tests live
+
+Three kinds of test, three Jest projects. The suffix is what selects a file, so a suite in the wrong directory with the wrong suffix is silently never run — check the table before adding one.
+
+| Kind | Directory | File suffix | Config | Opt-in flag | Run by |
+|---|---|---|---|---|---|
+| unit | `apps/api/src/**`, `apps/api/prisma/**` (next to the code) | `*.spec.ts` | `jest.unit.config.js` | — | `pnpm test:unit`, `ci.yml` |
+| integration | `apps/api/test/integration/<domain>/` | `*.int-spec.ts` | `jest.integration.config.js` | — | `pnpm test:integration`, `ci.yml` |
+| concurrency scenario (A, B, C) | `apps/api/test/scenarios/` | `*.spec.ts` | `jest.scenarios.config.js` | `RUN_SCENARIO_TESTS=1` | `booking-scenarios.yml` only |
+
+Integration suites are grouped by domain: `auth`, `catalog`, `booking`, `payment`, `delivery`, `infra`, `platform`, `schema`. Two suites stay at the top of `test/integration/` instead, because `scenario-d.yml` and `worker-shutdown.yml` name them verbatim in their `paths:` filters: `scenario-d.int-spec.ts` and `worker-shutdown.int-spec.ts`. Moving either one means editing its workflow in the same commit, or the workflow stops firing without any error.
+
+Shared, not owned by one project: `test/support/` (helpers: app env, auth, database, redis, http, fixtures) and `test/setup/` (containers and the template database). `test/setup/` is used by both the integration and the scenarios project — `test/scenarios/support/global-setup.ts` wraps it and only runs it when scenarios are enabled — so it stays outside `test/integration/`.
+
+Two integration suites read files under `docs/` through `__dirname`, so the documents cannot drift from what runs: `schema/erd.int-spec.ts` reads `docs/erd.md`, and `payment/admin-review.int-spec.ts` reads `docs/needs-review-queries.sql`. Those paths are not typechecked — if you move a suite or a document, open both ends.
+
 ## Tests that need OS signals
 
 A suite that sends real signals (`SIGTERM`, `SIGINT`…) to a child process is opt-in: it runs only when `RUN_SIGNAL_TESTS=1` and the platform is not Windows (Node cannot deliver a signal to another process there: `process.kill()` is a hard `TerminateProcess`). Gate it with the same two lines as `worker-shutdown.int-spec.ts`:

@@ -24,7 +24,7 @@ Also relevant, but declared in `schema.prisma` (so Prisma manages them):
 - `payments_vnp_transaction_no_key` — plain `UNIQUE (vnp_transaction_no)`. Postgres' default `NULLS DISTINCT` lets any number of rows have `NULL`. VNPay may send the same placeholder number (e.g. `"0"`) for failed/cancelled attempts; phase 3 must only store a value that is unique per real transaction (to be checked against the sandbox).
 - `outbox_events_status_next_retry_at_idx` — `(status, next_retry_at)`. It is a plain index, so it lives in the schema: if it were only in raw SQL, Prisma would see it as drift and generate a `DROP INDEX`.
 
-Every rule above is exercised by `test/integration/db-constraints.int-spec.ts` (one rejected and one accepted case each).
+Every rule above is exercised by `test/integration/schema/db-constraints.int-spec.ts` (one rejected and one accepted case each).
 
 When the application catches violations, map them by **constraint name** (e.g. `showtimes_no_overlap` → `409`).
 

@@ -6,8 +6,14 @@ on:
     branches: [main]
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Per PR (pull_request.number) or per branch/tag (github.ref): two different PRs never share a
+  # group, so they cannot cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A new commit on a PR cancels that PR's stale run. A push to main, a schedule or a manual run is
+  # never cancelled: every commit on main keeps its own validation, and a second merge queues behind
+  # the first instead of killing it. Cancelling a PR run is safe here because lint, typecheck and
+  # the unit and integration tests touch nothing outside the runner.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -74,8 +80,10 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
+      # --ignore-scripts: commitlint needs the root devDependencies only, not the Prisma client
+      # (apps/api postinstall) or packages/shared/dist (prepare). No test runs in this job.
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Check commit messages
         run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose

@@ -13,14 +13,14 @@ import {
 } from '@ticketify/shared';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { ObjectStorage } from '../../src/infra/storage/object-storage';
-import { FakeObjectStorage } from '../../src/infra/storage/testing/fake-object-storage';
-import { appTestEnv } from '../support/app-env';
-import { accessTokenFor } from '../support/auth';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { createFixtures, type Fixtures } from '../support/fixtures';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+import { ObjectStorage } from '../../../src/infra/storage/object-storage';
+import { FakeObjectStorage } from '../../../src/infra/storage/testing/fake-object-storage';
+import { appTestEnv } from '../../support/app-env';
+import { accessTokenFor } from '../../support/auth';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { createFixtures, type Fixtures } from '../../support/fixtures';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 type Method = 'get' | 'post' | 'patch' | 'delete';
 
@@ -50,7 +50,7 @@ describe('Movies & genres (real Postgres + Redis, fake object storage)', () => {
     [db, redis] = await Promise.all([createTestDatabase(), createTestRedis()]);
     // ConfigModule reads process.env when the module graph is first imported.
     Object.assign(process.env, appTestEnv({ databaseUrl: db.url, redisUrl: redis.url }));
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     storage = new FakeObjectStorage();
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ObjectStorage)

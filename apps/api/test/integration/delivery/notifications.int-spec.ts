@@ -11,27 +11,30 @@ import {
 import type { Job } from 'bullmq';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { OutboxEventType } from '../../src/infra/outbox/outbox-events';
-import { OUTBOX_POLL_INTERVAL_MS, OutboxRelay } from '../../src/infra/outbox/outbox-relay.service';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { OutboxEventType } from '../../../src/infra/outbox/outbox-events';
+import {
+  OUTBOX_POLL_INTERVAL_MS,
+  OutboxRelay,
+} from '../../../src/infra/outbox/outbox-relay.service';
 import {
   DeliveryAction,
   type DeliveryJobData,
   deliveryJobId,
-} from '../../src/infra/queue/delivery-queue';
-import { DeliveryQueueProducer } from '../../src/infra/queue/delivery-queue.producer';
-import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
-import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
-import { DeliveryProcessor } from '../../src/modules/delivery/delivery.processor';
-import { RealtimeTransport } from '../../src/modules/realtime/realtime-transport';
-import { RecordingTransport } from '../../src/modules/realtime/testing/recording-transport';
-import { appTestEnv } from '../support/app-env';
-import { accessTokenFor } from '../support/auth';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { createFixtures, type Fixtures } from '../support/fixtures';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+} from '../../../src/infra/queue/delivery-queue';
+import { DeliveryQueueProducer } from '../../../src/infra/queue/delivery-queue.producer';
+import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import { SWEEP_INTERVAL_MS } from '../../../src/modules/bookings/booking-expiry.processor';
+import { DeliveryProcessor } from '../../../src/modules/delivery/delivery.processor';
+import { RealtimeTransport } from '../../../src/modules/realtime/realtime-transport';
+import { RecordingTransport } from '../../../src/modules/realtime/testing/recording-transport';
+import { appTestEnv } from '../../support/app-env';
+import { accessTokenFor } from '../../support/auth';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { createFixtures, type Fixtures } from '../../support/fixtures';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 const NOW = '2026-11-05T10:00:00.000Z';
 const UNKNOWN_ID = '01a3a1aa-0000-7000-8000-000000000000';
@@ -55,7 +58,7 @@ describe('Notifications — delivery, list and read (real Postgres + Redis)', ()
     Object.assign(process.env, appTestEnv({ databaseUrl: db.url, redisUrl: redis.url }));
     fixtures = createFixtures(db.prisma);
 
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)
@@ -67,7 +70,7 @@ describe('Notifications — delivery, list and read (real Postgres + Redis)', ()
     adminId = admin.id;
 
     transport = new RecordingTransport();
-    const { WorkerModule } = await import('../../src/worker.module.js');
+    const { WorkerModule } = await import('../../../src/worker.module.js');
     workerRef = await Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(ClockService)
       .useValue(clock)

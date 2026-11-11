@@ -17,15 +17,15 @@ import {
 } from '@ticketify/shared';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
-import { VnpayService } from '../../src/modules/payment/vnpay/vnpay.service';
-import { REALTIME_CHANNEL_KEY } from '../../src/modules/realtime/realtime-redis';
-import { appTestEnv } from '../support/app-env';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import { VnpayService } from '../../../src/modules/payment/vnpay/vnpay.service';
+import { REALTIME_CHANNEL_KEY } from '../../../src/modules/realtime/realtime-redis';
+import { appTestEnv } from '../../support/app-env';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 /**
  * The admin queue of NEEDS_REVIEW bookings (ROADMAP 3.8, PLAN §5 "Xử lý NEEDS_REVIEW"): listing
@@ -50,7 +50,7 @@ const VNPAY_ENV = {
   VNPAY_RETURN_URL: 'http://localhost:5173/payment/result',
 } as const;
 
-const QUERIES_FILE = join(__dirname, '../../../../docs/needs-review-queries.sql');
+const QUERIES_FILE = join(__dirname, '../../../../../docs/needs-review-queries.sql');
 
 /** The `-- name: x` blocks of the checking-queries file, as runnable SQL. */
 function documentedQueries(): Map<string, string> {
@@ -98,7 +98,7 @@ describe('Admin review queue — /admin/bookings (real Postgres + Redis)', () =>
         },
       ),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)

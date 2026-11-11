@@ -14,16 +14,16 @@ import { Logger } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { LOG_DESTINATION } from '../../src/config/logger.module';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
-import { TicketCodes } from '../../src/modules/payment/seat-settlement';
-import { VnpayService } from '../../src/modules/payment/vnpay/vnpay.service';
-import { appTestEnv } from '../support/app-env';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { bodyOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+import { LOG_DESTINATION } from '../../../src/config/logger.module';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import { TicketCodes } from '../../../src/modules/payment/seat-settlement';
+import { VnpayService } from '../../../src/modules/payment/vnpay/vnpay.service';
+import { appTestEnv } from '../../support/app-env';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { bodyOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 /** 17:00 Sunday 2026-11-01 in Vietnam. */
 const NOW = '2026-11-01T10:00:00.000Z';
@@ -70,7 +70,7 @@ describe('Payment logs never carry signatures or secrets (real Postgres + Redis)
       process.env,
       appTestEnv({ databaseUrl: db.url, redisUrl: redis.url }, { LOG_LEVEL: 'info', ...VNPAY_ENV }),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)

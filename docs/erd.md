@@ -4,7 +4,7 @@ Physical schema after all migrations (table and column names as they exist in Po
 Source of truth: [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma) + the raw-SQL migration
 described in [`apps/api/prisma/README.md`](../apps/api/prisma/README.md).
 
-> This file is checked by `apps/api/test/integration/erd.int-spec.ts`: every table and column of the
+> This file is checked by `apps/api/test/integration/schema/erd.int-spec.ts`: every table and column of the
 > migrated database must appear here, and nothing else. Update it together with the schema.
 > Voucher tables arrive in phase 5.
 

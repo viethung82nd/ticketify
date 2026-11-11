@@ -12,23 +12,23 @@ import {
 } from '@ticketify/shared';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { AppConfig } from '../../src/config/app-config.service';
-import type { Env } from '../../src/config/env.schema';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
-import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
-import { BookingExpiryService } from '../../src/modules/bookings/booking-expiry.service';
-import { reclaimSeatsForExpiredBooking } from '../../src/modules/payment/reclaim-seats';
-import { TicketCodes } from '../../src/modules/payment/seat-settlement';
-import { VnpayService } from '../../src/modules/payment/vnpay/vnpay.service';
-import { REALTIME_CHANNEL_KEY } from '../../src/modules/realtime/realtime-redis';
-import { SeatEvents } from '../../src/modules/realtime/seat-events';
-import { appTestEnv } from '../support/app-env';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { bodyOf, errorOf } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
-import { captureServerErrors, formatServerErrors } from '../support/server-errors';
+import { AppConfig } from '../../../src/config/app-config.service';
+import type { Env } from '../../../src/config/env.schema';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import { SWEEP_INTERVAL_MS } from '../../../src/modules/bookings/booking-expiry.processor';
+import { BookingExpiryService } from '../../../src/modules/bookings/booking-expiry.service';
+import { reclaimSeatsForExpiredBooking } from '../../../src/modules/payment/reclaim-seats';
+import { TicketCodes } from '../../../src/modules/payment/seat-settlement';
+import { VnpayService } from '../../../src/modules/payment/vnpay/vnpay.service';
+import { REALTIME_CHANNEL_KEY } from '../../../src/modules/realtime/realtime-redis';
+import { SeatEvents } from '../../../src/modules/realtime/seat-events';
+import { appTestEnv } from '../../support/app-env';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { bodyOf, errorOf } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
+import { captureServerErrors, formatServerErrors } from '../../support/server-errors';
 
 /** 17:00 Sunday 2026-11-01 in Vietnam. */
 const NOW = '2026-11-01T10:00:00.000Z';
@@ -123,7 +123,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
         },
       ),
     );
-    const { AppModule } = await import('../../src/app.module.js');
+    const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService)
       .useValue(clock)
@@ -150,7 +150,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
       ),
     });
 
-    const { WorkerModule } = await import('../../src/worker.module.js');
+    const { WorkerModule } = await import('../../../src/worker.module.js');
     workerRef = await Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(ClockService)
       .useValue(clock)

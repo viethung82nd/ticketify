@@ -8,7 +8,7 @@
 -- (see `audit_logs`).
 --
 -- Each query is preceded by a `-- name:` line; `payment-querydr`'s sibling suite
--- (`test/integration/admin-review.int-spec.ts`) reads this file, splits it on those lines and
+-- (`test/integration/payment/admin-review.int-spec.ts`) reads this file, splits it on those lines and
 -- runs every query against real data, so the SQL here cannot drift from what is tested.
 
 -- name: refund-queue

@@ -5,15 +5,15 @@ import { type AuthSession, type CurrentUser as CurrentUserView, Role } from '@ti
 import { Redis } from 'ioredis';
 import request, { type Response } from 'supertest';
 import type { App } from 'supertest/types';
-import { type AuthUser, CurrentUser } from '../../src/common/decorators/current-user.decorator';
-import { Roles } from '../../src/common/decorators/roles.decorator';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { RefreshTokenService } from '../../src/modules/auth/tokens/refresh-token.service';
-import { appTestEnv } from '../support/app-env';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { bodyOf, cookieValue, errorOf, setCookieLine } from '../support/http';
-import { createTestRedis, type TestRedis } from '../support/redis';
+import { type AuthUser, CurrentUser } from '../../../src/common/decorators/current-user.decorator';
+import { Roles } from '../../../src/common/decorators/roles.decorator';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { RefreshTokenService } from '../../../src/modules/auth/tokens/refresh-token.service';
+import { appTestEnv } from '../../support/app-env';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { bodyOf, cookieValue, errorOf, setCookieLine } from '../../support/http';
+import { createTestRedis, type TestRedis } from '../../support/redis';
 
 const START = '2026-11-02T03:00:00.000Z';
 const PASSWORD = 'correct horse battery';
@@ -84,8 +84,8 @@ describe('Auth (real Postgres + Redis)', () => {
         { LOGIN_RATE_LIMIT_MAX: String(LOGIN_MAX), LOGIN_RATE_LIMIT_WINDOW_SECONDS: '900' },
       ),
     );
-    ({ AppModule } = await import('../../src/app.module.js'));
-    ({ REDIS } = await import('../../src/infra/redis/redis.module.js'));
+    ({ AppModule } = await import('../../../src/app.module.js'));
+    ({ REDIS } = await import('../../../src/infra/redis/redis.module.js'));
     clock = new FakeClock(START);
     app = await startApp();
   });

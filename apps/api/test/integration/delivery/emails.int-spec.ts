@@ -2,27 +2,30 @@ import { randomUUID } from 'node:crypto';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { Job } from 'bullmq';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
-import { ClockService } from '../../src/infra/clock/clock.service';
-import { FakeClock } from '../../src/infra/clock/testing/fake-clock';
-import { OutboxEventType } from '../../src/infra/outbox/outbox-events';
-import { OUTBOX_POLL_INTERVAL_MS, OutboxRelay } from '../../src/infra/outbox/outbox-relay.service';
+import { ClockService } from '../../../src/infra/clock/clock.service';
+import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
+import { OutboxEventType } from '../../../src/infra/outbox/outbox-events';
+import {
+  OUTBOX_POLL_INTERVAL_MS,
+  OutboxRelay,
+} from '../../../src/infra/outbox/outbox-relay.service';
 import {
   DeliveryAction,
   type DeliveryJobData,
   deliveryJobId,
-} from '../../src/infra/queue/delivery-queue';
-import { DeliveryQueueProducer } from '../../src/infra/queue/delivery-queue.producer';
-import { ObjectStorage } from '../../src/infra/storage/object-storage';
-import { FakeObjectStorage } from '../../src/infra/storage/testing/fake-object-storage';
-import { SWEEP_INTERVAL_MS } from '../../src/modules/bookings/booking-expiry.processor';
-import { DeliveryProcessor } from '../../src/modules/delivery/delivery.processor';
-import { RealtimeTransport } from '../../src/modules/realtime/realtime-transport';
-import { RecordingTransport } from '../../src/modules/realtime/testing/recording-transport';
-import { appTestEnv } from '../support/app-env';
-import { createTestDatabase, type TestDatabase } from '../support/database';
-import { createFixtures, type Fixtures } from '../support/fixtures';
-import { createTestRedis, type TestRedis } from '../support/redis';
-import { EXTERNAL_SMTP_ENV, MAILPIT_IMAGE } from '../support/test-env';
+} from '../../../src/infra/queue/delivery-queue';
+import { DeliveryQueueProducer } from '../../../src/infra/queue/delivery-queue.producer';
+import { ObjectStorage } from '../../../src/infra/storage/object-storage';
+import { FakeObjectStorage } from '../../../src/infra/storage/testing/fake-object-storage';
+import { SWEEP_INTERVAL_MS } from '../../../src/modules/bookings/booking-expiry.processor';
+import { DeliveryProcessor } from '../../../src/modules/delivery/delivery.processor';
+import { RealtimeTransport } from '../../../src/modules/realtime/realtime-transport';
+import { RecordingTransport } from '../../../src/modules/realtime/testing/recording-transport';
+import { appTestEnv } from '../../support/app-env';
+import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { createFixtures, type Fixtures } from '../../support/fixtures';
+import { createTestRedis, type TestRedis } from '../../support/redis';
+import { EXTERNAL_SMTP_ENV, MAILPIT_IMAGE } from '../../support/test-env';
 
 const NOW = '2026-11-05T10:00:00.000Z';
 const WEB_ORIGIN = 'http://localhost:5173';
@@ -105,7 +108,7 @@ describe('Ticket emails (real SMTP: Mailpit)', () => {
     fixtures = createFixtures(db.prisma);
     storage = new FakeObjectStorage();
 
-    const { WorkerModule } = await import('../../src/worker.module.js');
+    const { WorkerModule } = await import('../../../src/worker.module.js');
     workerRef = await Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(ClockService)
       .useValue(clock)
@@ -392,7 +395,7 @@ describe('Ticket emails (real SMTP: Mailpit)', () => {
     );
     await delivery.job(DeliveryAction.GENERATE_PDF);
     const mailer = workerRef.get<{ send: (message: unknown) => Promise<void> }>(
-      (await import('../../src/infra/mailer/mailer.js')).Mailer,
+      (await import('../../../src/infra/mailer/mailer.js')).Mailer,
     );
     const failing = jest
       .spyOn(mailer, 'send')
