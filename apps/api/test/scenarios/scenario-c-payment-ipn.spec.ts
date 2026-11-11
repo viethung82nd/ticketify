@@ -145,7 +145,7 @@ describeScenario('Scenario C — the VNPay IPN under stress', () => {
    * giving its seats up (querydr, ROADMAP 3.7); here that call fails at once, as it would with
    * VNPay unreachable, so the expiry behaves exactly as it did before 3.7 and the race below is
    * decided by the database alone. querydr's own branches are covered by
-   * `test/integration/payment-querydr.int-spec.ts`. Re-applied per test: `clearMocks` is on.
+   * `test/integration/payment/payment-querydr.int-spec.ts`. Re-applied per test: `clearMocks` is on.
    */
   beforeEach(() => {
     jest
