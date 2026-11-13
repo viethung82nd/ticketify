@@ -278,6 +278,7 @@ Lớp chặn cuối: partial unique index trên `Ticket(showtimeId, seatId)`. N�
 - **Giữ lượt** trong transaction giữ ghế: `SELECT voucher FOR UPDATE`, đếm số usage `RESERVED + CONSUMED` để kiểm tra `usageLimit` và `perUserLimit`, rồi INSERT `RESERVED`. Không có `usedCount` cập nhật riêng lẻ: số lượt được tính ra từ bảng usage.
 - Đơn `CONFIRMED` → usage `CONSUMED`. Đơn `EXPIRED` → usage `RELEASED`. Cả hai cập nhật nằm trong cùng transaction với việc đổi trạng thái booking.
 - Server luôn tự tính giảm giá. Client chỉ gửi mã voucher.
+- **Bổ sung 13/11/2026 (5.1, chờ chủ dự án duyệt)**: `Voucher(code, description, discountType PERCENT/FIXED, discountValue, maxDiscount, minSubtotal, usageLimit, perUserLimit, startsAt, endsAt, isActive)`. `code` lưu chữ hoa, unique; `null` ở hai giới hạn = không giới hạn. Voucher đã có đơn dùng thì không xóa và không đổi mã, chỉ tắt. Chi tiết và lý do ở ROADMAP "Đã chốt".
 
 ## 7. Sau thanh toán: giao vé
 
