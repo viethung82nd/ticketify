@@ -9,6 +9,7 @@ const ADMIN_NAV = [
   { to: '/admin/pricing', label: 'Giá vé & ngày lễ' },
   { to: '/admin/showtimes', label: 'Suất chiếu' },
   { to: '/admin/combos', label: 'Combo' },
+  { to: '/admin/vouchers', label: 'Voucher' },
   { to: '/admin/review', label: 'Đơn cần xử lý' },
 ];
 

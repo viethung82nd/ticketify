@@ -24,6 +24,7 @@ import { RoomsModule } from './modules/rooms/rooms.module';
 import { ShowtimesModule } from './modules/showtimes/showtimes.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
+import { VouchersModule } from './modules/vouchers/vouchers.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { UsersModule } from './modules/users/users.module';
     PricingModule,
     ShowtimesModule,
     CombosModule,
+    VouchersModule,
     BookingsModule,
     PaymentsModule,
     RealtimeModule,

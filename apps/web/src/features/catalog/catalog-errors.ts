@@ -6,6 +6,7 @@ import {
   ReviewErrorCode,
   RoomErrorCode,
   ShowtimeErrorCode,
+  VoucherErrorCode,
 } from '@ticketify/shared';
 import { z } from 'zod';
 import { apiErrorOf, isNetworkError } from '@/lib/api-error';
@@ -54,6 +55,12 @@ const MESSAGES: Record<string, string> = {
     'Đã có combo cùng tên (không phân biệt chữ hoa, chữ thường và dấu).',
   [ComboErrorCode.COMBO_IN_USE]:
     'Combo đã có trong đơn đặt vé nên không thể xóa. Hãy tắt combo để ẩn khỏi khách hàng.',
+  // Vouchers (admin, ROADMAP 5.1).
+  [VoucherErrorCode.VOUCHER_NOT_FOUND]: 'Không tìm thấy voucher. Có thể voucher đã bị xóa.',
+  [VoucherErrorCode.VOUCHER_CODE_TAKEN]:
+    'Mã này đã được voucher khác dùng (không phân biệt chữ hoa, chữ thường).',
+  [VoucherErrorCode.VOUCHER_IN_USE]:
+    'Voucher đã được dùng trong đơn đặt vé nên không thể xóa hoặc đổi mã. Hãy tắt voucher thay vì xóa.',
   // Bookings under review (admin, ROADMAP 3.8).
   [ReviewErrorCode.BOOKING_NOT_IN_REVIEW]:
     'Đơn này không còn ở trạng thái cần xử lý. Hãy tải lại danh sách.',

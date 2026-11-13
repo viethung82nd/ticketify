@@ -6,7 +6,6 @@ described in [`apps/api/prisma/README.md`](../apps/api/prisma/README.md).
 
 > This file is checked by `apps/api/test/integration/schema/erd.int-spec.ts`: every table and column of the
 > migrated database must appear here, and nothing else. Update it together with the schema.
-> Voucher tables arrive in phase 5.
 
 Conventions: `PK` primary key, `FK` foreign key, `UK` unique. All instants are `timestamptz` (UTC), money is `int` (VND), ids are UUIDv7.
 
@@ -38,6 +37,10 @@ erDiagram
     bookings ||--o{ tickets : "issues"
     showtime_seats ||--o{ tickets : ""
     bookings ||--o{ payments : "attempts"
+
+    vouchers ||--o{ voucher_usages : "used by"
+    bookings ||--o| voucher_usages : "applies"
+    users ||--o{ voucher_usages : "uses"
 
     users {
         uuid id PK
@@ -254,6 +257,33 @@ erDiagram
         jsonb after "nullable"
         timestamptz created_at "index"
     }
+
+    vouchers {
+        uuid id PK
+        text code UK "A-Z 0-9, 4-20 chars (CHECK)"
+        text description "nullable"
+        voucher_discount_type discount_type "PERCENT | FIXED"
+        int discount_value "PERCENT 1-100, FIXED VND (CHECK)"
+        int max_discount "nullable, PERCENT cap only"
+        int min_subtotal "0 = any"
+        int usage_limit "nullable = unlimited"
+        int per_user_limit "nullable = unlimited"
+        timestamptz starts_at
+        timestamptz ends_at "CHECK ends_at > starts_at"
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    voucher_usages {
+        uuid id PK
+        uuid voucher_id FK "index (voucher_id, status), (voucher_id, user_id, status)"
+        uuid user_id FK
+        uuid booking_id FK,UK "one voucher per booking"
+        voucher_usage_status status "RESERVED | CONSUMED | RELEASED"
+        timestamptz created_at
+        timestamptz updated_at
+    }
 ```
 
 ## Notes
@@ -263,3 +293,4 @@ erDiagram
 - `payments` has one row per payment attempt; `tickets` has one row per seat and is created in the same transaction that confirms the booking.
 - `outbox_events` and `notifications` are written by the API and consumed by the worker (phase 4).
 - `audit_logs` is append-only: one row per admin action taken by hand (ROADMAP 3.8). `bookings.review_resolved_at` is the current state, the log is the history; marking a NEEDS_REVIEW booking handled changes neither the booking status nor the payment, because refunds are manual.
+- `vouchers` has no usage counter: uses are counted from `voucher_usages` (`RESERVED` + `CONSUMED`) under `SELECT … FOR UPDATE` on the voucher (PLAN section 6). A voucher that any booking used cannot be deleted (`ON DELETE RESTRICT`); switch it off instead.
