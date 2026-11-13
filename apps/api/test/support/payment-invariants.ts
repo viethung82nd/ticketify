@@ -1,17 +1,19 @@
-import type { PrismaClient } from '../../../src/generated/prisma/client';
+import type { PrismaClient } from '../../src/generated/prisma/client';
 
 /**
  * Every rule that must hold over the **whole** database after any number of IPNs, expiries and
- * holds have run — the same set `payment-ipn.int-spec.ts` checks after each of its tests and race
- * rounds (ROADMAP 3.4), as named violations so a failure says what broke. Each query returns the
- * offending rows, so "all good" is every list empty.
+ * holds have run (ROADMAP 3.4), as named violations so a failure says what broke. Each query
+ * returns the offending rows, so "all good" is every list empty.
  *
- * Scenario C asserts on these rather than on responses: an IPN that answers `00` while leaving two
- * live tickets on one seat is a failure, however correct its answer looked.
+ * `payment-ipn.int-spec.ts` (after each test and each race round), `payment-querydr.int-spec.ts`
+ * (after each test) and scenario C assert on these rather than on responses: an IPN that answers
+ * `00` while leaving two live tickets on one seat is a failure, however correct its answer looked.
  *
- * `payment-ipn.int-spec.ts` keeps its own copy of these queries. The two drifted once — 4.1 taught
- * that copy that `expireBooking` also writes `seats.released` while 3.9 wrote this one from the
- * older rule, and the merge of the two branches broke scenario C — so change both together.
+ * These queries used to be copied into each suite, and the copies drifted: 4.1 taught the
+ * integration copy that `expireBooking` also writes `seats.released` while 3.9 wrote the scenario
+ * copy from the older rule, and because the two branches touched different files git merged them
+ * without a conflict — `main` went red on a rule neither commit got wrong. Hence one copy, here in
+ * `test/support`, which every suite already imports from.
  */
 export interface PaymentViolations {
   /** Two live tickets for one seat. The partial unique index should make this impossible. */
@@ -31,7 +33,7 @@ export interface PaymentViolations {
   /**
    * Not exactly one outbox event per settled booking, or a `seats.released` its cause cannot
    * explain: more than one per flow, a review one on a booking not under review, or an unknown
-   * cause.
+   * cause. The row carries a count per kind, so a failure names which one is off.
    */
   outboxMismatch: unknown[];
   /** A REFUND_REQUIRED payment without its event, or without a SUCCESS payment beside it. */
@@ -87,8 +89,17 @@ export async function paymentViolations(prisma: PrismaClient): Promise<PaymentVi
       WHERE p.status = 'SUCCESS' AND b.status NOT IN ('CONFIRMED', 'NEEDS_REVIEW')`,
     q`SELECT ss.seat_id FROM showtime_seats ss JOIN bookings b ON b.id = ss.booking_id
       WHERE ss.status = 'HELD' AND b.status IN ('EXPIRED', 'CONFIRMED', 'NEEDS_REVIEW')`,
-    q`SELECT b.id, b.status::text AS status FROM bookings b
-      LEFT JOIN outbox_events o ON o.aggregate_id = b.id::text
+    q`SELECT b.id, b.status::text AS status,
+             count(o.id) FILTER (WHERE o.type = 'booking.confirmed')::int AS confirmed,
+             count(o.id) FILTER (WHERE o.type = 'booking.needs_review')::int AS review,
+             count(o.id) FILTER (WHERE o.type = 'seats.released'
+               AND o.payload->>'cause' = 'booking.needs_review')::int AS released_by_review,
+             count(o.id) FILTER (WHERE o.type = 'seats.released'
+               AND o.payload->>'cause' = 'booking.expired')::int AS released_by_expiry,
+             count(o.id) FILTER (WHERE o.type = 'seats.released'
+               AND coalesce(o.payload->>'cause', '')
+                     NOT IN ('booking.needs_review', 'booking.expired'))::int AS released_other
+      FROM bookings b LEFT JOIN outbox_events o ON o.aggregate_id = b.id::text
       GROUP BY b.id, b.status
       HAVING count(o.id) FILTER (WHERE o.type = 'booking.confirmed')
                <> CASE WHEN b.status = 'CONFIRMED' THEN 1 ELSE 0 END

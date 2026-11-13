@@ -5,13 +5,13 @@ import { randomUUID } from 'node:crypto';
 import { AccessTokenIssuer } from '../../src/modules/auth/tokens/access-token.issuer';
 import type { ExpireOutcome } from '../../src/modules/bookings/expire-booking';
 import { VnpayService } from '../../src/modules/payment/vnpay/vnpay.service';
-import { formatServerErrors } from '../support/server-errors';
-import { ipnClient, type IpnOutcome, tallyIpn } from './support/ipn-client';
 import {
   formatPaymentViolations,
   NO_PAYMENT_VIOLATIONS,
   paymentViolations,
-} from './support/payment-checks';
+} from '../support/payment-invariants';
+import { formatServerErrors } from '../support/server-errors';
+import { ipnClient, type IpnOutcome, tallyIpn } from './support/ipn-client';
 import { type PoolUsage, samplePool } from './support/pool-sampler';
 import { random } from './support/random';
 import {
@@ -31,10 +31,11 @@ import { percentile, writeReport } from './support/stats';
  * and one racing the booking expiry.
  *
  * Every case asserts the **final state in the database**, not the answer: the whole-database rules
- * of `support/payment-checks.ts` (one live ticket per seat, a CONFIRMED booking owning all of its
- * seats SOLD, a consistent booking/seat/payment triple, exactly one outbox event per settled
- * booking) are checked after each case and after each round of the race. An IPN that answers `00`
- * while leaving two tickets on one seat is a failure however right its answer looked.
+ * of `test/support/payment-invariants.ts` (one live ticket per seat, a CONFIRMED booking owning
+ * all of its seats SOLD, a consistent booking/seat/payment triple, exactly one outbox event per
+ * settled booking) are checked after each case and after each round of the race, the same set
+ * `payment-ipn.int-spec.ts` checks. An IPN that answers `00` while leaving two tickets on one
+ * seat is a failure however right its answer looked.
  *
  * No request leaves the machine: the IPNs are built here and signed with this suite's own test
  * secret, exactly as `payment-ipn.int-spec.ts` and `vnpay-ipn.spec.ts` do (the sandbox credentials

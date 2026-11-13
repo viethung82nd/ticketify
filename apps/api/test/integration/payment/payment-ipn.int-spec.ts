@@ -27,6 +27,7 @@ import { SeatEvents } from '../../../src/modules/realtime/seat-events';
 import { appTestEnv } from '../../support/app-env';
 import { createTestDatabase, type TestDatabase } from '../../support/database';
 import { bodyOf, errorOf } from '../../support/http';
+import { NO_PAYMENT_VIOLATIONS, paymentViolations } from '../../support/payment-invariants';
 import { createTestRedis, type TestRedis } from '../../support/redis';
 import { captureServerErrors, formatServerErrors } from '../../support/server-errors';
 
@@ -378,118 +379,15 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
         ),
     );
 
-  /**
-   * The rules that must hold after every test and every race round, over the whole database:
-   * one live ticket per seat; a CONFIRMED booking owns all of its seats SOLD and one ticket per
-   * seat; a SOLD seat belongs to a CONFIRMED/NEEDS_REVIEW booking; tickets only for CONFIRMED
-   * bookings; a SUCCESS payment only for CONFIRMED/NEEDS_REVIEW; no seat HELD by an EXPIRED,
-   * CONFIRMED or NEEDS_REVIEW booking (a booking sent to review releases its own seats); one outbox
-   * event per CONFIRMED / NEEDS_REVIEW booking and none for others; at most one seats.released
-   * per cause per booking — `booking.needs_review` only for a booking under review,
-   * `booking.expired` at most once because a booking expires once (ROADMAP 4.1) — and no other
-   * cause; a REFUND_REQUIRED payment exactly when there is one payment.refund_required event for
-   * it, and only next to a SUCCESS payment of its booking.
-   *
-   * The same rules live in `test/scenarios/support/payment-checks.ts` for scenario C. The two
-   * drifted once — 4.1 taught this copy that `expireBooking` also writes `seats.released` while
-   * 3.9 wrote the other copy from the older rule, and the merge of the two branches broke
-   * scenario C — so change both together.
-   */
-  async function violations() {
-    const q = <T>(sql: TemplateStringsArray) => db.prisma.$queryRaw<T[]>(sql);
-    const [
-      duplicateTickets,
-      confirmedNotSold,
-      soldWithoutPaidBooking,
-      ticketsOfUnconfirmed,
-      ticketCountMismatch,
-      successNotSettled,
-      heldByOver,
-      outboxMismatch,
-      refundMismatch,
-    ] = await Promise.all([
-      q`SELECT showtime_id, seat_id, count(*)::int AS n FROM tickets WHERE status <> 'VOID'
-        GROUP BY showtime_id, seat_id HAVING count(*) > 1`,
-      q`SELECT b.id, bs.seat_id FROM bookings b
-        JOIN booking_seats bs ON bs.booking_id = b.id
-        JOIN showtime_seats ss ON ss.showtime_id = bs.showtime_id AND ss.seat_id = bs.seat_id
-        WHERE b.status = 'CONFIRMED' AND (ss.status <> 'SOLD' OR ss.booking_id IS DISTINCT FROM b.id)`,
-      q`SELECT ss.showtime_id, ss.seat_id FROM showtime_seats ss
-        LEFT JOIN bookings b ON b.id = ss.booking_id
-        WHERE ss.status = 'SOLD' AND (b.id IS NULL OR b.status NOT IN ('CONFIRMED', 'NEEDS_REVIEW'))`,
-      q`SELECT t.id FROM tickets t JOIN bookings b ON b.id = t.booking_id
-        WHERE b.status <> 'CONFIRMED'`,
-      q`SELECT b.id FROM bookings b WHERE b.status = 'CONFIRMED'
-        AND (SELECT count(*) FROM tickets t WHERE t.booking_id = b.id AND t.status <> 'VOID')
-          <> (SELECT count(*) FROM booking_seats bs WHERE bs.booking_id = b.id)`,
-      q`SELECT p.id FROM payments p JOIN bookings b ON b.id = p.booking_id
-        WHERE p.status = 'SUCCESS' AND b.status NOT IN ('CONFIRMED', 'NEEDS_REVIEW')`,
-      q`SELECT ss.seat_id FROM showtime_seats ss JOIN bookings b ON b.id = ss.booking_id
-        WHERE ss.status = 'HELD' AND b.status IN ('EXPIRED', 'CONFIRMED', 'NEEDS_REVIEW')`,
-      q`SELECT b.id, b.status::text AS status,
-               count(o.id) FILTER (WHERE o.type = 'booking.confirmed')::int AS confirmed,
-               count(o.id) FILTER (WHERE o.type = 'booking.needs_review')::int AS review,
-               count(o.id) FILTER (WHERE o.type = 'seats.released'
-                 AND o.payload->>'cause' = 'booking.needs_review')::int AS released_by_review,
-               count(o.id) FILTER (WHERE o.type = 'seats.released'
-                 AND o.payload->>'cause' = 'booking.expired')::int AS released_by_expiry,
-               count(o.id) FILTER (WHERE o.type = 'seats.released'
-                 AND o.payload->>'cause' NOT IN ('booking.needs_review', 'booking.expired'))::int
-                 AS released_other
-        FROM bookings b LEFT JOIN outbox_events o ON o.aggregate_id = b.id::text
-        GROUP BY b.id, b.status
-        HAVING count(o.id) FILTER (WHERE o.type = 'booking.confirmed')
-                 <> CASE WHEN b.status = 'CONFIRMED' THEN 1 ELSE 0 END
-            OR count(o.id) FILTER (WHERE o.type = 'booking.needs_review')
-                 <> CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END
-            OR count(o.id) FILTER (WHERE o.type = 'seats.released'
-                 AND o.payload->>'cause' = 'booking.needs_review')
-                 > CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END
-            OR count(o.id) FILTER (WHERE o.type = 'seats.released'
-                 AND o.payload->>'cause' = 'booking.expired') > 1
-            OR count(o.id) FILTER (WHERE o.type = 'seats.released'
-                 AND coalesce(o.payload->>'cause', '')
-                       NOT IN ('booking.needs_review', 'booking.expired')) > 0`,
-      q`SELECT p.id FROM payments p
-        WHERE (SELECT count(*) FROM outbox_events o
-               WHERE o.aggregate_id = p.id::text AND o.type = 'payment.refund_required')
-                <> CASE WHEN p.status = 'REFUND_REQUIRED' THEN 1 ELSE 0 END
-           OR (p.status = 'REFUND_REQUIRED' AND NOT EXISTS (
-                SELECT 1 FROM payments s
-                WHERE s.booking_id = p.booking_id AND s.status = 'SUCCESS'))`,
-    ]);
-    return {
-      duplicateTickets,
-      confirmedNotSold,
-      soldWithoutPaidBooking,
-      ticketsOfUnconfirmed,
-      ticketCountMismatch,
-      successNotSettled,
-      heldByOver,
-      outboxMismatch,
-      refundMismatch,
-    };
-  }
-
-  const NO_VIOLATIONS = {
-    duplicateTickets: [],
-    confirmedNotSold: [],
-    soldWithoutPaidBooking: [],
-    ticketsOfUnconfirmed: [],
-    ticketCountMismatch: [],
-    successNotSettled: [],
-    heldByOver: [],
-    outboxMismatch: [],
-    refundMismatch: [],
-  };
-
   const deadlocks = async () => {
     const [row] = await db.prisma.$queryRaw<{ deadlocks: number }[]>`
       SELECT deadlocks::int AS deadlocks FROM pg_stat_database WHERE datname = current_database()`;
     return row?.deadlocks ?? 0;
   };
 
-  afterEach(async () => expect(await violations()).toEqual(NO_VIOLATIONS));
+  // After every test, every rule in test/support/payment-invariants.ts must hold over the whole
+  // database — the same set scenario C asserts after each of its rounds.
+  afterEach(async () => expect(await paymentViolations(db.prisma)).toEqual(NO_PAYMENT_VIOLATIONS));
 
   // ─── One test per row of the IPN table ───
 
@@ -1229,7 +1127,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
             expect(state.seats).toEqual(seatsOf(paid, 'HELD', paid.booking.id));
             expect(state.tickets).toEqual([]);
           }
-          expect(await violations()).toEqual(NO_VIOLATIONS);
+          expect(await paymentViolations(db.prisma)).toEqual(NO_PAYMENT_VIOLATIONS);
         }
 
         await pause(1_500);
@@ -1289,7 +1187,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
           expect(state.seats).toEqual(seatsOf(paid, 'SOLD', paid.booking.id));
           expect(state.tickets).toHaveLength(2);
           expect(Boolean(reclaimed)).toBe(expired.outcome === 'expired');
-          expect(await violations()).toEqual(NO_VIOLATIONS);
+          expect(await paymentViolations(db.prisma)).toEqual(NO_PAYMENT_VIOLATIONS);
         }
 
         await pause(1_500);
@@ -1387,7 +1285,7 @@ describe('VNPay IPN — GET /payments/vnpay/ipn (real Postgres + Redis)', () => 
               rivalSeats.map(() => ({ status: 'HELD', bookingId: rivalBooking.id })),
             );
           }
-          expect(await violations()).toEqual(NO_VIOLATIONS);
+          expect(await paymentViolations(db.prisma)).toEqual(NO_PAYMENT_VIOLATIONS);
         }
 
         await pause(1_500);
