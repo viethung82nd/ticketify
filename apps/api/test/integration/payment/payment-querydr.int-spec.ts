@@ -24,6 +24,7 @@ import { REALTIME_CHANNEL_KEY } from '../../../src/modules/realtime/realtime-red
 import { appTestEnv } from '../../support/app-env';
 import { createTestDatabase, type TestDatabase } from '../../support/database';
 import { bodyOf } from '../../support/http';
+import { NO_PAYMENT_VIOLATIONS, paymentViolations } from '../../support/payment-invariants';
 import { createTestRedis, type TestRedis } from '../../support/redis';
 
 /**
@@ -346,63 +347,9 @@ describe('querydr in the booking expiry (real Postgres + Redis, VNPay stubbed)',
     return { booking, payments, seats, tickets, events };
   }
 
-  /**
-   * Whole-database rules that must hold after every test here: one live ticket per seat; a
-   * CONFIRMED booking owns every one of its seats SOLD; a SOLD seat belongs to a settled booking;
-   * no seat left HELD by a booking that is over; a SUCCESS payment only next to a settled booking;
-   * one outbox event per settled booking.
-   */
-  async function violations() {
-    const q = <T>(sql: TemplateStringsArray) => db.prisma.$queryRaw<T[]>(sql);
-    const [
-      duplicateTickets,
-      confirmedNotSold,
-      soldWithoutPaidBooking,
-      heldByOver,
-      successNotSettled,
-      outboxMismatch,
-    ] = await Promise.all([
-      q`SELECT showtime_id, seat_id FROM tickets WHERE status <> 'VOID'
-          GROUP BY showtime_id, seat_id HAVING count(*) > 1`,
-      q`SELECT b.id FROM bookings b
-          JOIN booking_seats bs ON bs.booking_id = b.id
-          JOIN showtime_seats ss ON ss.showtime_id = bs.showtime_id AND ss.seat_id = bs.seat_id
-          WHERE b.status = 'CONFIRMED'
-            AND (ss.status <> 'SOLD' OR ss.booking_id IS DISTINCT FROM b.id)`,
-      q`SELECT ss.seat_id FROM showtime_seats ss LEFT JOIN bookings b ON b.id = ss.booking_id
-          WHERE ss.status = 'SOLD'
-            AND (b.id IS NULL OR b.status NOT IN ('CONFIRMED', 'NEEDS_REVIEW'))`,
-      q`SELECT ss.seat_id FROM showtime_seats ss JOIN bookings b ON b.id = ss.booking_id
-          WHERE ss.status = 'HELD' AND b.status IN ('EXPIRED', 'CONFIRMED', 'NEEDS_REVIEW')`,
-      q`SELECT p.id FROM payments p JOIN bookings b ON b.id = p.booking_id
-          WHERE p.status = 'SUCCESS' AND b.status NOT IN ('CONFIRMED', 'NEEDS_REVIEW')`,
-      q`SELECT b.id FROM bookings b LEFT JOIN outbox_events o ON o.aggregate_id = b.id::text
-          GROUP BY b.id, b.status
-          HAVING count(o.id) FILTER (WHERE o.type = 'booking.confirmed')
-                   <> CASE WHEN b.status = 'CONFIRMED' THEN 1 ELSE 0 END
-              OR count(o.id) FILTER (WHERE o.type = 'booking.needs_review')
-                   <> CASE WHEN b.status = 'NEEDS_REVIEW' THEN 1 ELSE 0 END`,
-    ]);
-    return {
-      duplicateTickets,
-      confirmedNotSold,
-      soldWithoutPaidBooking,
-      heldByOver,
-      successNotSettled,
-      outboxMismatch,
-    };
-  }
-
-  const NO_VIOLATIONS = {
-    duplicateTickets: [],
-    confirmedNotSold: [],
-    soldWithoutPaidBooking: [],
-    heldByOver: [],
-    successNotSettled: [],
-    outboxMismatch: [],
-  };
-
-  afterEach(async () => expect(await violations()).toEqual(NO_VIOLATIONS));
+  // After every test, every rule in test/support/payment-invariants.ts must hold over the whole
+  // database — the same set payment-ipn and scenario C assert.
+  afterEach(async () => expect(await paymentViolations(db.prisma)).toEqual(NO_PAYMENT_VIOLATIONS));
 
   /** Moves the clock past holdUntil and expires the booking, as the job would. */
   async function expireAfterHold(bookingId: string): Promise<ExpireOutcome> {

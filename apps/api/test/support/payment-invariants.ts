@@ -5,15 +5,15 @@ import type { PrismaClient } from '../../src/generated/prisma/client';
  * holds have run (ROADMAP 3.4), as named violations so a failure says what broke. Each query
  * returns the offending rows, so "all good" is every list empty.
  *
- * Both `payment-ipn.int-spec.ts` (after each test and each race round) and scenario C assert on
- * these rather than on responses: an IPN that answers `00` while leaving two live tickets on one
- * seat is a failure, however correct its answer looked.
+ * `payment-ipn.int-spec.ts` (after each test and each race round), `payment-querydr.int-spec.ts`
+ * (after each test) and scenario C assert on these rather than on responses: an IPN that answers
+ * `00` while leaving two live tickets on one seat is a failure, however correct its answer looked.
  *
- * These queries used to be duplicated in the two suites, and the copies drifted: 4.1 taught the
+ * These queries used to be copied into each suite, and the copies drifted: 4.1 taught the
  * integration copy that `expireBooking` also writes `seats.released` while 3.9 wrote the scenario
  * copy from the older rule, and because the two branches touched different files git merged them
  * without a conflict — `main` went red on a rule neither commit got wrong. Hence one copy, here in
- * `test/support`, which both suites already import from.
+ * `test/support`, which every suite already imports from.
  */
 export interface PaymentViolations {
   /** Two live tickets for one seat. The partial unique index should make this impossible. */
