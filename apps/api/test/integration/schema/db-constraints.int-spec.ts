@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { PrismaClient } from '../../../src/generated/prisma/client';
+import type { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { createTestDatabase, type TestDatabase } from '../../support/database';
 import { expectViolation, SQLSTATE } from '../../support/db-errors';
 import { createFixtures, type Fixtures } from '../../support/fixtures';
@@ -403,6 +403,98 @@ describe('database constraints (raw SQL migration)', () => {
           sqlState: SQLSTATE.uniqueViolation,
           constraint: 'payments_vnp_transaction_no_key',
         });
+      });
+    });
+  });
+
+  describe('vouchers (ROADMAP 5.1)', () => {
+    let n = 0;
+    /** A valid voucher with a fresh code; `data` overrides any field. */
+    const voucher = (data: Partial<Prisma.VoucherUncheckedCreateInput> = {}) =>
+      prisma.voucher.create({
+        data: {
+          code: `DB${String(++n).padStart(6, '0')}`,
+          discountType: 'PERCENT',
+          discountValue: 10,
+          startsAt: new Date('2026-11-01T00:00:00Z'),
+          endsAt: new Date('2026-12-01T00:00:00Z'),
+          ...data,
+        },
+      });
+    const check = (constraint: string) => ({ sqlState: SQLSTATE.checkViolation, constraint });
+
+    it.each([
+      ['lower case', 'summer10'],
+      ['too short', 'AB1'],
+      ['too long', 'A'.repeat(21)],
+      ['a hyphen', 'SUMMER-10'],
+      ['a Vietnamese letter', 'GIẢMGIÁ'],
+    ])('vouchers_code_format_check rejects a code with %s', async (_case, code) => {
+      await expectViolation(voucher({ code }), check('vouchers_code_format_check'));
+    });
+
+    it.each([
+      ['PERCENT 0', { discountType: 'PERCENT', discountValue: 0 }],
+      ['PERCENT 101', { discountType: 'PERCENT', discountValue: 101 }],
+      ['PERCENT with a zero cap', { discountType: 'PERCENT', maxDiscount: 0 }],
+      ['FIXED 0', { discountType: 'FIXED', discountValue: 0 }],
+      ['FIXED with a cap', { discountType: 'FIXED', discountValue: 20_000, maxDiscount: 20_000 }],
+    ] as const)('vouchers_discount_check rejects %s', async (_case, data) => {
+      await expectViolation(voucher(data), check('vouchers_discount_check'));
+    });
+
+    it.each([
+      ['a negative min subtotal', { minSubtotal: -1 }],
+      ['a usage limit of 0', { usageLimit: 0 }],
+      ['a per-user limit of 0', { perUserLimit: 0 }],
+    ])('vouchers_limits_check rejects %s', async (_case, data) => {
+      await expectViolation(voucher(data), check('vouchers_limits_check'));
+    });
+
+    it('vouchers_time_range_check rejects a voucher that ends when it starts', async () => {
+      const at = new Date('2026-11-01T00:00:00Z');
+      await expectViolation(
+        voucher({ startsAt: at, endsAt: at }),
+        check('vouchers_time_range_check'),
+      );
+    });
+
+    it('accepts every valid shape', async () => {
+      await expect(
+        Promise.all([
+          voucher({ discountValue: 1 }),
+          voucher({ discountValue: 100, maxDiscount: 50_000 }),
+          voucher({ discountType: 'FIXED', discountValue: 20_000, minSubtotal: 100_000 }),
+          voucher({ usageLimit: 1, perUserLimit: 1 }),
+          voucher({ code: 'A'.repeat(20) }),
+        ]),
+      ).resolves.toHaveLength(5);
+    });
+
+    it('rejects a second voucher usage for one booking (voucher_usages_booking_id_key)', async () => {
+      const { user, booking } = await seatContext();
+      const [first, second] = await Promise.all([voucher(), voucher()]);
+      const usage = (voucherId: string) =>
+        prisma.voucherUsage.create({ data: { voucherId, userId: user.id, bookingId: booking.id } });
+      await usage(first.id);
+
+      await expectViolation(usage(second.id), {
+        sqlState: SQLSTATE.uniqueViolation,
+        constraint: 'voucher_usages_booking_id_key',
+      });
+    });
+
+    it('refuses to delete a voucher that a booking used (ON DELETE RESTRICT)', async () => {
+      const { user, booking } = await seatContext();
+      const used = await voucher();
+      await prisma.voucherUsage.create({
+        data: { voucherId: used.id, userId: user.id, bookingId: booking.id, status: 'RELEASED' },
+      });
+
+      await expectViolation(prisma.voucher.delete({ where: { id: used.id } }), {
+        sqlState: '23503', // foreign_key_violation
+
+        constraint: 'voucher_usages_voucher_id_fkey',
       });
     });
   });

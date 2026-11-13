@@ -18,6 +18,10 @@
 | `showtime_seats_sold_check` | `showtime_seats` | `SOLD ⇒ booking_id IS NOT NULL` (a sold seat always traces back to the paying booking) |
 | `tickets_showtime_id_seat_id_live_key` | `tickets` | `UNIQUE (showtime_id, seat_id) WHERE status <> 'VOID'` |
 | `payments_booking_id_success_key` | `payments` | `UNIQUE (booking_id) WHERE status = 'SUCCESS'` |
+| `vouchers_code_format_check` | `vouchers` | `code ~ '^[A-Z0-9]{4,20}$'` — stored upper-case, so the plain unique index on `code` is case-insensitive in effect (`*_vouchers` migration) |
+| `vouchers_discount_check` | `vouchers` | `PERCENT` ⇒ `discount_value` 1–100 and `max_discount` NULL or > 0; `FIXED` ⇒ `discount_value` > 0 and `max_discount` NULL |
+| `vouchers_limits_check` | `vouchers` | `min_subtotal >= 0`; `usage_limit`, `per_user_limit` NULL (unlimited) or > 0 |
+| `vouchers_time_range_check` | `vouchers` | `ends_at > starts_at` |
 
 Also relevant, but declared in `schema.prisma` (so Prisma manages them):
 

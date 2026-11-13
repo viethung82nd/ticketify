@@ -70,3 +70,15 @@ export const OutboxStatus = {
   FAILED: 'FAILED',
 } as const;
 export type OutboxStatus = ValueOf<typeof OutboxStatus>;
+
+/** PERCENT: 1–100 % of the subtotal, optionally capped. FIXED: VND off the subtotal. */
+export const VoucherDiscountType = { PERCENT: 'PERCENT', FIXED: 'FIXED' } as const;
+export type VoucherDiscountType = ValueOf<typeof VoucherDiscountType>;
+
+/** RESERVED ──► CONSUMED (booking confirmed) | RELEASED (booking expired) */
+export const VoucherUsageStatus = {
+  RESERVED: 'RESERVED',
+  CONSUMED: 'CONSUMED',
+  RELEASED: 'RELEASED',
+} as const;
+export type VoucherUsageStatus = ValueOf<typeof VoucherUsageStatus>;
