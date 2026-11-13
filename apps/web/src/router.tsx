@@ -9,6 +9,7 @@ import { AdminPricingPage } from '@/pages/admin/admin-pricing-page';
 import { AdminRoomsPage } from '@/pages/admin/admin-rooms-page';
 import { AdminReviewPage } from '@/pages/admin/admin-review-page';
 import { AdminShowtimesPage } from '@/pages/admin/admin-showtimes-page';
+import { AdminVouchersPage } from '@/pages/admin/admin-vouchers-page';
 import { EditMoviePage, NewMoviePage } from '@/pages/admin/movie-form-page';
 import { RoomEditorPage } from '@/pages/admin/room-editor-page';
 import { NewRoomPage } from '@/pages/admin/room-form-page';
@@ -58,6 +59,7 @@ export const router = createBrowserRouter([
           { path: 'admin/showtimes', element: <AdminShowtimesPage /> },
           { path: 'admin/showtimes/new', element: <NewShowtimePage /> },
           { path: 'admin/combos', element: <AdminCombosPage /> },
+          { path: 'admin/vouchers', element: <AdminVouchersPage /> },
           { path: 'admin/review', element: <AdminReviewPage /> },
         ],
       },
