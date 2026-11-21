@@ -13,10 +13,13 @@ Three kinds of test, three Jest projects. The suffix is what selects a file, so 
 | Kind | Directory | File suffix | Config | Opt-in flag | Run by |
 |---|---|---|---|---|---|
 | unit | `apps/api/src/**`, `apps/api/prisma/**` (next to the code) | `*.spec.ts` | `jest.unit.config.js` | — | `pnpm test:unit`, `ci.yml` |
+| web unit (Vitest + Testing Library, jsdom) | `apps/web/src/**` (next to the code) | `*.test.ts`, `*.test.tsx` | `test` block of `apps/web/vite.config.ts` | — | `pnpm test:unit`, `ci.yml` |
 | integration | `apps/api/test/integration/<domain>/` | `*.int-spec.ts` | `jest.integration.config.js` | — | `pnpm test:integration`, `ci.yml` |
 | concurrency scenario (A, B, C) | `apps/api/test/scenarios/` | `*.spec.ts` | `jest.scenarios.config.js` | `RUN_SCENARIO_TESTS=1` | `booking-scenarios.yml` only |
 
 Integration suites are grouped by domain: `auth`, `catalog`, `booking`, `payment`, `voucher`, `delivery`, `infra`, `platform`, `schema`. Two suites stay at the top of `test/integration/` instead, because `scenario-d.yml` and `worker-shutdown.yml` name them verbatim in their `paths:` filters: `scenario-d.int-spec.ts` and `worker-shutdown.int-spec.ts`. Moving either one means editing its workflow in the same commit, or the workflow stops firing without any error.
+
+Web unit tests (5.7) import `describe`/`it`/`expect`/`vi` from `vitest` (no globals); `src/test/setup.ts` adds the jest-dom matchers and unmounts after each test. Query the way a user perceives the page: by role and accessible name or label (`getByRole`, `getByLabelText`), not by class. Drive it with `@testing-library/user-event`, except a `type="date"` input, which takes a whole value through `fireEvent.change`. Mock at the edge — the auth API module, or `apiClient` through `vi.hoisted` (a mocked method read off `apiClient` trips `unbound-method`) — so the page, its form rules and the shared schemas run for real. `src/test/seat-fixtures.ts` draws seats from a picture of the room, and `src/test/api-error.ts` builds the axios error of an API error answer.
 
 Shared, not owned by one project: `test/support/` (helpers: app env, auth, database, redis, http, fixtures) and `test/setup/` (containers and the template database). `test/setup/` is used by both the integration and the scenarios project — `test/scenarios/support/global-setup.ts` wraps it and only runs it when scenarios are enabled — so it stays outside `test/integration/`.
 
