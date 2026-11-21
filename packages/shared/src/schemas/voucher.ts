@@ -27,6 +27,16 @@ export const VOUCHER_LIMITS = {
   perUserLimitMax: 100,
   /** `perUserLimit` when a create request leaves it out (`null` = unlimited). */
   perUserLimitDefault: 1,
+  /**
+   * VND a booking with a voucher still costs at least (ROADMAP 5.2, awaiting the owner's review).
+   * The discount is capped at `subtotal − payableTotalMin`, so a voucher never leaves a booking
+   * that `POST /payments/vnpay` cannot charge (it refuses a total of 0 with
+   * `409 BOOKING_NOT_PAYABLE`, and the booking would sit PENDING until it expired). A subtotal of
+   * `payableTotalMin` or less gets no voucher at all (`422 VOUCHER_MIN_SUBTOTAL_NOT_MET`).
+   * VNPay's documentation (`pay.html`, `bang-ma-loi`, read 21/11/2026) states no minimum amount;
+   * 5 000 ₫ is a conservative floor until the sandbox (ROADMAP 3.6) shows what it accepts.
+   */
+  payableTotalMin: 5_000,
 } as const;
 
 /** Upper-case letters and digits only; what the user typed is trimmed and upper-cased first. */
@@ -83,7 +93,11 @@ export function voucherRuleErrors(voucher: VoucherRuleInput): { field: string; m
 
 // ─── Requests ───
 
-const codeSchema = z
+/**
+ * A voucher code as typed: trimmed and upper-cased, then checked for format. The admin form and
+ * `POST /bookings` (`voucherCode`) share it.
+ */
+export const voucherCodeSchema = z
   .string({ error: 'Vui lòng nhập mã voucher' })
   .transform(normalizeVoucherCode)
   .pipe(
@@ -151,7 +165,7 @@ const discountTypeSchema = z.enum([VoucherDiscountType.PERCENT, VoucherDiscountT
 });
 
 const voucherFields = {
-  code: codeSchema,
+  code: voucherCodeSchema,
   description: descriptionSchema.optional(),
   discountType: discountTypeSchema,
   discountValue: discountValueSchema,
@@ -186,7 +200,7 @@ export type CreateVoucherRequest = z.input<typeof createVoucherRequestSchema>;
  * (`409 VOUCHER_IN_USE`).
  */
 export const updateVoucherRequestSchema = z.object({
-  code: codeSchema.optional(),
+  code: voucherCodeSchema.optional(),
   description: descriptionSchema.optional(),
   discountType: discountTypeSchema.optional(),
   discountValue: discountValueSchema.optional(),
@@ -231,6 +245,17 @@ export const adminVoucherSchema = z.object({
 });
 export type AdminVoucher = z.infer<typeof adminVoucherSchema>;
 
+/** `details` of `422 VOUCHER_NOT_IN_EFFECT` (ISO instants; `endsAt` is exclusive). */
+export const voucherPeriodDetailsSchema = z.object({ startsAt: z.string(), endsAt: z.string() });
+export type VoucherPeriodDetails = z.infer<typeof voucherPeriodDetailsSchema>;
+
+/** `details` of `422 VOUCHER_MIN_SUBTOTAL_NOT_MET` (VND). */
+export const voucherMinSubtotalDetailsSchema = z.object({
+  minSubtotal: z.number().int(),
+  subtotal: z.number().int(),
+});
+export type VoucherMinSubtotalDetails = z.infer<typeof voucherMinSubtotalDetailsSchema>;
+
 /** Machine-readable `code` values of voucher API errors. */
 export const VoucherErrorCode = {
   VOUCHER_NOT_FOUND: 'VOUCHER_NOT_FOUND',
@@ -241,5 +266,28 @@ export const VoucherErrorCode = {
    * `isActive: false`) and its code cannot change. `details.usageCount`.
    */
   VOUCHER_IN_USE: 'VOUCHER_IN_USE',
+
+  // `POST /bookings` with a `voucherCode` (ROADMAP 5.2). Every one of them writes nothing: no
+  // booking, no seat held, no use reserved. 422 = this voucher can never apply to this request as
+  // it stands; 409 = it could, but its uses are taken right now (one may come back when a booking
+  // holding it expires), like `SEAT_UNAVAILABLE`.
+
+  /**
+   * 422: no voucher has this code, or it is switched off. The two are not told apart, so codes
+   * cannot be probed for ones that exist (like `COMBO_NOT_AVAILABLE`).
+   */
+  VOUCHER_NOT_AVAILABLE: 'VOUCHER_NOT_AVAILABLE',
+  /** 422: `now` is before `startsAt` or at/after `endsAt`; `details` = voucherPeriodDetails. */
+  VOUCHER_NOT_IN_EFFECT: 'VOUCHER_NOT_IN_EFFECT',
+  /**
+   * 422: the subtotal is below what the voucher needs; `details.minSubtotal` is the smallest
+   * subtotal that would do — the voucher's own `minSubtotal`, or just above
+   * `VOUCHER_LIMITS.payableTotalMin` when that is higher — and `details.subtotal` this one.
+   */
+  VOUCHER_MIN_SUBTOTAL_NOT_MET: 'VOUCHER_MIN_SUBTOTAL_NOT_MET',
+  /** 409: every use of the voucher is reserved or consumed; `details.usageLimit`. */
+  VOUCHER_USAGE_LIMIT_REACHED: 'VOUCHER_USAGE_LIMIT_REACHED',
+  /** 409: this user has reserved or consumed all their uses; `details.perUserLimit`. */
+  VOUCHER_USER_LIMIT_REACHED: 'VOUCHER_USER_LIMIT_REACHED',
 } as const;
 export type VoucherErrorCode = (typeof VoucherErrorCode)[keyof typeof VoucherErrorCode];
