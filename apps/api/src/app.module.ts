@@ -20,6 +20,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PaymentsModule } from './modules/payment/payments.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
 import { ShowtimesModule } from './modules/showtimes/showtimes.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
@@ -44,6 +45,7 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     ShowtimesModule,
     CombosModule,
     VouchersModule,
+    ReportsModule,
     BookingsModule,
     PaymentsModule,
     RealtimeModule,
