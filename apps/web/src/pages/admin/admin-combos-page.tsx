@@ -245,7 +245,8 @@ function ComboRow({ combo, onDelete }: { combo: AdminCombo; onDelete: () => void
           variant="ghost"
           size="sm"
           aria-pressed={combo.isActive}
-          aria-label={`${combo.isActive ? 'Tắt' : 'Bật'} combo ${combo.name}`}
+          // Visible text first (WCAG 2.5.3); aria-pressed says whether it is on.
+          aria-label={`${combo.isActive ? 'Đang bán' : 'Đã tắt'}: combo ${combo.name}`}
           disabled={toggle.isPending}
           onClick={() => toggle.mutate()}
           className={cn(

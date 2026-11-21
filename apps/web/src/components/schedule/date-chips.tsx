@@ -21,7 +21,7 @@ export function DateChips({
   label: string;
 }) {
   return (
-    <div role="group" aria-label={label} className="flex gap-2 overflow-x-auto pb-1">
+    <div role="group" aria-label={label} className="relative flex gap-2 overflow-x-auto pb-1">
       {dates.map((date) => {
         const { weekday, day } = dayChipLabel(date);
         const isSelected = date === selected;
@@ -31,7 +31,6 @@ export function DateChips({
             key={date}
             type="button"
             aria-pressed={isSelected}
-            aria-label={`${longDayLabel(date)}${date === today ? ' (hôm nay)' : ''}${empty ? ', không có suất' : ''}`}
             data-date={date}
             onClick={() => onSelect(date)}
             className={cn(
@@ -44,6 +43,11 @@ export function DateChips({
           >
             <span className="text-xs font-medium">{date === today ? 'Hôm nay' : weekday}</span>
             <span className="text-base font-bold tabular-nums">{day}</span>
+            {/* The name starts with the visible text (WCAG 2.5.3, axe label-content-name-mismatch),
+                then spells the day out for a screen reader. */}
+            <span className="sr-only">
+              {`, ${longDayLabel(date)}${empty ? ', không có suất' : ''}`}
+            </span>
           </button>
         );
       })}
