@@ -323,7 +323,7 @@ Xác thực JWT khi handshake.
 
 - **Stack**: Vite + TypeScript, React Router, TanStack Query, Zustand, socket.io-client, Tailwind + shadcn/ui, react-hook-form + zod.
 - **User**: danh sách phim, chi tiết + lịch chiếu, **sơ đồ ghế realtime** (đếm ngược theo `expiresAt`), chọn combo, ô nhập mã giảm giá và bảng chi tiết giá (từng ghế, combo, giảm giá; 5.4), thanh toán, kết quả, lịch sử vé + tải PDF, chuông thông báo.
-- **Admin**: CRUD phim, phòng + sơ đồ ghế, suất chiếu, bảng giá, ngày lễ, combo, (voucher); danh sách đơn; **danh sách `NEEDS_REVIEW`**; Bull Board.
+- **Admin**: CRUD phim, phòng + sơ đồ ghế, suất chiếu, bảng giá, ngày lễ, combo, (voucher); danh sách đơn có bộ lọc và dashboard (doanh thu theo ngày theo giờ xác nhận, tỷ lệ lấp đầy theo suất; 5.5, định nghĩa ở ROADMAP "Đã chốt"); **danh sách `NEEDS_REVIEW`**; Bull Board.
 - **Staff**: trang quét QR (`html5-qrcode`) + nhập mã thủ công, check-in từng vé.
 
 ## 10. Testing

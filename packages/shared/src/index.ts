@@ -16,3 +16,4 @@ export * from './schemas/admin-review.js';
 export * from './schemas/notification.js';
 export * from './schemas/ticket.js';
 export * from './schemas/voucher.js';
+export * from './schemas/admin-report.js';
