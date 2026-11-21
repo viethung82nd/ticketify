@@ -288,6 +288,7 @@ Lớp chặn cuối: partial unique index trên `Ticket(showtimeId, seatId)`. N�
 - Server luôn tự tính giảm giá. Client chỉ gửi mã voucher.
 - **Bổ sung 22/11/2026 (5.2)**: đã làm như trên. Vị trí khóa voucher và lý do ở mục 4 (luồng giữ ghế). Xác nhận và hết hạn **không khóa voucher**: `RESERVED → CONSUMED` không đổi số lượt đã tính, `→ RELEASED` chỉ làm giảm; cả hai chỉ cập nhật dòng usage của đơn, mà dòng đó chỉ bị các luồng đang giữ khóa dòng `bookings` của đơn đụng tới. Ngoại lệ duy nhất làm **tăng** số lượt mà không khóa: IPN đến muộn giành lại ghế cho đơn đã `EXPIRED` (bước 6.3), lượt `RELEASED → CONSUMED`. Lượt `NEEDS_REVIEW` → `RELEASED`. Giảm giá luôn để lại `total ≥ VOUCHER_LIMITS.payableTotalMin`. Ba điểm này là lựa chọn **chờ duyệt**, ghi ở ROADMAP "Đã chốt". Mã lỗi ở CONTRIBUTING.
 - **Bổ sung 22/11/2026 (5.3)**: tranh chấp lượt đã có test (`booking/booking-voucher-race.int-spec.ts`, chạy mỗi PR): nhiều đơn tranh lượt cuối, một user tự đua vượt `perUserLimit` trên nhiều suất, hết hạn/hủy trả lượt trong lúc có người xin, dòng voucher bị khóa quá 2 s (`503`), và client tự gửi giá hay số tiền (`400`, IPN sai số tiền `04`). Không đổi thiết kế.
+- **Bổ sung 22/11/2026 (5.4)**: web gửi mã trong `POST /bookings` và chỉ hiện số tiền giảm sau khi giữ ghế (trang đơn). Không có API xem trước giảm giá (ROADMAP "Đã chốt", chờ duyệt).
 - **Bổ sung 13/11/2026 (5.1, chờ chủ dự án duyệt)**: `Voucher(code, description, discountType PERCENT/FIXED, discountValue, maxDiscount, minSubtotal, usageLimit, perUserLimit, startsAt, endsAt, isActive)`. `code` lưu chữ hoa, unique; `null` ở hai giới hạn = không giới hạn. Voucher đã có đơn dùng thì không xóa và không đổi mã, chỉ tắt. Chi tiết và lý do ở ROADMAP "Đã chốt".
 
 ## 7. Sau thanh toán: giao vé
@@ -321,7 +322,7 @@ Xác thực JWT khi handshake.
 ## 9. Frontend (React)
 
 - **Stack**: Vite + TypeScript, React Router, TanStack Query, Zustand, socket.io-client, Tailwind + shadcn/ui, react-hook-form + zod.
-- **User**: danh sách phim, chi tiết + lịch chiếu, **sơ đồ ghế realtime** (đếm ngược theo `expiresAt`), chọn combo, thanh toán, kết quả, lịch sử vé + tải PDF, chuông thông báo.
+- **User**: danh sách phim, chi tiết + lịch chiếu, **sơ đồ ghế realtime** (đếm ngược theo `expiresAt`), chọn combo, ô nhập mã giảm giá và bảng chi tiết giá (từng ghế, combo, giảm giá; 5.4), thanh toán, kết quả, lịch sử vé + tải PDF, chuông thông báo.
 - **Admin**: CRUD phim, phòng + sơ đồ ghế, suất chiếu, bảng giá, ngày lễ, combo, (voucher); danh sách đơn; **danh sách `NEEDS_REVIEW`**; Bull Board.
 - **Staff**: trang quét QR (`html5-qrcode`) + nhập mã thủ công, check-in từng vé.
 
