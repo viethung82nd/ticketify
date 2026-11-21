@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BookingStatus, SeatType } from '../enums.js';
 import { pageSchema } from './movie.js';
+import { voucherCodeSchema } from './voucher.js';
 
 /** Limits shared by the API DTOs and the web so both validate the same way. */
 export const BOOKING_LIMITS = {
@@ -67,6 +68,11 @@ export const holdBookingRequestSchema = z.object({
       error: 'Mỗi combo chỉ một dòng, tăng số lượng thay vì thêm dòng',
     })
     .default([]),
+  /**
+   * Optional voucher; trimmed and upper-cased like the admin form. The API computes the discount
+   * itself and reserves one use of the voucher in the hold transaction (ROADMAP 5.2).
+   */
+  voucherCode: voucherCodeSchema.optional(),
 });
 export type HoldBookingRequest = z.input<typeof holdBookingRequestSchema>;
 
@@ -132,8 +138,12 @@ export const bookingSchema = z.object({
   combos: z.array(bookingComboSchema),
   /** Seats + combos. */
   subtotal: z.number().int(),
+  /** VND off the subtotal, computed by the API from the voucher at hold time; 0 without one. */
   discount: z.number().int(),
+  /** subtotal − discount: what the customer pays. */
   total: z.number().int(),
+  /** The voucher the booking used (upper case), or null. */
+  voucherCode: z.string().nullable(),
   createdAt: z.string(),
 });
 export type Booking = z.infer<typeof bookingSchema>;

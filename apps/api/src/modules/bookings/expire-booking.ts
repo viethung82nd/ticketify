@@ -6,6 +6,7 @@ import {
   SeatsReleasedCause,
   writeOutboxEvent,
 } from '../../infra/outbox/outbox-events';
+import { releaseVoucherUse } from '../vouchers/voucher-usages';
 
 type Tx = Prisma.TransactionClient;
 
@@ -91,7 +92,8 @@ interface PendingPaymentRow {
  * 1. the booking's PENDING payments `FOR UPDATE` — the IPN takes the payment row first too, so
  *    the two never wait on each other in a cycle; the worker's `lock_timeout` bounds the wait;
  * 2. the booking row `FOR UPDATE SKIP LOCKED` — never waits: whoever got it first does the work;
- * 3. the booking's own HELD seats `FOR UPDATE ORDER BY seat_id`.
+ * 3. the booking's own HELD seats `FOR UPDATE ORDER BY seat_id`;
+ * then its own `voucher_usages` row is updated (RESERVED → RELEASED), never the voucher row.
  * A hold never waits on a lock (NOWAIT) and a showtime cancel never locks `bookings`, so no flow
  * can wait on this one in a cycle.
  *
@@ -201,11 +203,15 @@ export async function expireBooking(
     RETURNING seat_id`;
   const releasedSeatIds = released.map((row) => row.seat_id).sort();
 
-  // 10. One `seats.released` event, in this transaction, only when seats really went back
+  // 10. Its voucher use, if any, goes back (ROADMAP 5.2): RESERVED → RELEASED, whether or not any
+  //     seat was still its own. Only the booking's usage row is updated; the voucher row is not
+  //     locked, since releasing a use can only lower the count a hold checks.
+  await releaseVoucherUse(tx, bookingId, now);
+
+  // 11. One `seats.released` event, in this transaction, only when seats really went back
   //    (ROADMAP 4.1). The relay turns it into the `seat:released` every browser watching the
   //    showtime gets, so the news survives this worker being killed right after the commit. The
   //    caller still emits the same event itself for speed; receiving it twice changes nothing.
-  //    (phase 5) VoucherUsage RESERVED → RELEASED goes here too.
   if (releasedSeatIds.length > 0) {
     await writeOutboxEvent(
       tx,

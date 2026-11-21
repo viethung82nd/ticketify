@@ -344,6 +344,12 @@ export class PaymentService {
               `${result.showtimeId} had started (owner decision pending)`,
           );
         }
+        if (result.voucherUse === 'taken_back') {
+          this.logger.warn(
+            `IPN: booking ${result.bookingId} took back the voucher use its expiry had released, ` +
+              'without checking the voucher limits again (paid at the discounted total)',
+          );
+        }
         return;
       case 'needs_review':
         this.logger.warn(

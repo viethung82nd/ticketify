@@ -37,6 +37,7 @@ const VIEW_INCLUDE = {
     },
   },
   combos: { orderBy: { id: 'asc' } },
+  voucherUsage: { select: { voucher: { select: { code: true } } } },
 } satisfies Prisma.BookingInclude;
 
 type BookingWithLines = Prisma.BookingGetPayload<{ include: typeof VIEW_INCLUDE }>;
@@ -135,6 +136,7 @@ export class BookingViews {
       subtotal: booking.subtotal,
       discount: booking.discount,
       total: booking.total,
+      voucherCode: booking.voucherUsage?.voucher.code ?? null,
       createdAt: booking.createdAt.toISOString(),
     };
   }

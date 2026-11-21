@@ -124,7 +124,7 @@ describe('expireBooking', () => {
       expiredPaymentIds: [],
     });
 
-    const [, , expire, lockSeats, release, outbox] = statements;
+    const [, , expire, lockSeats, release, voucherUse, outbox] = statements;
     expect(expire?.sql).toBe(
       "UPDATE bookings SET status = 'EXPIRED', updated_at = $ WHERE id = $::uuid",
     );
@@ -140,6 +140,13 @@ describe('expireBooking', () => {
         "WHERE booking_id = $::uuid AND status = 'HELD' RETURNING seat_id",
     );
     expect(release?.values).toEqual([BOOKING_ID]);
+    // Its voucher use, if any, goes back; the voucher row itself is never locked (ROADMAP 5.2).
+    expect(voucherUse?.sql).toBe(
+      "UPDATE voucher_usages SET status = 'RELEASED', updated_at = $ " +
+        "WHERE booking_id = $::uuid AND status = 'RESERVED'",
+    );
+    expect(voucherUse?.values).toEqual([now, BOOKING_ID]);
+    expect(statements.some((s) => s.sql.includes('FROM vouchers'))).toBe(false);
     // And one seats.released event, in the same transaction as the release (ROADMAP 4.1).
     expect(outbox?.sql).toBe('INSERT INTO outbox_events');
     expect(outbox?.values[0]).toEqual({
@@ -154,7 +161,7 @@ describe('expireBooking', () => {
       nextRetryAt: now,
       createdAt: now,
     });
-    expect(statements).toHaveLength(6);
+    expect(statements).toHaveLength(7);
   });
 
   it('expired with 0 released seats when another booking already took them all', async () => {
@@ -198,6 +205,7 @@ describe('expireBooking', () => {
       'UPDATE payments',
       'SELECT showtime_seats FOR UPDATE',
       'UPDATE showtime_seats',
+      'UPDATE voucher_usages',
       'INSERT outbox_events',
     ]);
     expect(statements[3]?.sql).toBe(
@@ -282,6 +290,7 @@ describe('expireBooking', () => {
       'UPDATE bookings SET',
       'UPDATE payments SET',
       'UPDATE showtime_seats SET',
+      'UPDATE voucher_usages SET',
       'INSERT INTO outbox_events',
     ]);
   });

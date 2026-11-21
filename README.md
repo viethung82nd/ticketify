@@ -103,18 +103,19 @@ pnpm test:integration
 
 ## Giữ ghế (API)
 
-`POST /bookings` (đăng nhập, header `Idempotency-Key` bắt buộc, 8–128 ký tự `A–Z a–z 0–9 . _ ~ : -`), body `{ showtimeId, seatIds, comboItems? }`:
+`POST /bookings` (đăng nhập, header `Idempotency-Key` bắt buộc, 8–128 ký tự `A–Z a–z 0–9 . _ ~ : -`), body `{ showtimeId, seatIds, comboItems?, voucherCode? }`:
 
 - 1–6 ghế, không trùng; ghế đôi phải chọn đủ cặp (`422 COUPLE_INCOMPLETE`). `comboItems: [{ comboId, quantity }]` chỉ nhận combo đang bật (`422 COMBO_NOT_AVAILABLE`).
 - Thành công → `201`, đơn `PENDING`: ghế `HELD` tới `holdUntil = expiresAt + PAYMENT_GRACE_SECONDS`, `expiresAt = lúc tạo + HOLD_TTL_SECONDS`. Giá ghế lấy từ giá đã chốt của suất, combo lưu snapshot tên và giá.
-- Gửi lại cùng key và cùng nội dung → `200` với đơn cũ; cùng key khác nội dung → `422 IDEMPOTENCY_KEY_REUSED`.
+- **Voucher** (5.2): `voucherCode` tùy chọn, được trim và viết hoa. Server tự tính giảm giá trên `subtotal` (ghế + combo): `PERCENT` = `floor(subtotal × % / 100)`, có trần `maxDiscount`; `FIXED` = `min(giá trị, subtotal)`; sau đó giới hạn để `total` không dưới `VOUCHER_LIMITS.payableTotalMin` (5.000 ₫, xem ROADMAP "Đã chốt"). Giữ một lượt (`voucher_usages` `RESERVED`) trong cùng transaction giữ ghế; lượt thành `CONSUMED` khi đơn xác nhận, `RELEASED` khi đơn hết hạn, bị hủy hoặc thành `NEEDS_REVIEW`. Từ chối (không ghi gì): `422 VOUCHER_NOT_AVAILABLE` (không có hoặc đã tắt), `422 VOUCHER_NOT_IN_EFFECT` (`details.startsAt/endsAt`), `422 VOUCHER_MIN_SUBTOTAL_NOT_MET` (`details.minSubtotal`, `details.subtotal`), `409 VOUCHER_USAGE_LIMIT_REACHED` (`details.usageLimit`), `409 VOUCHER_USER_LIMIT_REACHED` (`details.perUserLimit`); khóa voucher chờ quá 2 giây → `503 DATABASE_BUSY`.
+- Gửi lại cùng key và cùng nội dung → `200` với đơn cũ; cùng key khác nội dung (kể cả khác `voucherCode`, hoặc thêm/bỏ voucher) → `422 IDEMPOTENCY_KEY_REUSED`.
 - Ghế đang bị request khác khóa → `409 SEAT_LOCKED`; ghế đã bán hoặc đang được giữ → `409 SEAT_UNAVAILABLE` (`details.seatIds`). Client tải lại sơ đồ ghế khi nhận `409`.
 - Suất đã hủy → `409 SHOWTIME_CANCELLED`; suất đã bắt đầu → `422 SHOWTIME_STARTED`; đã có đơn `PENDING` chưa qua `expiresAt` cho suất này → `409 BOOKING_ALREADY_PENDING` với `details.existingBookingId` và `details.expiresAt` (trang chọn ghế dẫn tới đơn đó). Qua `expiresAt` là đặt lại được ngay: đơn cũ không còn thanh toán được, nhưng ghế của nó vẫn `HELD` tới `holdUntil` (đón IPN trễ), nên đơn mới lấy ghế khác được còn ghế cũ thì `409 SEAT_UNAVAILABLE`.
 - Rate limit theo user: `BOOKING_RATE_LIMIT_MAX` (10) request mỗi cửa sổ cố định `BOOKING_RATE_LIMIT_WINDOW_SECONDS` (60 giây), key Redis `rl:booking:user:{userId}`. Vượt → `429 TOO_MANY_ATTEMPTS` với `details.retryAfterSeconds`. Đếm trước transaction giữ ghế và trước khi tra `Idempotency-Key` (request bị chặn không chạm DB); gửi lại cùng key cũng bị đếm. Redis lỗi thì bỏ qua giới hạn (fail-open, như giới hạn đăng nhập).
 
 **Đọc đơn** (đăng nhập, mọi vai trò):
 
-- `GET /bookings/:id`: đơn kèm `seats`, `combos`, `status`, `expiresAt`, `holdUntil`, `subtotal`, `total`. Đơn của người khác hoặc không tồn tại → `404 BOOKING_NOT_FOUND` (không dùng `403` để không lộ đơn có tồn tại); id sai định dạng → `400 VALIDATION_FAILED`.
+- `GET /bookings/:id`: đơn kèm `seats`, `combos`, `status`, `expiresAt`, `holdUntil`, `subtotal`, `discount`, `total`, `voucherCode` (mã voucher đã dùng hoặc `null`). Đơn của người khác hoặc không tồn tại → `404 BOOKING_NOT_FOUND` (không dùng `403` để không lộ đơn có tồn tại); id sai định dạng → `400 VALIDATION_FAILED`.
 - `GET /me/bookings?status=&page=&pageSize=`: đơn của user hiện tại, mới nhất trước (`createdAt` giảm dần). `pageSize` mặc định 10, tối đa 50.
 - **`expired: boolean`** (cả trong `POST /bookings`) = `status == PENDING && holdUntil <= now`: đơn đã hết hạn dù job chưa kịp đánh dấu. `status` vẫn trả đúng giá trị đang lưu (`PENDING`), client dựa vào `expired` để hiện "đã hết hạn".
 

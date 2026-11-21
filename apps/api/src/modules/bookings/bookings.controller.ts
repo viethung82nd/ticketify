@@ -80,12 +80,15 @@ export class BookingsController {
   @ApiNotFoundResponse({ description: 'SHOWTIME_NOT_FOUND' })
   @ApiConflictResponse({
     description:
-      'SEAT_LOCKED, SEAT_UNAVAILABLE (details.seatIds), SHOWTIME_CANCELLED, BOOKING_ALREADY_PENDING',
+      'SEAT_LOCKED, SEAT_UNAVAILABLE (details.seatIds), SHOWTIME_CANCELLED, BOOKING_ALREADY_PENDING, ' +
+      'VOUCHER_USAGE_LIMIT_REACHED (details.usageLimit), VOUCHER_USER_LIMIT_REACHED (details.perUserLimit)',
   })
   @ApiUnprocessableEntityResponse({
     description:
       'SEAT_NOT_FOUND, COUPLE_INCOMPLETE, SHOWTIME_STARTED, COMBO_NOT_AVAILABLE (details.comboIds), ' +
-      'IDEMPOTENCY_KEY_REUSED (same key, different payload)',
+      'IDEMPOTENCY_KEY_REUSED (same key, different payload), VOUCHER_NOT_AVAILABLE (unknown or ' +
+      'switched off), VOUCHER_NOT_IN_EFFECT (details.startsAt/endsAt), VOUCHER_MIN_SUBTOTAL_NOT_MET ' +
+      '(details.minSubtotal/subtotal)',
   })
   @ApiTooManyRequestsResponse({
     description:
@@ -105,6 +108,7 @@ export class BookingsController {
       showtimeId: dto.showtimeId,
       seatIds: dto.seatIds,
       comboItems: dto.comboItems ?? [],
+      voucherCode: dto.voucherCode ?? null,
       idempotencyKey,
     });
     res.status(result.created ? HttpStatus.CREATED : HttpStatus.OK);
