@@ -115,3 +115,19 @@
     @apply font-sans;
   }
 }
+
+/*
+ * ROADMAP 5.6: a visitor who asked the system for less motion gets no pulsing skeletons,
+ * spinning icons or animated transitions. Loading states keep their role="status" and text, so
+ * nothing is lost. JS smooth scrolling is handled by `scrollBehavior()` (lib/motion.ts).
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

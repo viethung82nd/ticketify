@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import { Toaster } from '@/components/ui/toast';
 import { useNotificationStream } from '@/features/notifications/use-notification-stream';
+import { scrollBehavior } from '@/lib/motion';
 import { SiteFooter } from './site-footer';
 import { SiteHeader } from './site-header';
 
@@ -12,7 +13,7 @@ function useHashScroll() {
     if (!hash) return;
     document
       .getElementById(decodeURIComponent(hash.slice(1)))
-      ?.scrollIntoView({ behavior: 'smooth' });
+      ?.scrollIntoView({ behavior: scrollBehavior() });
   }, [hash, pathname]);
 }
 

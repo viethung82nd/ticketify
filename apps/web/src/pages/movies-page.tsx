@@ -8,6 +8,7 @@ import { Select } from '@/components/ui/select';
 import { STATUS_LABELS } from '@/features/catalog/movie-labels';
 import { useGenres, useMovies } from '@/features/catalog/use-catalog';
 import { useMovieQuery } from '@/features/catalog/use-movie-query';
+import { scrollBehavior } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -133,7 +134,7 @@ export function MoviesPage() {
             total={movies.data.total}
             onPageChange={(page) => {
               update({ page });
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              window.scrollTo({ top: 0, behavior: scrollBehavior() });
             }}
           />
         )}
