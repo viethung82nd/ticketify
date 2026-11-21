@@ -20,6 +20,10 @@ artifacts/
 coverage/
 *.lcov
 junit.xml
+# Playwright (apps/web e2e)
+playwright-report/
+test-results/
+blob-report/
 
 # Logs
 logs/
