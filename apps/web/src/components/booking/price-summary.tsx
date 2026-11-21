@@ -96,8 +96,9 @@ export function PriceSummary({
             {vnd(total)}
           </dd>
         </div>
-        {note && <p className="text-xs text-muted-foreground">{note}</p>}
       </dl>
+      {/* Outside the <dl>: a list of terms may hold nothing but <dt>/<dd> groups. */}
+      {note && <p className="-mt-2 text-xs text-muted-foreground">{note}</p>}
     </div>
   );
 }
