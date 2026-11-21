@@ -144,7 +144,7 @@ Ticket       : ISSUED ──► CHECKED_IN
 ### Nguyên tắc
 
 1. **PostgreSQL là nơi duy nhất quyết định.** Không có trạng thái giữ ghế nào nằm ngoài DB.
-2. **Thứ tự khóa cố định** cho mọi luồng: `Payment → Booking → ShowtimeSeat (ORDER BY seat_id)`. Mục đích là tránh deadlock giữa các luồng giữ ghế, IPN và hết hạn.
+2. **Thứ tự khóa cố định** cho mọi luồng: `Payment → Booking → ShowtimeSeat (ORDER BY seat_id)`. Mục đích là tránh deadlock giữa các luồng giữ ghế, IPN và hết hạn. **Voucher** (giai đoạn 5, 22/11/2026): chỉ luồng giữ ghế khóa dòng `vouchers`, và khóa **sau** `ShowtimeSeat` (xem luồng giữ ghế bên dưới). Xác nhận, hết hạn và hủy không khóa voucher, chỉ cập nhật dòng `voucher_usages` của chính đơn.
 3. **`heldUntil` trong DB là thời điểm hết hạn chuẩn.** Job và cron chỉ là cơ chế kích hoạt việc dọn dẹp. Luồng giữ ghế tự coi ghế `HELD` có `heldUntil <= now()` là ghế trống (hết hạn lười), không cần chờ job.
 4. Mọi thao tác nhả ghế đều có điều kiện `booking_id = <booking của mình>` nên chạy lại bao nhiêu lần cũng cho cùng kết quả (idempotent).
 
@@ -167,9 +167,16 @@ FOR UPDATE NOWAIT;          -- ghế đang bị transaction khác khóa → lỗ
 -- 2. Ứng dụng kiểm tra: đủ số ghế, đúng suất chiếu, ghế đôi theo cặp,
 --    mọi ghế đều AVAILABLE hoặc (HELD AND held_until <= now()). Sai → ROLLBACK, 409.
 
--- 3. INSERT booking, booking_seats, booking_combos (giá tính ở server)
+-- 3. (giai đoạn 5, chỉ khi có voucherCode) khóa voucher, kiểm điều kiện, đếm lượt
+SELECT ... FROM vouchers WHERE code = $5 FOR UPDATE;   -- chờ tối đa 2 giây (lock_timeout) → 503
+SELECT count(*) FROM voucher_usages
+WHERE voucher_id = $6 AND status IN ('RESERVED', 'CONSUMED');   -- và theo user
+--    Sai → ROLLBACK, 409/422 (không ghi gì).
 
--- 4. Cập nhật có điều kiện (phòng thủ thêm một lớp)
+-- 4. INSERT booking (subtotal, discount, total), booking_seats, booking_combos,
+--    voucher_usages RESERVED (giá và giảm giá tính ở server)
+
+-- 5. Cập nhật có điều kiện (phòng thủ thêm một lớp)
 UPDATE showtime_seats
 SET status='HELD', booking_id=$3, held_until=$4
 WHERE showtime_id=$1 AND seat_id = ANY($2)
@@ -178,6 +185,7 @@ WHERE showtime_id=$1 AND seat_id = ANY($2)
 COMMIT;
 ```
 
+- **Vị trí khóa voucher (22/11/2026, 5.2)**: thứ tự đầy đủ là advisory lock `(user, suất)` → `showtime_seats` `FOR UPDATE NOWAIT ORDER BY seat_id` → `vouchers` `FOR UPDATE` → các INSERT. Voucher khóa **cuối** vì ba lý do: (1) cần `subtotal`, mà `subtotal` chỉ có sau khi đọc giá ghế đã khóa và combo; (2) mọi người dùng cùng một mã tranh **một** dòng, nên khóa này phải **chờ** (không `NOWAIT`, nếu không voucher phổ biến sẽ bị từ chối với gần như mọi người); khóa cuối thì mỗi request chỉ giữ nó trong lúc INSERT (vài ms), và request bị từ chối vì ghế không bao giờ xếp hàng ở đây; (3) không tạo vòng chờ: request đang chờ voucher chỉ giữ ghế của chính nó, còn request đang giữ voucher thì đã có đủ ghế của nó và không chờ ghế nào nữa; admin sửa/xóa voucher chỉ khóa dòng voucher; xác nhận/hết hạn/hủy không khóa voucher. Lần chờ bị chặn bởi `lock_timeout` 2 giây (`VOUCHER_LOCK_TIMEOUT_MS`), quá thì `503 DATABASE_BUSY`. Số lượt đếm bằng một câu lệnh **sau** khi có khóa: ở READ COMMITTED câu đó thấy mọi lượt mà các request giữ khóa trước đã commit, nên hai request không thể cùng lấy lượt cuối.
 - **Vì sao dùng `NOWAIT`**: khi 500 request cùng tranh một ghế, `FOR UPDATE` thông thường bắt các request xếp hàng chờ khóa. Trong lúc chờ, mỗi request vẫn giữ một connection trong pool, dễ làm cạn pool. Với `NOWAIT`, request thua nhận `409` ngay lập tức.
 - Sau khi commit: enqueue job `expire-booking` với delay = `holdUntil − now`, rồi emit `seat:held`.
 - Rate limit `POST /bookings` theo user. Mỗi user tối đa 1 đơn `PENDING` cho mỗi suất chiếu.
@@ -199,7 +207,7 @@ BEGIN
   SELECT showtime_seats WHERE booking_id = $id AND status = 'HELD' ORDER BY seat_id FOR UPDATE
   UPDATE showtime_seats SET status='AVAILABLE', booking_id=NULL, held_until=NULL
     WHERE booking_id = $id AND status = 'HELD'
-  (giai đoạn 5) VoucherUsage RESERVED → RELEASED
+  VoucherUsage RESERVED → RELEASED   -- (5.2) chỉ dòng usage của đơn, không khóa voucher
   (giai đoạn 4) INSERT outbox(seats.released)   -- chưa có: hoãn sang 4.1, xem ROADMAP 2.7
 COMMIT
 ```
@@ -278,6 +286,7 @@ Lớp chặn cuối: partial unique index trên `Ticket(showtimeId, seatId)`. N�
 - **Giữ lượt** trong transaction giữ ghế: `SELECT voucher FOR UPDATE`, đếm số usage `RESERVED + CONSUMED` để kiểm tra `usageLimit` và `perUserLimit`, rồi INSERT `RESERVED`. Không có `usedCount` cập nhật riêng lẻ: số lượt được tính ra từ bảng usage.
 - Đơn `CONFIRMED` → usage `CONSUMED`. Đơn `EXPIRED` → usage `RELEASED`. Cả hai cập nhật nằm trong cùng transaction với việc đổi trạng thái booking.
 - Server luôn tự tính giảm giá. Client chỉ gửi mã voucher.
+- **Bổ sung 22/11/2026 (5.2)**: đã làm như trên. Vị trí khóa voucher và lý do ở mục 4 (luồng giữ ghế). Xác nhận và hết hạn **không khóa voucher**: `RESERVED → CONSUMED` không đổi số lượt đã tính, `→ RELEASED` chỉ làm giảm; cả hai chỉ cập nhật dòng usage của đơn, mà dòng đó chỉ bị các luồng đang giữ khóa dòng `bookings` của đơn đụng tới. Ngoại lệ duy nhất làm **tăng** số lượt mà không khóa: IPN đến muộn giành lại ghế cho đơn đã `EXPIRED` (bước 6.3), lượt `RELEASED → CONSUMED`. Lượt `NEEDS_REVIEW` → `RELEASED`. Giảm giá luôn để lại `total ≥ VOUCHER_LIMITS.payableTotalMin`. Ba điểm này là lựa chọn **chờ duyệt**, ghi ở ROADMAP "Đã chốt". Mã lỗi ở CONTRIBUTING.
 - **Bổ sung 13/11/2026 (5.1, chờ chủ dự án duyệt)**: `Voucher(code, description, discountType PERCENT/FIXED, discountValue, maxDiscount, minSubtotal, usageLimit, perUserLimit, startsAt, endsAt, isActive)`. `code` lưu chữ hoa, unique; `null` ở hai giới hạn = không giới hạn. Voucher đã có đơn dùng thì không xóa và không đổi mã, chỉ tắt. Chi tiết và lý do ở ROADMAP "Đã chốt".
 
 ## 7. Sau thanh toán: giao vé
