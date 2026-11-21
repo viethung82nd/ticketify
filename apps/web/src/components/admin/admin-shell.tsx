@@ -3,6 +3,7 @@ import { NavLink } from 'react-router';
 import { cn } from '@/lib/utils';
 
 const ADMIN_NAV = [
+  { to: '/admin/bookings', label: 'Đơn hàng' },
   { to: '/admin/movies', label: 'Phim' },
   { to: '/admin/genres', label: 'Thể loại' },
   { to: '/admin/rooms', label: 'Phòng chiếu' },

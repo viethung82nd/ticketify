@@ -2,6 +2,7 @@ import { Role } from '@ticketify/shared';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { AppLayout } from '@/components/layout/app-layout';
 import { GuestOnly, RequireAuth } from '@/features/auth/route-guards';
+import { AdminBookingsPage } from '@/pages/admin/admin-bookings-page';
 import { AdminCombosPage } from '@/pages/admin/admin-combos-page';
 import { AdminGenresPage } from '@/pages/admin/admin-genres-page';
 import { AdminMoviesPage } from '@/pages/admin/admin-movies-page';
@@ -48,6 +49,7 @@ export const router = createBrowserRouter([
         element: <RequireAuth roles={[Role.ADMIN]} />,
         children: [
           { path: 'admin', element: <Navigate to="/admin/movies" replace /> },
+          { path: 'admin/bookings', element: <AdminBookingsPage /> },
           { path: 'admin/movies', element: <AdminMoviesPage /> },
           { path: 'admin/movies/new', element: <NewMoviePage /> },
           { path: 'admin/movies/:id/edit', element: <EditMoviePage /> },
