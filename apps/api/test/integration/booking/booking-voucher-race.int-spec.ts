@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import type { INestApplication } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import {
@@ -11,6 +12,7 @@ import {
   SeatType,
   type VoucherUsageStatus,
 } from '@ticketify/shared';
+import { Client } from 'pg';
 import request, { type Response } from 'supertest';
 import type { App } from 'supertest/types';
 import type { Prisma } from '../../../src/generated/prisma/client';
@@ -36,6 +38,8 @@ const PAYMENT_GRACE_SECONDS = 300;
 const HOLD_MINUTES = (HOLD_TTL_SECONDS + PAYMENT_GRACE_SECONDS) / 60;
 /** Every seat type and day type: one seat is 90 000 ₫. */
 const SEAT_PRICE = 90_000;
+/** `VOUCHER_LOCK_TIMEOUT_MS` in booking.service.ts. */
+const VOUCHER_LOCK_TIMEOUT_MS = 2_000;
 /** Test-only merchant settings; never a real secret. */
 const VNPAY_ENV = {
   VNPAY_TMN_CODE: 'TKFTEST1',
@@ -511,5 +515,162 @@ describe('Voucher contention — the last use, per-user limits, give-back, tampe
         );
       }
     }, 120_000);
+  });
+
+  // ─── Expiry gives the use back ───
+
+  describe('an expired booking gives its use back', () => {
+    it('expiry racing a hold for the last use, 20 rounds: the hold gets it or 409, never both; a retry after the expiry gets it', async () => {
+      const outcomes: Record<string, number> = {};
+      for (let round = 0; round < 20; round++) {
+        clock.set(NOW);
+        const { showtime, seat } = await scene();
+        const v = await voucher({ usageLimit: 1 });
+        const [first, second] = await newUsers(2);
+        const old = await held(first, {
+          showtimeId: showtime.id,
+          seatIds: [seat(1)],
+          voucherCode: v.code,
+        });
+        clock.advance({ minutes: HOLD_MINUTES });
+
+        // Half the rounds start the expiry first, half the hold: both orders get a chance.
+        const body = { showtimeId: showtime.id, seatIds: [seat(2)], voucherCode: v.code };
+        const [expired, res] =
+          round % 2 === 0
+            ? await Promise.all([expiry.expire(old.id), hold(second, body)])
+            : await Promise.all([hold(second, body), expiry.expire(old.id)]).then(
+                ([r, e]) => [e, r] as const,
+              );
+        expect(expired).toMatchObject({ outcome: 'expired' });
+        expect(await useOf(old.id)).toBe('RELEASED');
+        const key = res.status === 201 ? 'got it' : `${res.status} ${errorOf(res).code}`;
+        outcomes[key] = (outcomes[key] ?? 0) + 1;
+        expect(['got it', '409 VOUCHER_USAGE_LIMIT_REACHED']).toContain(key);
+
+        // Whichever way it went, the use is now free (or the hold has it), never double-counted.
+        const winner = res.status === 201 ? bodyOf<Booking>(res) : await held(second, body);
+        expect(await activeUses(v.id)).toEqual([
+          { bookingId: winner.id, userId: second.id, status: 'RESERVED' },
+        ]);
+      }
+      console.info(`[5.3] expiry vs hold for the last use × 20: ${JSON.stringify(outcomes)}`);
+    }, 120_000);
+
+    it('the sweep gives back every overdue use at once: 5 expired holds, then 5 new users get them', async () => {
+      const v = await voucher({ usageLimit: 5 });
+      const { showtime, seat } = await scene(10);
+      const quitters = await newUsers(5);
+      const old = await Promise.all(
+        quitters.map((user, i) =>
+          held(user, { showtimeId: showtime.id, seatIds: [seat(i + 1)], voucherCode: v.code }),
+        ),
+      );
+      const blocked = await hold(await newUser(), {
+        showtimeId: showtime.id,
+        seatIds: [seat(6)],
+        voucherCode: v.code,
+      });
+      expect(errorOf(blocked).code).toBe('VOUCHER_USAGE_LIMIT_REACHED');
+
+      clock.advance({ minutes: HOLD_MINUTES });
+      const report = await expiry.sweep();
+      expect(report.outcomes.expired).toBeGreaterThanOrEqual(5);
+      for (const booking of old) expect(await useOf(booking.id)).toBe('RELEASED');
+
+      // The seats and the uses are free again: 5 new users race for them, plus one too many.
+      const newcomers = await newUsers(6);
+      const responses = await Promise.all(
+        newcomers.map((user, i) =>
+          hold(user, { showtimeId: showtime.id, seatIds: [seat(i + 1)], voucherCode: v.code }),
+        ),
+      );
+      expect(tally(responses)).toEqual({ '201': 5, '409 VOUCHER_USAGE_LIMIT_REACHED': 1 });
+      expect(await activeUses(v.id)).toHaveLength(5);
+    }, 60_000);
+
+    it('a cancel racing a hold for the last use, 10 rounds: same rule as the expiry', async () => {
+      for (let round = 0; round < 10; round++) {
+        const { showtime, seat } = await scene();
+        const v = await voucher({ usageLimit: 1 });
+        const [first, second] = await newUsers(2);
+        const old = await held(first, {
+          showtimeId: showtime.id,
+          seatIds: [seat(1)],
+          voucherCode: v.code,
+        });
+        const body = { showtimeId: showtime.id, seatIds: [seat(2)], voucherCode: v.code };
+        const [cancelled, res] = await Promise.all([
+          http()
+            .delete(`/bookings/${old.id}`)
+            .set('Authorization', `Bearer ${tokenOf(first)}`),
+          hold(second, body),
+        ]);
+        expect(cancelled.status).toBe(204);
+        expect([201, 409]).toContain(res.status);
+        if (res.status === 409) expect(errorOf(res).code).toBe('VOUCHER_USAGE_LIMIT_REACHED');
+        const winner = res.status === 201 ? bodyOf<Booking>(res) : await held(second, body);
+        expect(await activeUses(v.id)).toEqual([
+          { bookingId: winner.id, userId: second.id, status: 'RESERVED' },
+        ]);
+      }
+    }, 120_000);
+  });
+
+  // ─── The voucher row locked too long ───
+
+  describe(`the voucher row locked past VOUCHER_LOCK_TIMEOUT_MS (${VOUCHER_LOCK_TIMEOUT_MS} ms)`, () => {
+    it('503 DATABASE_BUSY, nothing written; a hold without the voucher is not held up; after the lock, 201', async () => {
+      const { showtime, seat } = await scene();
+      const v = await voucher({ usageLimit: 1 });
+      const [waiter, other] = await newUsers(2);
+      const locker = new Client({ connectionString: db.url });
+      await locker.connect();
+      // If the hold ever waited without a timeout (no lock_timeout, or a lock taken elsewhere),
+      // it would wait for this session forever: let go after a while so the test fails instead.
+      const safety = setTimeout(() => void locker.query('ROLLBACK'), 3 * VOUCHER_LOCK_TIMEOUT_MS);
+      try {
+        await locker.query('BEGIN');
+        await locker.query('SELECT id FROM vouchers WHERE id = $1 FOR UPDATE', [v.id]);
+
+        const started = performance.now();
+        const [busy, plain] = await Promise.all([
+          hold(waiter, { showtimeId: showtime.id, seatIds: [seat(1)], voucherCode: v.code }),
+          hold(other, { showtimeId: showtime.id, seatIds: [seat(2)] }),
+        ]);
+        const waited = performance.now() - started;
+
+        expect(busy.status).toBe(503);
+        expect(errorOf(busy).code).toBe('DATABASE_BUSY');
+        expect(waited).toBeGreaterThanOrEqual(VOUCHER_LOCK_TIMEOUT_MS - 100);
+        expect(plain.status).toBe(201);
+        // The refused hold rolled back: its seat is free and it left no booking, no use.
+        expect(await usesOf(v.id)).toEqual([]);
+        expect(
+          await db.prisma.booking.count({ where: { showtimeId: showtime.id, userId: waiter.id } }),
+        ).toBe(0);
+        expect(
+          (
+            await db.prisma.showtimeSeat.findFirstOrThrow({
+              where: { showtimeId: showtime.id, seatId: seat(1) },
+            })
+          ).status,
+        ).toBe('AVAILABLE');
+      } finally {
+        clearTimeout(safety);
+        await locker.query('ROLLBACK');
+        await locker.end();
+      }
+      // A 503 is what the test asked for, not a server fault.
+      expect(serverErrors.errors.map((e) => e.code)).toEqual(['DATABASE_BUSY']);
+      serverErrors.clear();
+
+      const again = await held(waiter, {
+        showtimeId: showtime.id,
+        seatIds: [seat(1)],
+        voucherCode: v.code,
+      });
+      expect(await useOf(again.id)).toBe('RESERVED');
+    }, 30_000);
   });
 });
