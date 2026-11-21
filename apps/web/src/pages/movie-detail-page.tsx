@@ -17,12 +17,14 @@ import { useMovie } from '@/features/catalog/use-catalog';
 
 function Fact({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl bg-surface-raised p-3.5">
-      <span className="mt-0.5 text-brand">{icon}</span>
-      <div>
-        <dt className="text-xs text-muted-foreground">{label}</dt>
-        <dd className="font-medium text-cream">{children}</dd>
-      </div>
+    // A <dl> may only hold <div>s of <dt>/<dd> (axe definition-list): the icon goes inside the
+    // <dt>, placed in the left gutter.
+    <div className="relative rounded-xl bg-surface-raised py-3.5 pr-3.5 pl-11">
+      <dt className="text-xs text-muted-foreground">
+        <span className="absolute top-4 left-3.5 text-brand">{icon}</span>
+        {label}
+      </dt>
+      <dd className="font-medium text-cream">{children}</dd>
     </div>
   );
 }

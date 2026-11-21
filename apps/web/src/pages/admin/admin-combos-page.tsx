@@ -24,6 +24,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
+import { TableScroll } from '@/components/ui/table-scroll';
 import { FormAlert } from '@/features/auth/auth-card';
 import { catalogErrorMessage, errorCodeOf } from '@/features/catalog/catalog-errors';
 import {
@@ -244,7 +245,8 @@ function ComboRow({ combo, onDelete }: { combo: AdminCombo; onDelete: () => void
           variant="ghost"
           size="sm"
           aria-pressed={combo.isActive}
-          aria-label={`${combo.isActive ? 'Tắt' : 'Bật'} combo ${combo.name}`}
+          // Visible text first (WCAG 2.5.3); aria-pressed says whether it is on.
+          aria-label={`${combo.isActive ? 'Đang bán' : 'Đã tắt'}: combo ${combo.name}`}
           disabled={toggle.isPending}
           onClick={() => toggle.mutate()}
           className={cn(
@@ -391,7 +393,7 @@ export function AdminCombosPage() {
       ) : data.length === 0 ? (
         <EmptyState title="Chưa có combo nào" />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-white/10 bg-surface">
+        <TableScroll label="Danh sách combo">
           <table className="w-full min-w-[720px] text-left text-sm">
             <caption className="sr-only">Danh sách combo</caption>
             <thead className="border-b border-white/10 text-xs text-muted-foreground uppercase">
@@ -423,7 +425,7 @@ export function AdminCombosPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
       <DeleteComboDialog combo={toDelete} onClose={() => setToDelete(null)} />
     </AdminShell>

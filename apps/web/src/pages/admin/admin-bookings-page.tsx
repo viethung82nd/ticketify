@@ -15,6 +15,7 @@ import { EmptyState, ErrorState } from '@/components/catalog/query-states';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { TableScroll } from '@/components/ui/table-scroll';
 import {
   type AdminBookingsParams,
   useAdminBookings,
@@ -243,7 +244,7 @@ export function AdminBookingsPage() {
           <p className="mb-3 text-sm text-muted-foreground" aria-live="polite">
             {data.total} đơn{isFetching ? ' · đang tải…' : ''}
           </p>
-          <div className="overflow-x-auto rounded-2xl border border-white/10 bg-surface">
+          <TableScroll label="Danh sách đơn đặt vé">
             <table className="w-full min-w-[900px] text-left text-sm">
               <caption className="sr-only">Danh sách đơn đặt vé</caption>
               <thead className="border-b border-white/10 text-xs text-muted-foreground uppercase">
@@ -271,7 +272,7 @@ export function AdminBookingsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
           <div className="mt-6">
             <Pagination
               page={data.page}

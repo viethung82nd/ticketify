@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { TableScroll } from '@/components/ui/table-scroll';
 import { FormAlert } from '@/features/auth/auth-card';
 import { catalogErrorMessage, errorCodeOf } from '@/features/catalog/catalog-errors';
 import {
@@ -182,10 +183,7 @@ export function AdminShowtimesPage() {
           </Link>
         </EmptyState>
       ) : (
-        <div
-          className="overflow-x-auto rounded-2xl border border-white/10 bg-surface"
-          aria-busy={isFetching}
-        >
+        <TableScroll label="Danh sách suất chiếu" busy={isFetching}>
           <table className="w-full min-w-[820px] text-left text-sm">
             <caption className="sr-only">Suất chiếu {longDayLabel(date)}</caption>
             <thead className="border-b border-white/10 text-xs text-muted-foreground uppercase">
@@ -255,7 +253,7 @@ export function AdminShowtimesPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
       <CancelDialog showtime={toCancel} onClose={() => setToCancel(null)} />
     </AdminShell>

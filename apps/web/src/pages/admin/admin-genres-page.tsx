@@ -21,6 +21,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
+import { TableScroll } from '@/components/ui/table-scroll';
 import { FormAlert } from '@/features/auth/auth-card';
 import { createGenre, deleteGenre, renameGenre } from '@/features/catalog/catalog-api';
 import { catalogErrorMessage } from '@/features/catalog/catalog-errors';
@@ -243,7 +244,7 @@ export function AdminGenresPage() {
       ) : data.length === 0 ? (
         <EmptyState title="Chưa có thể loại nào" />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-white/10 bg-surface">
+        <TableScroll label="Danh sách thể loại">
           <table className="w-full min-w-[560px] text-left text-sm">
             <caption className="sr-only">Danh sách thể loại</caption>
             <thead className="border-b border-white/10 text-xs text-muted-foreground uppercase">
@@ -268,7 +269,7 @@ export function AdminGenresPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
       <DeleteGenreDialog genre={toDelete} onClose={() => setToDelete(null)} />
     </AdminShell>

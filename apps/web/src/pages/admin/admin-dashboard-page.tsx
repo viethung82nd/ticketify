@@ -12,6 +12,7 @@ import { AdminShell } from '@/components/admin/admin-shell';
 import { EmptyState, ErrorState } from '@/components/catalog/query-states';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { TableScroll } from '@/components/ui/table-scroll';
 import { useOccupancy, useRevenue } from '@/features/admin-reports/admin-reports-api';
 import { cinemaTime, cinemaToday } from '@/lib/cinema-time';
 import { cn } from '@/lib/utils';
@@ -352,7 +353,7 @@ export function AdminDashboardPage() {
         ) : occupancy.data.showtimes.length === 0 ? (
           <EmptyState title="Không có suất chiếu nào trong ngày này" />
         ) : (
-          <div className="overflow-x-auto rounded-2xl border border-white/10 bg-surface">
+          <TableScroll label="Tỷ lệ lấp đầy các suất chiếu">
             <table className="w-full min-w-[720px] text-left text-sm">
               <caption className="sr-only">Tỷ lệ lấp đầy các suất chiếu trong ngày</caption>
               <thead className="border-b border-white/10 text-xs text-muted-foreground uppercase">
@@ -383,7 +384,7 @@ export function AdminDashboardPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
       </section>
     </AdminShell>

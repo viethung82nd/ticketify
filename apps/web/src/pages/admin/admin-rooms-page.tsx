@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { TableScroll } from '@/components/ui/table-scroll';
 import { FormAlert } from '@/features/auth/auth-card';
 import { catalogErrorMessage } from '@/features/catalog/catalog-errors';
 import { deleteRoom } from '@/features/rooms/rooms-api';
@@ -103,7 +104,7 @@ export function AdminRoomsPage() {
           </Link>
         </EmptyState>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-white/10 bg-surface">
+        <TableScroll label="Danh sách phòng chiếu">
           <table className="w-full min-w-[640px] text-left text-sm">
             <caption className="sr-only">Danh sách phòng chiếu</caption>
             <thead className="border-b border-white/10 text-xs text-muted-foreground uppercase">
@@ -158,7 +159,7 @@ export function AdminRoomsPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
       <DeleteRoomDialog room={toDelete} onClose={() => setToDelete(null)} />
     </AdminShell>
