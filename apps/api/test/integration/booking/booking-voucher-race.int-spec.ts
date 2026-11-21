@@ -48,6 +48,7 @@ const VNPAY_ENV = {
   VNPAY_RETURN_URL: 'http://localhost:5173/payment/result',
 } as const;
 const OK = { RspCode: '00', Message: 'Confirm Success' };
+const INVALID_AMOUNT = { RspCode: '04', Message: 'Invalid amount' };
 
 const vn = (date: string, time: string): string => `${date}T${time}:00+07:00`;
 const instant = (value: string): Date => new FakeClock(value).now();
@@ -672,5 +673,106 @@ describe('Voucher contention — the last use, per-user limits, give-back, tampe
       });
       expect(await useOf(again.id)).toBe('RESERVED');
     }, 30_000);
+  });
+
+  // ─── A client that edits the payload ───
+
+  describe('a client that edits the payload cannot set its own price', () => {
+    it.each([
+      ['discount', { discount: 90_000 }],
+      ['total', { total: 1 }],
+      ['subtotal', { subtotal: 1 }],
+      ['voucherId', { voucherId: randomUUID() }],
+      ['a price per seat', { seats: [{ price: 1 }] }],
+      ['a booking status', { status: 'CONFIRMED' }],
+      ['a user id', { userId: randomUUID() }],
+    ])('400 VALIDATION_FAILED for an extra %s field, nothing written', async (_, extra) => {
+      const { showtime, seat } = await scene();
+      const v = await voucher();
+      const res = await hold(await newUser(), {
+        showtimeId: showtime.id,
+        seatIds: [seat(1)],
+        voucherCode: v.code,
+        ...extra,
+      });
+      expect(res.status).toBe(400);
+      expect(errorOf(res).code).toBe('VALIDATION_FAILED');
+      await expectOnlyWinnersWritten([showtime.id], []);
+      expect(await usesOf(v.id)).toEqual([]);
+    });
+
+    it('400 for a price on a combo line, or a voucher code that is not a string', async () => {
+      const { showtime, seat } = await scene();
+      const v = await voucher();
+      const combo = await db.prisma.combo.create({
+        data: { name: `Bắp ${randomUUID()}`, price: 79_000 },
+      });
+      const bodies = [
+        { comboItems: [{ comboId: combo.id, quantity: 1, price: 1 }], voucherCode: v.code },
+        { voucherCode: [v.code, v.code] },
+        { voucherCode: { code: v.code } },
+        { voucherCode: true },
+      ];
+      for (const extra of bodies) {
+        const res = await hold(await newUser(), {
+          showtimeId: showtime.id,
+          seatIds: [seat(1)],
+          ...extra,
+        });
+        expect({ extra, status: res.status }).toEqual({ extra, status: 400 });
+        expect(errorOf(res).code).toBe('VALIDATION_FAILED');
+      }
+      await expectOnlyWinnersWritten([showtime.id], []);
+    });
+
+    it('POST /payments/vnpay takes no amount from the client (400), and asks VNPay for the discounted total', async () => {
+      const { showtime, seat } = await scene();
+      const v = await voucher({ discountType: 'FIXED', discountValue: 20_000, maxDiscount: null });
+      const user = await newUser();
+      const booking = await held(user, {
+        showtimeId: showtime.id,
+        seatIds: [seat(1)],
+        voucherCode: v.code,
+      });
+      expect(booking).toMatchObject({ subtotal: 90_000, discount: 20_000, total: 70_000 });
+
+      const tampered = await http()
+        .post('/payments/vnpay')
+        .set('Authorization', `Bearer ${tokenOf(user)}`)
+        .send({ bookingId: booking.id, amount: 1 });
+      expect(tampered.status).toBe(400);
+      expect(errorOf(tampered).code).toBe('VALIDATION_FAILED');
+      expect(await db.prisma.payment.count({ where: { bookingId: booking.id } })).toBe(0);
+
+      const payment = await paymentFor(user, booking.id);
+      expect(new URL(payment.paymentUrl).searchParams.get('vnp_Amount')).toBe(String(70_000 * 100));
+    });
+
+    it('an IPN for any amount but the discounted total is 04 Invalid amount: booking PENDING, use RESERVED', async () => {
+      const { showtime, seat } = await scene();
+      const v = await voucher({ discountType: 'FIXED', discountValue: 20_000, maxDiscount: null });
+      const user = await newUser();
+      const booking = await held(user, {
+        showtimeId: showtime.id,
+        seatIds: [seat(1)],
+        voucherCode: v.code,
+      });
+      const payment = await paymentFor(user, booking.id);
+
+      // The undiscounted subtotal, and a smaller amount, are both refused.
+      for (const amount of [booking.subtotal, booking.total - 1]) {
+        expect((await sendIpn(booking, payment, amount)).body).toEqual(INVALID_AMOUNT);
+      }
+      expect(
+        await db.prisma.booking.findUniqueOrThrow({
+          where: { id: booking.id },
+          select: { status: true },
+        }),
+      ).toEqual({ status: 'PENDING' });
+      expect(await useOf(booking.id)).toBe('RESERVED');
+
+      expect((await sendIpn(booking, payment)).body).toEqual(OK);
+      expect(await useOf(booking.id)).toBe('CONSUMED');
+    });
   });
 });
