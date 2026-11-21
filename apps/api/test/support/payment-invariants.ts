@@ -1,3 +1,4 @@
+import { VOUCHER_LIMITS } from '@ticketify/shared';
 import type { PrismaClient } from '../../src/generated/prisma/client';
 
 /**
@@ -40,6 +41,18 @@ export interface PaymentViolations {
   refundMismatch: unknown[];
   /** An attempt left PENDING on an EXPIRED booking: the expiry must EXPIRE them all (3.7). */
   pendingAfterExpiry: unknown[];
+  /**
+   * A voucher use whose status does not follow its booking (ROADMAP 5.2): PENDING → RESERVED,
+   * CONFIRMED → CONSUMED, EXPIRED and NEEDS_REVIEW → RELEASED.
+   */
+  voucherUseMismatch: unknown[];
+  /**
+   * total ≠ subtotal − discount, a negative discount, or a discounted total below
+   * `VOUCHER_LIMITS.payableTotalMin` (5.2: a voucher never leaves a booking that cannot be paid).
+   */
+  totalMismatch: unknown[];
+  /** A discount without a voucher use, or a voucher use without a discount (5.2). */
+  discountWithoutUse: unknown[];
 }
 
 export const NO_PAYMENT_VIOLATIONS: PaymentViolations = {
@@ -53,6 +66,9 @@ export const NO_PAYMENT_VIOLATIONS: PaymentViolations = {
   outboxMismatch: [],
   refundMismatch: [],
   pendingAfterExpiry: [],
+  voucherUseMismatch: [],
+  totalMismatch: [],
+  discountWithoutUse: [],
 };
 
 export async function paymentViolations(prisma: PrismaClient): Promise<PaymentViolations> {
@@ -68,6 +84,9 @@ export async function paymentViolations(prisma: PrismaClient): Promise<PaymentVi
     outboxMismatch,
     refundMismatch,
     pendingAfterExpiry,
+    voucherUseMismatch,
+    totalMismatch,
+    discountWithoutUse,
   ] = await Promise.all([
     q`SELECT showtime_id, seat_id, count(*)::int AS n FROM tickets WHERE status <> 'VOID'
       GROUP BY showtime_id, seat_id HAVING count(*) > 1`,
@@ -134,6 +153,21 @@ export async function paymentViolations(prisma: PrismaClient): Promise<PaymentVi
     // page and never paid it leaves that attempt PENDING, and only its own IPN decides it.
     q`SELECT p.id FROM payments p JOIN bookings b ON b.id = p.booking_id
       WHERE p.status = 'PENDING' AND b.status = 'EXPIRED'`,
+    // ROADMAP 5.2: the use follows the booking in the booking's own transactions. NEEDS_REVIEW
+    // gives the use back (the booking is refunded, see ROADMAP "Đã chốt").
+    q`SELECT b.id, b.status::text AS booking_status, u.status::text AS use_status
+      FROM voucher_usages u JOIN bookings b ON b.id = u.booking_id
+      WHERE u.status::text <> CASE b.status::text
+        WHEN 'PENDING' THEN 'RESERVED'
+        WHEN 'CONFIRMED' THEN 'CONSUMED'
+        ELSE 'RELEASED' END`,
+    prisma.$queryRaw<unknown[]>`
+      SELECT b.id, b.subtotal, b.discount, b.total FROM bookings b
+      WHERE b.total <> b.subtotal - b.discount OR b.discount < 0
+         OR (b.discount > 0 AND b.total < ${VOUCHER_LIMITS.payableTotalMin})`,
+    q`SELECT b.id, b.discount, u.id AS use_id FROM bookings b
+      LEFT JOIN voucher_usages u ON u.booking_id = b.id
+      WHERE (b.discount > 0) <> (u.id IS NOT NULL)`,
   ]);
   return {
     duplicateTickets,
@@ -146,6 +180,9 @@ export async function paymentViolations(prisma: PrismaClient): Promise<PaymentVi
     outboxMismatch,
     refundMismatch,
     pendingAfterExpiry,
+    voucherUseMismatch,
+    totalMismatch,
+    discountWithoutUse,
   };
 }
 
