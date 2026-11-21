@@ -5,6 +5,7 @@ import {
   fieldErrorSchema,
   formatVnd,
   isIsoDate,
+  normalizeVoucherCode,
   type UpdateVoucherRequest,
   VOUCHER_LIMITS,
   VoucherDiscountType,
@@ -86,7 +87,8 @@ const endOf = (date: string) => (isIsoDate(date) ? cinemaIso(addDays(date, 1), '
 function toBody(values: VoucherFormValues) {
   const discountValue = parseNumber(values.discountValue);
   return {
-    code: values.code,
+    // As the API stores it (trimmed, upper case): what the form checked is what it sends.
+    code: normalizeVoucherCode(values.code),
     description: values.description,
     discountType: values.discountType,
     discountValue: discountValue ?? Number.NaN,
