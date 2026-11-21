@@ -1,7 +1,48 @@
-import { BookingErrorCode, CommonErrorCode } from '@ticketify/shared';
+import {
+  BookingErrorCode,
+  CommonErrorCode,
+  formatVnd,
+  voucherMinSubtotalDetailsSchema,
+  VoucherErrorCode,
+  voucherPeriodDetailsSchema,
+} from '@ticketify/shared';
 import { apiErrorOf, isNetworkError } from '@/lib/api-error';
-import { cinemaTime } from '@/lib/cinema-time';
+import { cinemaDate, cinemaTime, longDayLabel } from '@/lib/cinema-time';
 import { pendingBookingOf, retryAfterOf } from './bookings-api';
+
+const vnd = (amount: number) => `${formatVnd(amount)} ₫`;
+const moment = (iso: string) => `${cinemaTime(iso)} ${longDayLabel(cinemaDate(iso))}`;
+
+/**
+ * Vietnamese message for a `POST /bookings` refused because of its voucher alone (ROADMAP 5.2),
+ * shown under the voucher field: the seats are not the problem and stay chosen. `undefined` for
+ * any other error. Nothing was held, so removing the code and continuing always works.
+ */
+export function voucherErrorMessage(error: unknown): string | undefined {
+  const apiError = apiErrorOf(error);
+  switch (apiError?.code) {
+    case VoucherErrorCode.VOUCHER_NOT_AVAILABLE:
+      return 'Mã giảm giá không tồn tại hoặc đã ngừng áp dụng.';
+    case VoucherErrorCode.VOUCHER_NOT_IN_EFFECT: {
+      const period = voucherPeriodDetailsSchema.safeParse(apiError.details);
+      return period.success
+        ? `Mã giảm giá chỉ áp dụng từ ${moment(period.data.startsAt)} đến trước ${moment(period.data.endsAt)}.`
+        : 'Mã giảm giá chưa đến hoặc đã hết thời gian áp dụng.';
+    }
+    case VoucherErrorCode.VOUCHER_MIN_SUBTOTAL_NOT_MET: {
+      const min = voucherMinSubtotalDetailsSchema.safeParse(apiError.details);
+      return min.success
+        ? `Mã giảm giá áp dụng cho đơn từ ${vnd(min.data.minSubtotal)} (đơn này ${vnd(min.data.subtotal)}). Chọn thêm ghế hoặc combo, hoặc bỏ mã.`
+        : 'Đơn chưa đạt giá trị tối thiểu của mã giảm giá.';
+    }
+    case VoucherErrorCode.VOUCHER_USAGE_LIMIT_REACHED:
+      return 'Mã giảm giá đã hết lượt sử dụng. Bạn có thể bỏ mã để tiếp tục đặt vé.';
+    case VoucherErrorCode.VOUCHER_USER_LIMIT_REACHED:
+      return 'Bạn đã dùng hết số lượt của mã này, kể cả các đơn đang chờ thanh toán.';
+    default:
+      return undefined;
+  }
+}
 
 /**
  * Vietnamese message for a failed `POST /bookings` that is not a seat conflict (those name the
@@ -41,6 +82,6 @@ export function holdErrorMessage(error: unknown): string {
     case 'TOKEN_EXPIRED':
       return 'Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.';
     default:
-      return 'Không giữ được ghế. Vui lòng thử lại.';
+      return voucherErrorMessage(error) ?? 'Không giữ được ghế. Vui lòng thử lại.';
   }
 }
