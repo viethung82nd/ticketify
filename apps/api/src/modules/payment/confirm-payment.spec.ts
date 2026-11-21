@@ -285,6 +285,7 @@ describe('confirmPayment — branch A (PENDING, seats still HELD)', () => {
       showtimeId: SHOWTIME_ID,
       seatIds: [SEAT_A, SEAT_B],
       ticketIds: [mockTicketId(1), mockTicketId(2)],
+      voucherUse: 'none',
       reclaimed: false,
       showtimeStarted: false,
     });
@@ -298,6 +299,7 @@ describe('confirmPayment — branch A (PENDING, seats still HELD)', () => {
       'SELECT showtimes',
       'UPDATE showtime_seats',
       'UPDATE bookings',
+      'UPDATE voucher_usages',
       'INSERT tickets',
       'INSERT outbox_events',
     ]);
@@ -451,6 +453,7 @@ describe('confirmPayment — branch C (review)', () => {
         'UPDATE payments',
         'UPDATE bookings',
         'UPDATE showtime_seats',
+        'UPDATE voucher_usages',
         'INSERT outbox_events',
         'INSERT outbox_events',
       ]);
@@ -546,6 +549,7 @@ describe('confirmPayment — branch B (EXPIRED booking)', () => {
       'UPDATE showtime_seats',
       'UPDATE showtime_seats',
       'UPDATE bookings',
+      'UPDATE voucher_usages',
       'INSERT tickets',
       'INSERT outbox_events',
     ]);
@@ -586,6 +590,7 @@ describe('confirmPayment — branch B (EXPIRED booking)', () => {
       'UPDATE payments',
       'UPDATE bookings',
       'UPDATE showtime_seats',
+      'UPDATE voucher_usages',
       'INSERT outbox_events',
     ]);
     expect(mock.ticket.createManyAndReturn).not.toHaveBeenCalled();
@@ -596,6 +601,86 @@ describe('confirmPayment — branch B (EXPIRED booking)', () => {
  * The delivery handlers parse every payload with these schemas (ROADMAP 4.1–4.2), so a writer
  * that drops or renames a field must fail here rather than in the worker at run time.
  */
+describe('confirmPayment — voucher use (ROADMAP 5.2)', () => {
+  const CONSUME =
+    "UPDATE voucher_usages u SET status = 'CONSUMED', updated_at = $ FROM voucher_usages old " +
+    "WHERE u.id = old.id AND u.booking_id = $::uuid AND u.status <> 'CONSUMED' " +
+    'RETURNING old.status::text AS previous';
+  const neverLocksVoucher = (statements: readonly Statement[]) =>
+    expect(statements.some((s) => /\bvouchers\b/.test(s.sql))).toBe(false);
+
+  it('branch A: RESERVED → CONSUMED with the booking, without locking the voucher', async () => {
+    const { result, statements } = run(
+      [
+        paymentRow(),
+        bookingRow(BookingStatus.PENDING),
+        [],
+        heldByBooking,
+        showtimeRow(),
+        [{ previous: 'RESERVED' }],
+      ],
+      [1, 2, 1],
+    );
+
+    await expect(result).resolves.toMatchObject({ outcome: 'confirmed', voucherUse: 'consumed' });
+    const consume = statements.find((s) => s.sql.startsWith('UPDATE voucher_usages'));
+    expect(consume?.sql).toBe(CONSUME);
+    expect(consume?.values).toEqual([NOW, BOOKING_ID]);
+    neverLocksVoucher(statements);
+  });
+
+  it('branch B: a use the expiry had RELEASED is taken back (voucherUse: taken_back)', async () => {
+    const { result, statements } = run(
+      [
+        paymentRow(),
+        bookingRow(BookingStatus.EXPIRED),
+        [],
+        [{ status: BookingStatus.EXPIRED, showtime_id: SHOWTIME_ID }],
+        [
+          seatRow(SEAT_A, ShowtimeSeatStatus.AVAILABLE, null, null),
+          seatRow(SEAT_B, ShowtimeSeatStatus.AVAILABLE, null, null),
+        ],
+        showtimeRow(),
+        [{ previous: 'RELEASED' }],
+      ],
+      [1, 2, 2, 1],
+    );
+
+    await expect(result).resolves.toMatchObject({
+      outcome: 'confirmed',
+      reclaimed: true,
+      voucherUse: 'taken_back',
+    });
+    neverLocksVoucher(statements);
+  });
+
+  it('review: the RESERVED use is RELEASED in the IPN transaction', async () => {
+    const { result, statements } = run(
+      [
+        paymentRow(),
+        bookingRow(BookingStatus.PENDING),
+        [],
+        [
+          seatRow(SEAT_A, ShowtimeSeatStatus.HELD, BOOKING_ID, HELD_UNTIL),
+          seatRow(SEAT_B, ShowtimeSeatStatus.SOLD, OTHER_BOOKING_ID, null),
+        ],
+        showtimeRow(),
+        [{ seat_id: SEAT_A }],
+      ],
+      [1, 1, 1],
+    );
+
+    await expect(result).resolves.toMatchObject({ outcome: 'needs_review' });
+    const release = statements.find((s) => s.sql.startsWith('UPDATE voucher_usages'));
+    expect(release?.sql).toBe(
+      "UPDATE voucher_usages SET status = 'RELEASED', updated_at = $ " +
+        "WHERE booking_id = $::uuid AND status = 'RESERVED'",
+    );
+    expect(release?.values).toEqual([NOW, BOOKING_ID]);
+    neverLocksVoucher(statements);
+  });
+});
+
 describe('confirmPayment — outbox payloads match the schemas the worker parses', () => {
   const SCHEMAS = {
     'booking.confirmed': bookingConfirmedPayloadSchema,

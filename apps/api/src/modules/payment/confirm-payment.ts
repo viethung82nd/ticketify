@@ -8,6 +8,11 @@ import {
 import { lockSeatsOfBooking, type ShowtimeState, showtimeOf } from './booking-seats';
 import { reclaimSeatsForExpiredBooking } from './reclaim-seats';
 import { heldSeatsProblem, type SeatProblem, showtimeProblem } from './seat-settlement';
+import {
+  consumeVoucherUse,
+  releaseVoucherUse,
+  type VoucherUseOnConfirm,
+} from '../vouchers/voucher-usages';
 import { vnpayAmount } from './vnpay/vnpay-format';
 import { readVnpayIpn, type VnpayIpnResult } from './vnpay/vnpay-ipn';
 
@@ -67,6 +72,8 @@ export type ConfirmOutcome =
       showtimeId: string;
       seatIds: string[];
       ticketIds: string[];
+      /** What happened to the booking's voucher use (ROADMAP 5.2). */
+      voucherUse: VoucherUseOnConfirm;
       /** Branch B: the booking had EXPIRED and took its seats back. */
       reclaimed: boolean;
       /** The showtime had already started (owner decision pending, ROADMAP "Quyết định chờ"). */
@@ -123,7 +130,9 @@ interface Settlement {
  *    LOCKED`) skips the booking meanwhile, a cancel and a payment creation wait; a cancel that got
  *    the row first sees this payment PENDING and refuses (`BookingService.cancel`);
  * 3. the booking's seats `FOR UPDATE ORDER BY seat_id` (`lockSeatsOfBooking`), as a hold
- *    (NOWAIT), a cancel, an expiry and a showtime cancel do.
+ *    (NOWAIT), a cancel, an expiry and a showtime cancel do;
+ * then the booking's own `voucher_usages` row is updated (CONSUMED, or RELEASED for review), never
+ * the voucher row: no limit is checked here (ROADMAP 5.2, `VoucherUseOnConfirm`).
  * No other flow locks a payment row, and none waits for the booking row while holding a seat, so
  * no flow waits on this one in a cycle.
  *
@@ -261,7 +270,7 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
     };
   }
 
-  const ticketIds = await confirmBooking(
+  const { ticketIds, voucherUse } = await confirmBooking(
     tx,
     { booking, payment, seatIds: settlement.seatIds, reclaimed: settlement.reclaimed },
     input,
@@ -273,6 +282,7 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
     showtimeId: booking.showtime_id,
     seatIds: settlement.seatIds,
     ticketIds,
+    voucherUse,
     reclaimed: settlement.reclaimed,
     showtimeStarted,
   };
@@ -305,14 +315,15 @@ async function settleExpiredBooking(tx: Tx, booking: BookingRow, now: Date): Pro
 
 /**
  * Branches A and B: seats SOLD, booking CONFIRMED, one ISSUED ticket per seat, outbox
- * `booking.confirmed`. Returns the ticket ids. Every count is checked: anything off rolls the
- * whole IPN back rather than confirming a booking that does not own all of its seats.
+ * `booking.confirmed`, voucher use CONSUMED. Returns the ticket ids and what happened to the use.
+ * Every count is checked: anything off rolls the whole IPN back rather than confirming a booking
+ * that does not own all of its seats.
  */
 async function confirmBooking(
   tx: Tx,
   ctx: { booking: BookingRow; payment: PaymentRow; seatIds: string[]; reclaimed: boolean },
   input: ConfirmPaymentInput,
-): Promise<string[]> {
+): Promise<{ ticketIds: string[]; voucherUse: VoucherUseOnConfirm }> {
   const { booking, payment, seatIds, reclaimed } = ctx;
   const { now } = input;
 
@@ -328,6 +339,10 @@ async function confirmBooking(
     UPDATE bookings SET status = 'CONFIRMED', confirmed_at = ${now}, updated_at = ${now}
     WHERE id = ${booking.id}::uuid AND status IN ('PENDING', 'EXPIRED')`;
   if (confirmed !== 1) throw new Error(`Booking ${booking.id} could not be confirmed`);
+
+  // Its voucher use, if any, is spent (ROADMAP 5.2): RESERVED → CONSUMED, or RELEASED → CONSUMED
+  // when an expired booking is confirmed again (branch B; see VoucherUseOnConfirm).
+  const voucherUse = await consumeVoucherUse(tx, booking.id, now);
 
   // No skipDuplicates: ON CONFLICT DO NOTHING would also swallow a violation of the partial
   // unique index on (showtime_id, seat_id) and confirm a booking with a ticket missing.
@@ -363,14 +378,15 @@ async function confirmBooking(
     },
     now,
   );
-  return ticketIds;
+  return { ticketIds, voucherUse };
 }
 
 /**
  * Branch C (and a failed branch B): booking NEEDS_REVIEW, outbox `booking.needs_review`, no ticket.
  * The booking's own seats still HELD for it go back to AVAILABLE at once (outbox `seats.released`,
  * once, only when there are some): a booking under review will never use them, and left HELD they
- * would block a showtime cancel and wait for nobody. Returns those seat ids, sorted.
+ * would block a showtime cancel and wait for nobody. Its voucher use is RELEASED. Returns those
+ * seat ids, sorted.
  *
  * Every one of them is already locked: a seat HELD by the booking is one of its booking_seats,
  * which `lockSeatsOfBooking` locked FOR UPDATE ORDER BY seat_id in both branches. A SOLD seat and
@@ -394,6 +410,11 @@ async function sendToReview(
       AND status = 'HELD'
     RETURNING seat_id`;
   const releasedSeatIds = released.map((row) => row.seat_id).sort();
+
+  // The voucher use goes back (ROADMAP 5.2, awaiting the owner's review): the booking will never
+  // be served and its money is refunded by hand, so the customer keeps their use. A use already
+  // RELEASED by an earlier expiry stays so.
+  await releaseVoucherUse(tx, booking.id, now);
 
   await writeOutboxEvent(
     tx,

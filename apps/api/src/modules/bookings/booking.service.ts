@@ -28,6 +28,7 @@ import {
   voucherLimitRefusal,
   voucherTermsRefusal,
 } from '../vouchers/voucher-rules';
+import { releaseVoucherUse } from '../vouchers/voucher-usages';
 import { BookingExpirationQueue } from './booking-expiration-queue';
 import {
   bookingCode,
@@ -503,7 +504,8 @@ export class BookingService {
    *    same row, which conflicts with FOR UPDATE): the payments are read only after this lock, so
    *    a payment that committed first is always seen, and one that starts later waits for this
    *    cancel and then finds the booking EXPIRED;
-   * 2. the booking's own HELD seats `FOR UPDATE ORDER BY seat_id`.
+   * 2. the booking's own HELD seats `FOR UPDATE ORDER BY seat_id`;
+   * then its own `voucher_usages` row (RESERVED → RELEASED), never the voucher row.
    * An expiry that comes second skips the booking (SKIP LOCKED), a hold never waits (NOWAIT) and a
    * showtime cancel never locks `bookings`, so no flow waits on this one in a cycle.
    */
@@ -549,10 +551,12 @@ export class BookingService {
         SET status = 'AVAILABLE', booking_id = NULL, held_until = NULL
         WHERE booking_id = ${bookingId}::uuid AND status = 'HELD'
         RETURNING seat_id`;
+      // 7. Its voucher use goes back, as on an expiry (ROADMAP 5.2); the voucher is not locked.
+      await releaseVoucherUse(tx, bookingId, this.clock.now());
       return { showtimeId: booking.showtime_id, seatIds: rows.map((row) => row.seat_id).sort() };
     }, CANCEL_TX);
 
-    // 7. Only after the commit, and only when seats changed (SeatEvents skips an empty list).
+    // 8. Only after the commit, and only when seats changed (SeatEvents skips an empty list).
     if (released) this.seatEvents.released(released.showtimeId, released.seatIds);
   }
 
