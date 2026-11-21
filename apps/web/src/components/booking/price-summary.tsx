@@ -39,8 +39,8 @@ function Row({
 }) {
   return (
     <div className="flex justify-between gap-4 text-sm" data-testid={testId}>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-right text-cream tabular-nums">{children}</dd>
+      <dt className="min-w-0 break-words text-muted-foreground">{label}</dt>
+      <dd className="shrink-0 text-right whitespace-nowrap text-cream tabular-nums">{children}</dd>
     </div>
   );
 }
