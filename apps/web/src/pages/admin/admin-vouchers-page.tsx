@@ -28,6 +28,7 @@ import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { TableScroll } from '@/components/ui/table-scroll';
 import { FormAlert } from '@/features/auth/auth-card';
 import { catalogErrorMessage, errorCodeOf } from '@/features/catalog/catalog-errors';
 import {
@@ -581,7 +582,7 @@ export function AdminVouchersPage() {
       ) : data.length === 0 ? (
         <EmptyState title="Chưa có voucher nào" />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-white/10 bg-surface">
+        <TableScroll label="Danh sách voucher">
           <table className="w-full min-w-[860px] text-left text-sm">
             <caption className="sr-only">Danh sách voucher</caption>
             <thead className="border-b border-white/10 text-xs text-muted-foreground uppercase">
@@ -617,7 +618,7 @@ export function AdminVouchersPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
       <DeleteVoucherDialog voucher={toDelete} onClose={() => setToDelete(null)} />
     </AdminShell>

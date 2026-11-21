@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
 import { Textarea } from '@/components/ui/textarea';
+import { TableScroll } from '@/components/ui/table-scroll';
 import {
   reviewKeys,
   resolveReview,
@@ -258,7 +259,7 @@ export function AdminReviewPage() {
         />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-2xl border border-white/10 bg-surface">
+          <TableScroll label="Đơn cần xử lý">
             <table className="w-full min-w-[900px] text-left text-sm">
               <caption className="sr-only">Đơn đã thu tiền nhưng mất ghế</caption>
               <thead className="border-b border-white/10 text-xs text-muted-foreground uppercase">
@@ -290,7 +291,7 @@ export function AdminReviewPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
           <div className="mt-6">
             <Pagination
               page={data.page}

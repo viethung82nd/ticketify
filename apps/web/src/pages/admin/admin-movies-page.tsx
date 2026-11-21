@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { TableScroll } from '@/components/ui/table-scroll';
 import { FormAlert } from '@/features/auth/auth-card';
 import { deleteMovie } from '@/features/catalog/catalog-api';
 import { catalogErrorMessage } from '@/features/catalog/catalog-errors';
@@ -126,10 +127,7 @@ export function AdminMoviesPage() {
         </EmptyState>
       ) : (
         <div className="space-y-6">
-          <div
-            className="overflow-x-auto rounded-2xl border border-white/10 bg-surface"
-            aria-busy={isFetching}
-          >
+          <TableScroll label="Danh sách phim" busy={isFetching}>
             <table className="w-full min-w-[720px] text-left text-sm">
               <caption className="sr-only">Danh sách phim ({data.total})</caption>
               <thead className="border-b border-white/10 text-xs text-muted-foreground uppercase">
@@ -199,7 +197,7 @@ export function AdminMoviesPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
           <Pagination
             page={data.page}
             pageSize={data.pageSize}

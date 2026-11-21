@@ -26,6 +26,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { TableScroll } from '@/components/ui/table-scroll';
 import { FormAlert } from '@/features/auth/auth-card';
 import { catalogErrorMessage, errorCodeOf } from '@/features/catalog/catalog-errors';
 import { formatReleaseDate } from '@/features/catalog/movie-labels';
@@ -143,7 +144,7 @@ function PriceTable({ prices }: { prices: SeatPrice[] }) {
           Lưu cả bảng{dirty.length > 0 ? ` (${dirty.length})` : ''}
         </Button>
       </div>
-      <div className="overflow-x-auto rounded-2xl border border-white/10 bg-surface">
+      <TableScroll label="Bảng giá vé">
         <table className="w-full min-w-[720px] text-left text-sm">
           <caption className="sr-only">Giá vé theo loại ghế và loại ngày</caption>
           <thead className="border-b border-white/10">
@@ -257,7 +258,7 @@ function PriceTable({ prices }: { prices: SeatPrice[] }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </section>
   );
 }
