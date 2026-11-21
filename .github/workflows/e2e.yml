@@ -1,0 +1,116 @@
+name: E2E (Playwright)
+
+# The main customer flow in a real browser (ROADMAP 5.8): sign in → pick seats → pay (VNPay
+# simulated by the test with a signed IPN and return URL) → see the confirmed booking. Playwright
+# starts the built API and `vite preview` itself (apps/web/playwright.config.ts); this workflow
+# only provides Postgres and Redis, migrates and seeds the database, and builds both apps.
+on:
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/e2e.yml'
+  # The same paths as the PR trigger: a merge commit is re-validated when it changes the app.
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+
+concurrency:
+  # Per PR (pull_request.number) or per branch/tag (github.ref): two different PRs never share a
+  # group, so they cannot cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A new commit on a PR cancels that PR's stale run; a push to main is never cancelled. Safe: the
+  # database and the servers live only inside the runner.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: booking flow in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://ticketify:ticketify@localhost:5432/ticketify
+      REDIS_URL: redis://localhost:6379
+      # Test-only seed passwords; the e2e signs in as the seeded admin to set up its scene.
+      SEED_ADMIN_PASSWORD: e2e-admin-password
+      SEED_STAFF_PASSWORD: e2e-staff-password
+      SEED_USER_PASSWORD: e2e-user-password
+      E2E_ADMIN_PASSWORD: e2e-admin-password
+    # Same images as docker-compose.yml.
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_USER: ticketify
+          POSTGRES_PASSWORD: ticketify
+          POSTGRES_DB: ticketify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ticketify"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4.12-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Version comes from "packageManager" in package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Also builds packages/shared (prepare) and generates the Prisma client (postinstall).
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Migrate and seed the database
+        run: |
+          pnpm --filter @ticketify/api db:deploy
+          pnpm --filter @ticketify/api db:seed
+
+      # The API runs from dist/; the web app is served as built (VITE_API_URL defaults to :3000).
+      - name: Build the API and the web app
+        run: |
+          pnpm --filter @ticketify/api build
+          pnpm --filter @ticketify/web build
+
+      - name: Install Chromium
+        run: pnpm --filter @ticketify/web exec playwright install --with-deps chromium
+
+      - name: E2E
+        run: pnpm --filter @ticketify/web test:e2e
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

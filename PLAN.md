@@ -335,7 +335,7 @@ Tiêu chí chính là **tính đúng đắn**: state machine, tranh chấp, idem
 | Unit | Jest | Tính giá (gồm múi giờ, ngày lễ), chữ ký VNPay, chuyển trạng thái, guard |
 | Integration | Jest + Testcontainers (Postgres, Redis) | SQL khóa, constraint, outbox relay, processor |
 | E2E API | Supertest + Mailpit | Đăng ký → giữ ghế → IPN giả lập có chữ ký → CONFIRMED → PDF/email |
-| Frontend | Vitest + RTL, Playwright | Sơ đồ ghế, form; 1–2 luồng e2e chính. Vitest + RTL đã có từ 5.7 (`apps/web`, `*.test.tsx`, chạy trong `pnpm test:unit`) |
+| Frontend | Vitest + RTL, Playwright | Sơ đồ ghế, form; 1–2 luồng e2e chính. Vitest + RTL đã có từ 5.7 (`apps/web`, `*.test.tsx`, chạy trong `pnpm test:unit`); luồng Playwright đặt vé → thanh toán (IPN giả lập) → xem vé từ 5.8 (`apps/web/e2e`, workflow `E2E (Playwright)`) |
 
 ### Kịch bản bắt buộc (acceptance)
 
