@@ -1,4 +1,9 @@
-import { BOOKING_LIMITS, holdBookingRequestSchema, isIdempotencyKey } from '@ticketify/shared';
+import {
+  BOOKING_LIMITS,
+  holdBookingRequestSchema,
+  isIdempotencyKey,
+  VOUCHER_LIMITS,
+} from '@ticketify/shared';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { HoldBookingDto } from './hold-booking.dto';
@@ -96,6 +101,33 @@ describe('HoldBookingDto (and the web schema)', () => {
     expect(instance.showtimeId).toBe(SHOWTIME);
     expect(instance.seatIds).toEqual([SEAT(1)]);
     expect(instance.comboItems?.[0]?.comboId).toBe(COMBO(1));
+  });
+
+  describe('voucherCode', () => {
+    const body = (voucherCode: unknown) => ({
+      showtimeId: SHOWTIME,
+      seatIds: seats(1),
+      voucherCode,
+    });
+
+    it('is optional, and trimmed and upper-cased like the admin code', () => {
+      expectBoth({ showtimeId: SHOWTIME, seatIds: seats(1) }, []);
+      expectBoth(body('SUMMER10'), []);
+      expectBoth(body('  summer10 '), []);
+      expect(check(body('  summer10 ')).instance.voucherCode).toBe('SUMMER10');
+      expect(holdBookingRequestSchema.parse(body('  summer10 ')).voucherCode).toBe('SUMMER10');
+    });
+
+    it.each([
+      ['too short', 'ABC'],
+      ['too long', 'A'.repeat(VOUCHER_LIMITS.codeMax + 1)],
+      ['a dash', 'SUMMER-10'],
+      ['an accented letter', 'GIẢMGIÁ'],
+      ['blank', '   '],
+      ['not a string', 10],
+    ])('rejects %s (400, nothing reaches the database)', (_label, code) => {
+      expectBoth(body(code), ['voucherCode']);
+    });
   });
 });
 

@@ -1,5 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BOOKING_LIMITS } from '@ticketify/shared';
+import {
+  BOOKING_LIMITS,
+  normalizeVoucherCode,
+  VOUCHER_CODE_PATTERN,
+  VOUCHER_LIMITS,
+} from '@ticketify/shared';
 import { Transform, type TransformFnParams, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -8,7 +13,10 @@ import {
   IsArray,
   IsInt,
   IsOptional,
+  IsString,
   IsUUID,
+  Length,
+  Matches,
   Max,
   Min,
   ValidateNested,
@@ -17,6 +25,9 @@ import {
 /** UUIDs are compared lower-case, so `A…` and `a…` are the same seat (duplicates, hash). */
 const lowerCase = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.toLowerCase() : value;
+/** Voucher codes are stored upper-case: " summer10 " is SUMMER10 (as in the admin DTO). */
+const voucherCode = ({ value }: TransformFnParams): unknown =>
+  typeof value === 'string' ? normalizeVoucherCode(value) : value;
 const lowerCaseEach = ({ value }: TransformFnParams): unknown =>
   Array.isArray(value)
     ? value.map((item: unknown) => (typeof item === 'string' ? item.toLowerCase() : item))
@@ -38,8 +49,8 @@ export class ComboItemDto {
 
 /**
  * Mirrors `holdBookingRequestSchema`. Count, duplicates and format are value limits
- * (`400 VALIDATION_FAILED`); seat existence, couple pairs, availability and combos being on sale
- * need the database.
+ * (`400 VALIDATION_FAILED`), and so is a malformed `voucherCode`; seat existence, couple pairs,
+ * availability, combos being on sale and whether the voucher applies need the database.
  */
 export class HoldBookingDto {
   @ApiProperty()
@@ -73,4 +84,19 @@ export class HoldBookingDto {
   @ValidateNested({ each: true })
   @Type(() => ComboItemDto)
   comboItems?: ComboItemDto[];
+
+  @ApiPropertyOptional({
+    example: 'SUMMER10',
+    minLength: VOUCHER_LIMITS.codeMin,
+    maxLength: VOUCHER_LIMITS.codeMax,
+    description:
+      'Voucher to apply; trimmed and upper-cased. The API computes the discount and reserves ' +
+      'one use of the voucher with the seats (ROADMAP 5.2)',
+  })
+  @Transform(voucherCode)
+  @IsOptional()
+  @IsString()
+  @Length(VOUCHER_LIMITS.codeMin, VOUCHER_LIMITS.codeMax)
+  @Matches(VOUCHER_CODE_PATTERN, { message: 'voucherCode may contain only letters A-Z and digits' })
+  voucherCode?: string;
 }

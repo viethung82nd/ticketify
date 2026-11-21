@@ -65,4 +65,31 @@ describe('requestHash', () => {
     });
     expect(asSeat).not.toBe(asCombo);
   });
+
+  describe('voucherCode (ROADMAP 5.2)', () => {
+    it('no voucher hashes as before vouchers existed: left out, undefined and null alike', () => {
+      // Pinned: the hash of a voucher-less request must not change, or a retry sent across the
+      // deploy would get 422 IDEMPOTENCY_KEY_REUSED for the booking it already made.
+      // The literal is what the code before 5.2 gave for `base`.
+      const pinned = '3bfa8900b2c4e7c1d6f712cf13450e5acd00cd20440574bd35c37fc1a70cc978';
+      expect(requestHash(base)).toBe(pinned);
+      expect(requestHash({ ...base, voucherCode: undefined })).toBe(pinned);
+      expect(requestHash({ ...base, voucherCode: null })).toBe(pinned);
+    });
+
+    it('a voucher, another voucher and none are three different requests', () => {
+      const hashes = new Set([
+        requestHash(base),
+        requestHash({ ...base, voucherCode: 'SUMMER10' }),
+        requestHash({ ...base, voucherCode: 'WINTER20' }),
+      ]);
+      expect(hashes.size).toBe(3);
+    });
+
+    it('the letter case of the code does not matter', () => {
+      expect(requestHash({ ...base, voucherCode: 'summer10' })).toBe(
+        requestHash({ ...base, voucherCode: 'SUMMER10' }),
+      );
+    });
+  });
 });

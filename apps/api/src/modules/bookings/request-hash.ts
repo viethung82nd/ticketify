@@ -4,6 +4,8 @@ export interface HoldPayload {
   showtimeId: string;
   seatIds: readonly string[];
   comboItems: readonly { comboId: string; quantity: number }[];
+  /** Already normalized (trimmed, upper case); `null` or left out = no voucher. */
+  voucherCode?: string | null;
 }
 
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -26,6 +28,8 @@ const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
  * SHA-256 (hex) of the normalized hold payload: ids lower-cased, `seatIds` sorted, `comboItems`
  * sorted by `comboId`, keys sorted. The same booking asked for in another order gives the same
  * hash. Neither the user nor the time is part of it: the `Idempotency-Key` is already per user.
+ * `voucherCode` (upper-cased) is part of it only when there is one, so a request without a
+ * voucher hashes exactly as it did before vouchers existed (ROADMAP 5.2).
  */
 export function requestHash(payload: HoldPayload): string {
   const normalized: Json = {
@@ -34,6 +38,7 @@ export function requestHash(payload: HoldPayload): string {
     comboItems: payload.comboItems
       .map((item) => ({ comboId: item.comboId.toLowerCase(), quantity: item.quantity }))
       .sort((a, b) => byString(a.comboId, b.comboId)),
+    ...(payload.voucherCode ? { voucherCode: payload.voucherCode.toUpperCase() } : {}),
   };
   return createHash('sha256').update(canonicalJson(normalized)).digest('hex');
 }
