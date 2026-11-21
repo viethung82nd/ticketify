@@ -16,11 +16,15 @@ Three kinds of test, three Jest projects. The suffix is what selects a file, so 
 | integration | `apps/api/test/integration/<domain>/` | `*.int-spec.ts` | `jest.integration.config.js` | — | `pnpm test:integration`, `ci.yml` |
 | concurrency scenario (A, B, C) | `apps/api/test/scenarios/` | `*.spec.ts` | `jest.scenarios.config.js` | `RUN_SCENARIO_TESTS=1` | `booking-scenarios.yml` only |
 
-Integration suites are grouped by domain: `auth`, `catalog`, `booking`, `payment`, `delivery`, `infra`, `platform`, `schema`. Two suites stay at the top of `test/integration/` instead, because `scenario-d.yml` and `worker-shutdown.yml` name them verbatim in their `paths:` filters: `scenario-d.int-spec.ts` and `worker-shutdown.int-spec.ts`. Moving either one means editing its workflow in the same commit, or the workflow stops firing without any error.
+Integration suites are grouped by domain: `auth`, `catalog`, `booking`, `payment`, `voucher`, `delivery`, `infra`, `platform`, `schema`. Two suites stay at the top of `test/integration/` instead, because `scenario-d.yml` and `worker-shutdown.yml` name them verbatim in their `paths:` filters: `scenario-d.int-spec.ts` and `worker-shutdown.int-spec.ts`. Moving either one means editing its workflow in the same commit, or the workflow stops firing without any error.
 
 Shared, not owned by one project: `test/support/` (helpers: app env, auth, database, redis, http, fixtures) and `test/setup/` (containers and the template database). `test/setup/` is used by both the integration and the scenarios project — `test/scenarios/support/global-setup.ts` wraps it and only runs it when scenarios are enabled — so it stays outside `test/integration/`.
 
 Two integration suites read files under `docs/` through `__dirname`, so the documents cannot drift from what runs: `schema/erd.int-spec.ts` reads `docs/erd.md`, and `payment/admin-review.int-spec.ts` reads `docs/needs-review-queries.sql`. Those paths are not typechecked — if you move a suite or a document, open both ends.
+
+A test that holds a row lock from its own `pg` `Client` to make the API wait (the voucher lock in `booking/booking-voucher-race.int-spec.ts`) must not be able to hang forever: if the code under test ever waits without a `lock_timeout`, the `await` on the request never returns, the `finally` that would roll the lock back never runs, and Jest stops only at the job timeout. Give such a session a safety `setTimeout` that rolls it back after a few times the expected wait, and clear it in `finally`, so the test fails instead of hanging (5.3 found this with a mutation that dropped the voucher's `FOR UPDATE`: the `voucher_usages` insert then waited on its foreign key's `FOR KEY SHARE`).
+
+To run a few integration folders one suite at a time (the clean signal on Windows, see the flakiness note in ROADMAP), pass the flag **without** `--`: `pnpm --filter @ticketify/api test:integration --runInBand test/integration/booking`. After `--` Jest takes `--runInBand` as a path pattern, the suites run in parallel, and with the larger pools of some suites Postgres answers `sorry, too many clients already` (its limit is 100).
 
 ## Tests that need OS signals
 
