@@ -30,9 +30,12 @@ import { type LiveState, useSeatMap } from '@/features/seats/use-seat-map';
 import { cinemaDate, cinemaTime, longDayLabel } from '@/lib/cinema-time';
 import { cn } from '@/lib/utils';
 
-/** Router state handed to the booking page, to compare the server total with what was shown. */
+/**
+ * Router state handed to the booking detail page, to compare the server's subtotal with the one
+ * shown here. The subtotal, not the total: the discount is the API's alone to compute.
+ */
 export interface BookingPageState {
-  localTotal?: number;
+  localSubtotal?: number;
 }
 
 interface Notice {
@@ -178,7 +181,7 @@ export function BookingPage() {
       return holdBooking({ showtimeId, seatIds, comboItems }, attempt.current.key);
     },
     onSuccess: (booking) => {
-      const state: BookingPageState = { localTotal };
+      const state: BookingPageState = { localSubtotal: localTotal };
       void navigate(`/bookings/${booking.id}`, { state });
     },
     onError: async (error) => {
