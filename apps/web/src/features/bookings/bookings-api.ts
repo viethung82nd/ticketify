@@ -19,6 +19,8 @@ export interface HoldRequest {
   showtimeId: string;
   seatIds: string[];
   comboItems: ComboItem[];
+  /** Normalized (`voucherCodeSchema`); left out of the body when there is none. */
+  voucherCode?: string;
 }
 
 /**

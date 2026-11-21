@@ -3,17 +3,22 @@ import {
   BookingErrorCode,
   type ComboItem,
   formatVnd,
+  normalizeVoucherCode,
   type ShowtimeSeat,
+  voucherCodeSchema,
 } from '@ticketify/shared';
 import { useMutation } from '@tanstack/react-query';
-import { AlertTriangle, ChevronLeft, Loader2, Minus, Plus, WifiOff } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, Loader2, Minus, Plus, WifiOff, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { AgeBadge } from '@/components/catalog/movie-card';
 import { EmptyState, ErrorState } from '@/components/catalog/query-states';
 import { BookingStepper } from '@/components/booking/booking-stepper';
+import { type PriceLine, PriceSummary } from '@/components/booking/price-summary';
 import { Button } from '@/components/ui/button';
-import { holdErrorMessage } from '@/features/bookings/booking-errors';
+import { FormField } from '@/components/ui/form-field';
+import { Input } from '@/components/ui/input';
+import { holdErrorMessage, voucherErrorMessage } from '@/features/bookings/booking-errors';
 import { holdBooking, pendingBookingOf, seatIdsOf } from '@/features/bookings/bookings-api';
 import { errorCodeOf } from '@/features/catalog/catalog-errors';
 import { useCombos } from '@/features/combos/combos-api';
@@ -30,9 +35,12 @@ import { type LiveState, useSeatMap } from '@/features/seats/use-seat-map';
 import { cinemaDate, cinemaTime, longDayLabel } from '@/lib/cinema-time';
 import { cn } from '@/lib/utils';
 
-/** Router state handed to the booking page, to compare the server total with what was shown. */
+/**
+ * Router state handed to the booking detail page, to compare the server's subtotal with the one
+ * shown here. The subtotal, not the total: the discount is the API's alone to compute.
+ */
 export interface BookingPageState {
-  localTotal?: number;
+  localSubtotal?: number;
 }
 
 interface Notice {
@@ -127,6 +135,11 @@ export function BookingPage() {
   const [announcement, setAnnouncement] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  /** The voucher code as typed; blank = no voucher. */
+  const [voucherInput, setVoucherInput] = useState('');
+  /** Why the code was refused, by the format check here or by the API. */
+  const [voucherError, setVoucherError] = useState<string | null>(null);
+  const voucherRef = useRef<HTMLInputElement>(null);
   /** Seats of the request in flight: their own `seat:held` must not read as "someone took it". */
   const submitting = useRef<Set<string> | null>(null);
   /** One Idempotency-Key per attempt: kept for a retry of the same selection, new once it changes. */
@@ -166,22 +179,44 @@ export function BookingPage() {
     0,
   );
   const localTotal = seatsTotal + combosTotal;
+  /** What is typed, checked for format: `undefined` when the field is blank. */
+  const voucherParsed =
+    voucherInput.trim() === '' ? undefined : voucherCodeSchema.safeParse(voucherInput);
+  /** The code to send, normalized; `undefined` for none or while what is typed is not a code. */
+  const voucherCode = voucherParsed?.success ? voucherParsed.data : undefined;
+
+  const refuseVoucher = (text: string) => {
+    // Focus moves to the field, whose error is its aria-describedby: no second copy elsewhere.
+    setVoucherError(text);
+    voucherRef.current?.focus();
+  };
 
   const hold = useMutation({
     mutationFn: () => {
       const seatIds = [...selected].sort();
-      const signature = JSON.stringify({ seatIds, comboItems });
+      // The voucher is part of the request hash: another code needs another key.
+      const signature = JSON.stringify({ seatIds, comboItems, voucherCode });
       if (attempt.current?.signature !== signature) {
         attempt.current = { signature, key: crypto.randomUUID() };
       }
       submitting.current = new Set(seatIds);
-      return holdBooking({ showtimeId, seatIds, comboItems }, attempt.current.key);
+      return holdBooking(
+        { showtimeId, seatIds, comboItems, ...(voucherCode ? { voucherCode } : {}) },
+        attempt.current.key,
+      );
     },
     onSuccess: (booking) => {
-      const state: BookingPageState = { localTotal };
+      const state: BookingPageState = { localSubtotal: localTotal };
       void navigate(`/bookings/${booking.id}`, { state });
     },
     onError: async (error) => {
+      // A voucher refusal held nothing: the seats stay chosen, the message goes under the code.
+      const voucherText = voucherErrorMessage(error);
+      if (voucherText) {
+        setNotice(null);
+        refuseVoucher(voucherText);
+        return;
+      }
       const code = errorCodeOf(error);
       if (code === BookingErrorCode.SEAT_UNAVAILABLE || code === BookingErrorCode.SEAT_LOCKED) {
         // Seats lost to someone else: drop exactly those, reload the map, name them.
@@ -240,6 +275,14 @@ export function BookingPage() {
     setQuantities((current) => ({ ...current, [comboId]: quantity }));
   };
 
+  const submit = () => {
+    if (voucherParsed && !voucherParsed.success) {
+      refuseVoucher(voucherParsed.error.issues[0]?.message ?? 'Mã giảm giá không hợp lệ.');
+      return;
+    }
+    hold.mutate();
+  };
+
   if (query.isPending) {
     return (
       <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
@@ -269,6 +312,21 @@ export function BookingPage() {
   }
 
   const { showtime } = map;
+  const priceLines: PriceLine[] = [
+    { key: 'seats', label: `Vé · ${chosenSeats.length} ghế`, amount: seatsTotal },
+    ...(comboItems.length === 0
+      ? [{ key: 'combos', label: 'Combo', amount: 0 }]
+      : (combos.data ?? [])
+          .filter((combo) => (quantities[combo.id] ?? 0) > 0)
+          .map((combo) => {
+            const quantity = quantities[combo.id] ?? 0;
+            return {
+              key: combo.id,
+              label: `${combo.name} × ${quantity}`,
+              amount: combo.price * quantity,
+            };
+          })),
+  ];
   const canContinue = selected.length > 0 && live.phase === 'live' && !hold.isPending;
   const blockedReason =
     selected.length === 0
@@ -378,25 +436,66 @@ export function BookingPage() {
             )}
           </div>
 
-          <dl className="space-y-1.5 border-t border-white/10 pt-4 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">Vé</dt>
-              <dd className="tabular-nums">{vnd(seatsTotal)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">Combo</dt>
-              <dd className="tabular-nums">{vnd(combosTotal)}</dd>
-            </div>
-            <div className="flex justify-between pt-1 text-base font-bold text-cream">
-              <dt>Tổng cộng</dt>
-              <dd className="text-brand tabular-nums" data-testid="local-total">
-                {vnd(localTotal)}
-              </dd>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Tạm tính. Máy chủ tính lại tổng tiền khi tạo đơn.
-            </p>
-          </dl>
+          <div className="border-t border-white/10 pt-4">
+            <FormField
+              label="Mã giảm giá"
+              error={voucherError ? { type: 'voucher', message: voucherError } : undefined}
+              hint="Không bắt buộc. Số tiền giảm được tính khi giữ ghế."
+            >
+              <Input
+                ref={voucherRef}
+                value={voucherInput}
+                placeholder="Nhập mã nếu có"
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                disabled={hold.isPending}
+                className="uppercase placeholder:normal-case"
+                data-testid="voucher-input"
+                onChange={(event) => {
+                  setVoucherInput(event.target.value);
+                  setVoucherError(null);
+                }}
+                onBlur={() => setVoucherInput((value) => normalizeVoucherCode(value))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && canContinue) submit();
+                }}
+              />
+            </FormField>
+            {voucherInput !== '' && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-1 h-8 px-2 text-muted-foreground"
+                disabled={hold.isPending}
+                onClick={() => {
+                  setVoucherInput('');
+                  setVoucherError(null);
+                  voucherRef.current?.focus();
+                }}
+              >
+                <X aria-hidden />
+                Bỏ mã
+              </Button>
+            )}
+          </div>
+
+          <div className="border-t border-white/10 pt-4">
+            <PriceSummary
+              lines={priceLines}
+              subtotal={localTotal}
+              voucher={voucherCode ? { code: voucherCode, discount: null } : null}
+              total={localTotal}
+              totalLabel="Tổng cộng"
+              totalTestId="local-total"
+              note={
+                voucherCode
+                  ? 'Tạm tính, chưa trừ giảm giá. Máy chủ tính giảm giá và tổng tiền khi giữ ghế.'
+                  : 'Tạm tính. Máy chủ tính lại tổng tiền khi tạo đơn.'
+              }
+            />
+          </div>
 
           {notice && (
             <div
@@ -421,7 +520,7 @@ export function BookingPage() {
               className="h-11 w-full rounded-xl text-base font-semibold disabled:bg-white/10 disabled:text-muted-foreground disabled:opacity-100"
               disabled={!canContinue}
               aria-describedby={blockedReason ? 'continue-hint' : undefined}
-              onClick={() => hold.mutate()}
+              onClick={submit}
             >
               {hold.isPending && <Loader2 className="animate-spin" aria-hidden />}
               Tiếp tục

@@ -1,9 +1,10 @@
 import { type Booking, BookingStatus, formatVnd } from '@ticketify/shared';
 import { AlertTriangle, CircleCheck, Clock, Download, Info, TimerOff } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import { EmptyState, ErrorState } from '@/components/catalog/query-states';
 import { BookingStepper } from '@/components/booking/booking-stepper';
+import { PriceSummary } from '@/components/booking/price-summary';
 import { Button } from '@/components/ui/button';
 import { useBooking } from '@/features/bookings/bookings-api';
 import { formatCountdown, useCountdown } from '@/features/bookings/use-countdown';
@@ -118,15 +119,6 @@ function TicketPdfButton({ bookingId }: { bookingId: string }) {
   );
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex justify-between gap-4 text-sm">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-right text-cream tabular-nums">{children}</dd>
-    </div>
-  );
-}
-
 /**
  * `/bookings/:id` (ROADMAP 2.13): the booking and, while it is PENDING, a countdown to `expiresAt`
  * anchored to the server clock. Past it, or once the API reports `expired`, the "Đơn đã hết hạn"
@@ -136,7 +128,7 @@ export function BookingDetailPage() {
   const { id = '' } = useParams();
   const location = useLocation();
   const { data, isPending, error, refetch } = useBooking(id);
-  const shownTotal = (location.state as BookingPageState | null)?.localTotal;
+  const shownSubtotal = (location.state as BookingPageState | null)?.localSubtotal;
   /** The countdown reached 0 on the server clock (the API may still say PENDING: grace period). */
   const [clockElapsed, setClockElapsed] = useState(false);
   const onElapsed = useCallback(() => {
@@ -188,14 +180,14 @@ export function BookingDetailPage() {
       </header>
       <BookingStepper current={2} />
 
-      {shownTotal !== undefined && shownTotal !== booking.total && (
+      {shownSubtotal !== undefined && shownSubtotal !== booking.subtotal && (
         <p
           role="status"
           className="flex gap-2 rounded-xl border border-brand/40 bg-brand/10 px-4 py-2.5 text-sm text-cream"
         >
           <Info className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
-          Tổng tiền máy chủ tính là {vnd(booking.total)}, khác với {vnd(shownTotal)} hiển thị lúc
-          chọn (giá combo hoặc giá vé vừa thay đổi). Đơn dùng tổng của máy chủ.
+          Tạm tính máy chủ tính là {vnd(booking.subtotal)}, khác với {vnd(shownSubtotal)} hiển thị
+          lúc chọn (giá combo hoặc giá vé vừa thay đổi). Đơn dùng giá của máy chủ.
         </p>
       )}
 
@@ -234,27 +226,29 @@ export function BookingDetailPage() {
             {longDayLabel(cinemaDate(booking.showtime.startsAt))} · {booking.room.name}
           </p>
         </div>
-        <dl className="space-y-2 border-t border-white/10 pt-4">
-          {booking.seats.map((seat) => (
-            <Row key={seat.seatId} label={`Ghế ${seat.label} · ${SEAT_TYPE_NAMES[seat.type]}`}>
-              {vnd(seat.price)}
-            </Row>
-          ))}
-          {booking.combos.map((combo) => (
-            <Row key={combo.comboId} label={`${combo.name} × ${combo.quantity}`}>
-              {vnd(combo.amount)}
-            </Row>
-          ))}
-        </dl>
-        <dl className="space-y-2 border-t border-white/10 pt-4">
-          {booking.discount > 0 && <Row label="Giảm giá">−{vnd(booking.discount)}</Row>}
-          <div className="flex justify-between text-base font-bold text-cream">
-            <dt>Tổng cộng</dt>
-            <dd className="text-brand tabular-nums" data-testid="booking-total">
-              {vnd(booking.total)}
-            </dd>
-          </div>
-        </dl>
+        <div className="border-t border-white/10 pt-4">
+          <PriceSummary
+            lines={[
+              ...booking.seats.map((seat) => ({
+                key: seat.seatId,
+                label: `Ghế ${seat.label} · ${SEAT_TYPE_NAMES[seat.type]}`,
+                amount: seat.price,
+              })),
+              ...booking.combos.map((combo) => ({
+                key: combo.comboId,
+                label: `${combo.name} × ${combo.quantity}`,
+                amount: combo.amount,
+              })),
+            ]}
+            subtotal={booking.subtotal}
+            voucher={
+              booking.voucherCode ? { code: booking.voucherCode, discount: booking.discount } : null
+            }
+            total={booking.total}
+            totalLabel="Tổng cộng"
+            totalTestId="booking-total"
+          />
+        </div>
         {showClock && (
           <div className="space-y-3 border-t border-white/10 pt-4">
             <PayWithVnpayButton bookingId={booking.id} onStale={() => void refetch()} />
