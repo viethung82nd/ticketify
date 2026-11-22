@@ -405,6 +405,87 @@ describe('database constraints (raw SQL migration)', () => {
         });
       });
     });
+
+    describe('MoMo columns (*_payment_provider_momo migration)', () => {
+      let m = 0;
+      const momoPayment = (
+        bookingId: string,
+        data: { requestId?: string | null; transactionId?: string; vnpNo?: string } = {},
+      ) =>
+        prisma.payment.create({
+          data: {
+            bookingId,
+            provider: 'MOMO',
+            txnRef: `momo-${++m}-${bookingId.slice(-6)}`,
+            amount: 90_000,
+            status: 'PENDING',
+            providerRequestId:
+              data.requestId === undefined ? `req-${m}-${bookingId}` : data.requestId,
+            providerTransactionId: data.transactionId,
+            vnpTransactionNo: data.vnpNo,
+          },
+        });
+
+      it('payments_momo_request_id_check: rejects a MoMo payment without its requestId', async () => {
+        const { booking } = await bookingWithPayments();
+
+        await expectViolation(momoPayment(booking.id, { requestId: null }), {
+          sqlState: SQLSTATE.checkViolation,
+          constraint: 'payments_momo_request_id_check',
+        });
+      });
+
+      it('payments_vnp_transaction_no_provider_check: rejects a VNPay number on a MoMo payment', async () => {
+        const { booking } = await bookingWithPayments();
+
+        await expectViolation(momoPayment(booking.id, { vnpNo: '14999999' }), {
+          sqlState: SQLSTATE.checkViolation,
+          constraint: 'payments_vnp_transaction_no_provider_check',
+        });
+      });
+
+      it('payments_provider_provider_transaction_id_key: one transaction id per provider', async () => {
+        const first = await bookingWithPayments();
+        const second = await bookingWithPayments();
+        await momoPayment(first.booking.id, { transactionId: '4088878653' });
+
+        await expectViolation(momoPayment(second.booking.id, { transactionId: '4088878653' }), {
+          sqlState: SQLSTATE.uniqueViolation,
+          constraint: 'payments_provider_provider_transaction_id_key',
+        });
+      });
+
+      it('accepts: MoMo payments with requestIds, the same transaction id under another provider, many NULLs', async () => {
+        const { booking, payment } = await bookingWithPayments();
+        await momoPayment(booking.id, { transactionId: '4088878654' });
+
+        await expect(
+          Promise.all([
+            momoPayment(booking.id),
+            momoPayment(booking.id),
+            prisma.payment.create({
+              data: {
+                bookingId: booking.id,
+                txnRef: `vnpay-same-id-${booking.id}`,
+                amount: 90_000,
+                providerTransactionId: '4088878654',
+              },
+            }),
+            payment('PENDING'),
+          ]),
+        ).resolves.toHaveLength(4);
+      });
+
+      it('payments_provider_request_id_key: a requestId names one attempt', async () => {
+        const { booking } = await bookingWithPayments();
+        await momoPayment(booking.id, { requestId: 'same-request-id' });
+
+        await expectViolation(momoPayment(booking.id, { requestId: 'same-request-id' }), {
+          sqlState: SQLSTATE.uniqueViolation,
+          constraint: 'payments_provider_request_id_key',
+        });
+      });
+    });
   });
 
   describe('vouchers (ROADMAP 5.1)', () => {

@@ -98,10 +98,18 @@ enum PaymentStatus {
   SUCCESS
   FAILED
   EXPIRED
-  /// Paid at VNPay after another attempt had already paid the booking: refund by hand.
+  /// Paid at the gateway after another attempt had already paid the booking: refund by hand.
   REFUND_REQUIRED
 
   @@map("payment_status")
+}
+
+/// The gateway a payment attempt goes through. Rows from before MoMo are VNPAY.
+enum PaymentProvider {
+  VNPAY
+  MOMO
+
+  @@map("payment_provider")
 }
 
 /// ISSUED ──► CHECKED_IN; ISSUED ──► VOID (manual handling)
@@ -509,24 +517,35 @@ model Ticket {
 /// One row per payment attempt (VNPay).
 /// Partial unique (booking_id) WHERE status = 'SUCCESS' (raw SQL): a booking is paid at most once.
 model Payment {
-  id               String        @id @default(uuid(7)) @db.Uuid
-  bookingId        String        @map("booking_id") @db.Uuid
-  /// vnp_TxnRef sent to VNPay.
-  txnRef           String        @unique @map("txn_ref")
-  amount           Int
-  status           PaymentStatus @default(PENDING)
-  /// vnp_TransactionNo. Plain UNIQUE: Postgres treats NULLs as distinct, so many
-  /// attempts without a transaction number are allowed.
-  vnpTransactionNo String?       @unique @map("vnp_transaction_no")
-  bankCode         String?       @map("bank_code")
-  responseCode     String?       @map("response_code")
-  rawPayload       Json?         @map("raw_payload")
-  processedAt      DateTime?     @map("processed_at") @db.Timestamptz(3)
-  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                    String          @id @default(uuid(7)) @db.Uuid
+  bookingId             String          @map("booking_id") @db.Uuid
+  provider              PaymentProvider @default(VNPAY)
+  /// Our order reference at the gateway: vnp_TxnRef (VNPay) or orderId (MoMo). Unique across
+  /// every provider, so a reference always names one payment.
+  txnRef                String          @unique @map("txn_ref")
+  amount                Int
+  status                PaymentStatus   @default(PENDING)
+  /// vnp_TransactionNo (VNPay only, kept for the rows and readers from before MoMo). Plain
+  /// UNIQUE: Postgres treats NULLs as distinct, so many attempts without a number are allowed.
+  vnpTransactionNo      String?         @unique @map("vnp_transaction_no")
+  /// The gateway's own transaction id once it reported the payment paid: vnp_TransactionNo
+  /// (VNPay) or transId (MoMo). Unique per provider; NULLs are distinct.
+  providerTransactionId String?         @map("provider_transaction_id")
+  /// MoMo requestId of the create call: one per attempt, re-sent unchanged on a retry so MoMo
+  /// answers it idempotently. NULL for VNPay.
+  providerRequestId     String?         @unique @map("provider_request_id")
+  /// MoMo payUrl once MoMo accepted the create call; reused while the attempt is PENDING.
+  payUrl                String?         @map("pay_url")
+  bankCode              String?         @map("bank_code")
+  responseCode          String?         @map("response_code")
+  rawPayload            Json?           @map("raw_payload")
+  processedAt           DateTime?       @map("processed_at") @db.Timestamptz(3)
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   booking Booking @relation(fields: [bookingId], references: [id])
 
+  @@unique([provider, providerTransactionId])
   @@index([bookingId])
   @@map("payments")
 }

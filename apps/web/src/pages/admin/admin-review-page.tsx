@@ -1,6 +1,7 @@
 import {
   formatVnd,
   type NeedsReviewBooking,
+  PaymentProvider,
   REVIEW_LIMITS,
   ReviewFilter,
   resolveReviewRequestSchema,
@@ -32,6 +33,16 @@ import { FormAlert } from '@/features/auth/auth-card';
 import { catalogErrorMessage } from '@/features/catalog/catalog-errors';
 import { cinemaDate, cinemaTime } from '@/lib/cinema-time';
 import { cn } from '@/lib/utils';
+
+/** The merchant portal the refund is made in. */
+const GATEWAY_NAMES: Record<PaymentProvider, string> = {
+  [PaymentProvider.VNPAY]: 'VNPay',
+  [PaymentProvider.MOMO]: 'MoMo',
+};
+
+/** The gateway's transaction id to refund with (`transId` for MoMo, `vnp_TransactionNo` for VNPay). */
+const transactionIdOf = (payment: NonNullable<NeedsReviewBooking['payment']>): string | null =>
+  payment.providerTransactionId ?? payment.vnpTransactionNo;
 
 /** Why the seats could not be kept (`reason` of the `booking.needs_review` event). */
 const REASON_LABELS: Record<string, string> = {
@@ -80,11 +91,14 @@ function ReviewRow({ item, onResolve }: { item: NeedsReviewBooking; onResolve: (
         {formatVnd(item.total)} ₫
         {item.payment && (
           <span className="block text-xs text-muted-foreground">
-            Mã GD VNPay: {item.payment.vnpTransactionNo ?? '—'}
+            Mã GD {GATEWAY_NAMES[item.payment.provider]}: {transactionIdOf(item.payment) ?? '—'}
           </span>
         )}
         {item.payment && (
-          <span className="block text-xs text-muted-foreground">txnRef: {item.payment.txnRef}</span>
+          <span className="block text-xs text-muted-foreground">
+            {item.payment.provider === PaymentProvider.MOMO ? 'orderId' : 'txnRef'}:{' '}
+            {item.payment.txnRef}
+          </span>
         )}
       </td>
       <td className="px-4 py-3">
@@ -150,9 +164,11 @@ function ResolveDialog({
           Đơn <strong className="text-cream">{item?.code}</strong> của{' '}
           <strong className="text-cream">{item?.user.fullName}</strong>,{' '}
           {item ? formatVnd(item.total) : 0} ₫. Hệ thống <strong>không hoàn tiền</strong>: hãy hoàn
-          tiền trên cổng merchant VNPay (mã GD {item?.payment?.vnpTransactionNo ?? '—'}) hoặc liên
-          hệ khách trước, rồi ghi lại ở đây. Đơn vẫn giữ trạng thái cần xử lý; thao tác này chỉ được
-          lưu vào audit log và không thể sửa lại.
+          tiền trên cổng merchant{' '}
+          {item?.payment ? GATEWAY_NAMES[item.payment.provider] : 'thanh toán'} (mã GD{' '}
+          {(item?.payment && transactionIdOf(item.payment)) ?? '—'}) hoặc liên hệ khách trước, rồi
+          ghi lại ở đây. Đơn vẫn giữ trạng thái cần xử lý; thao tác này chỉ được lưu vào audit log
+          và không thể sửa lại.
         </AlertDialogDescription>
         <form
           noValidate

@@ -1,3 +1,4 @@
+import { PaymentProvider } from '@ticketify/shared';
 import { z } from 'zod';
 import { ReviewReason } from '../../modules/payment/seat-settlement';
 import { SeatsReleasedCause } from './outbox-events';
@@ -13,6 +14,12 @@ import { SeatsReleasedCause } from './outbox-events';
 
 const uuid = z.uuid();
 const seatIds = z.array(uuid);
+/**
+ * The gateway of the payment, and its transaction id. Added with MoMo (11/2026): events written
+ * before that carry neither and are VNPay events, whose number is `vnpTransactionNo`.
+ */
+const provider = z.enum(PaymentProvider).default(PaymentProvider.VNPAY);
+const providerTransactionId = z.string().nullable().optional();
 
 export const seatsReleasedPayloadSchema = z.object({
   bookingId: uuid,
@@ -42,7 +49,10 @@ export const bookingNeedsReviewPayloadSchema = z.object({
   showtimeId: uuid,
   paymentId: uuid,
   amount: z.number().int(),
+  provider,
+  /** VNPay's transaction number; always null for another gateway. */
   vnpTransactionNo: z.string().nullable(),
+  providerTransactionId,
   reason: z.enum(Object.values(ReviewReason)),
   /** The seats behind `reason`; empty when the showtime itself is the problem. */
   seatIds,
@@ -58,7 +68,10 @@ export const paymentRefundRequiredPayloadSchema = z.object({
   bookingCode: z.string().min(1),
   userId: uuid,
   amount: z.number().int(),
+  provider,
+  /** VNPay's transaction number; always null for another gateway. */
   vnpTransactionNo: z.string().nullable(),
+  providerTransactionId,
   /** The payment that actually paid the booking and keeps it confirmed. */
   paidPaymentId: uuid,
 });

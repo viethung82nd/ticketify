@@ -46,7 +46,7 @@ export type BookingStatus = ValueOf<typeof BookingStatus>;
 
 /**
  * One row per payment attempt. PENDING ──► SUCCESS | FAILED | EXPIRED | REFUND_REQUIRED.
- * REFUND_REQUIRED: VNPay took the money, but another attempt had already paid the booking (a
+ * REFUND_REQUIRED: the gateway took the money, but another attempt had already paid the booking (a
  * booking is paid at most once); it is refunded by hand (week 12).
  */
 export const PaymentStatus = {
@@ -57,6 +57,10 @@ export const PaymentStatus = {
   REFUND_REQUIRED: 'REFUND_REQUIRED',
 } as const;
 export type PaymentStatus = ValueOf<typeof PaymentStatus>;
+
+/** The gateway a payment attempt goes through (MoMo added 11/2026; older rows are VNPAY). */
+export const PaymentProvider = { VNPAY: 'VNPAY', MOMO: 'MOMO' } as const;
+export type PaymentProvider = ValueOf<typeof PaymentProvider>;
 
 /** ISSUED ──► CHECKED_IN; ISSUED ──► VOID */
 export const TicketStatus = { ISSUED: 'ISSUED', CHECKED_IN: 'CHECKED_IN', VOID: 'VOID' } as const;

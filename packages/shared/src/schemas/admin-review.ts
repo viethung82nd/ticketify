@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BookingStatus, PaymentStatus, ShowtimeStatus } from '../enums.js';
+import { BookingStatus, PaymentProvider, PaymentStatus, ShowtimeStatus } from '../enums.js';
 import { pageSchema } from './movie.js';
 
 /** Limits of the NEEDS_REVIEW queue and of the note an admin must write (ROADMAP 3.8). */
@@ -62,11 +62,16 @@ export const needsReviewBookingSchema = z.object({
   payment: z
     .object({
       id: z.uuid(),
+      /** The gateway the money went through: the refund is made in its merchant portal. */
+      provider: z.enum(PaymentProvider),
+      /** Our order reference at the gateway: `vnp_TxnRef` (VNPay) or `orderId` (MoMo). */
       txnRef: z.string(),
       amount: z.number().int(),
       status: z.enum(PaymentStatus),
-      /** Needed to refund through the VNPay merchant portal. */
+      /** Needed to refund through the VNPay merchant portal (VNPay only). */
       vnpTransactionNo: z.string().nullable(),
+      /** The gateway's transaction id: `vnp_TransactionNo` (VNPay) or `transId` (MoMo). */
+      providerTransactionId: z.string().nullable(),
       bankCode: z.string().nullable(),
       processedAt: z.string().nullable(),
     })

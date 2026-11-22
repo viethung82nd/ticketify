@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { PaymentProvider } from '@ticketify/shared';
 import { ClockService } from '../../infra/clock/clock.service';
 import { SQLSTATE, sqlStateOf } from '../../infra/prisma/prisma-errors';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { MomoClient, MomoQueryVerdict } from '../payment/momo/momo.client';
 import { TicketCodes } from '../payment/seat-settlement';
 import { VnpayQuerydrClient } from '../payment/vnpay/vnpay-querydr.client';
 import { QuerydrVerdict } from '../payment/vnpay/vnpay-querydr';
@@ -36,10 +38,11 @@ const EXPIRE_TX = { maxWait: 5_000, timeout: 10_000 } as const;
 export const WORKER_LOCK_TIMEOUT_MS = 3_000;
 
 /**
- * Most payment attempts of one booking the expiry asks VNPay about, newest first (ROADMAP 3.7).
- * A booking normally has one; it gets another every time the customer starts the payment again
- * (`POST /payments/vnpay`), and any of them could be the one that was paid. The bound keeps one
- * expiry to a few HTTP calls; past it the oldest attempts are left to their IPN, with a warning.
+ * Most payment attempts of one booking the expiry asks the gateways about, newest first (ROADMAP
+ * 3.7). A booking normally has one; it gets another every time the customer starts a VNPay payment
+ * again (`POST /payments/vnpay`) or picks the other gateway, and any of them could be the one that
+ * was paid. The bound keeps one expiry to a few HTTP calls; past it the oldest attempts are left
+ * to their IPN, with a warning.
  */
 export const QUERYDR_MAX_ATTEMPTS = 5;
 
@@ -70,6 +73,7 @@ export class BookingExpiryService {
     private readonly clock: ClockService,
     private readonly seatEvents: SeatEvents,
     private readonly querydr: VnpayQuerydrClient,
+    private readonly momo: MomoClient,
     private readonly ticketCodes: TicketCodes,
   ) {}
 
@@ -79,12 +83,12 @@ export class BookingExpiryService {
    * found by querydr sold (`seat:sold`) or released on its way to review. `noop`, `skipped`,
    * `early` and a rolled-back transaction send nothing.
    *
-   * Before the transaction, and only outside it (PLAN §4), VNPay is asked about every payment
-   * attempt still PENDING: an answer that says "paid" is handed to the transaction, which checks
-   * it against the locked rows before acting on it.
+   * Before the transaction, and only outside it (PLAN §4), the gateway of every payment attempt
+   * still PENDING is asked about it: an answer that says "paid" is handed to the transaction,
+   * which checks it against the locked rows before acting on it.
    */
   async expire(bookingId: string): Promise<ExpireOutcome> {
-    const paid = await this.askVnpay(bookingId);
+    const paid = await this.askGateways(bookingId);
     const result = await this.prisma.$transaction(async (tx) => {
       // set_config(…, true) is SET LOCAL: it ends with this transaction.
       await tx.$queryRaw`SELECT set_config('lock_timeout', ${`${WORKER_LOCK_TIMEOUT_MS}ms`}, true)`;
@@ -101,23 +105,34 @@ export class BookingExpiryService {
   }
 
   /**
-   * Asks VNPay about the booking's unfinished payment attempts (querydr, ROADMAP 3.7) and returns
-   * the first one it reports paid, newest attempt first. Runs **outside** any transaction and
-   * takes no lock: everything read here is checked again under the locks of `expireBooking`.
+   * Asks each unfinished payment attempt's gateway about it (VNPay querydr, ROADMAP 3.7; MoMo
+   * query, 11/2026) and returns the first one reported paid, newest attempt first. Runs
+   * **outside** any transaction and takes no lock: everything read here is checked again under
+   * the locks of `expireBooking`.
    *
    * Returns `null` — and the booking then expires exactly as it did before 3.7 — when the booking
-   * is not due, when it has no PENDING attempt, when the merchant settings are missing, and for
-   * every answer that is not a clear "paid" (including a timeout or a network error, which
-   * `VnpayQuerydrClient` turns into `unknown` rather than throwing).
+   * is not due, when it has no PENDING attempt, when a gateway's merchant settings are missing
+   * (its attempts are not asked about), and for every answer that is not a clear "paid"
+   * (including a timeout or a network error, which both clients turn into `unknown` rather than
+   * throwing).
    */
-  private async askVnpay(bookingId: string): Promise<PaidQuerydr | null> {
-    if (!this.querydr.configured) return null;
+  private async askGateways(bookingId: string): Promise<PaidQuerydr | null> {
+    const vnpay = this.querydr.configured;
+    const momo = this.momo.configured;
+    if (!vnpay && !momo) return null;
     const now = this.clock.now();
     // No lock and no FOR UPDATE: a snapshot, only to decide which attempts are worth asking about.
     const rows = await this.prisma.$queryRaw<
-      { id: string; txn_ref: string; created_at: Date; code: string; attempts: number }[]
+      {
+        id: string;
+        provider: PaymentProvider;
+        txn_ref: string;
+        created_at: Date;
+        code: string;
+        attempts: number;
+      }[]
     >`
-      SELECT p.id, p.txn_ref, p.created_at, b.code,
+      SELECT p.id, p.provider::text AS provider, p.txn_ref, p.created_at, b.code,
              count(*) OVER ()::int AS attempts
       FROM payments p JOIN bookings b ON b.id = p.booking_id
       WHERE p.booking_id = ${bookingId}::uuid AND p.status = 'PENDING'
@@ -134,6 +149,24 @@ export class BookingExpiryService {
     }
 
     for (const row of rows) {
+      if (row.provider === PaymentProvider.MOMO) {
+        if (!momo) continue;
+        const answer = await this.momo.query(row.txn_ref);
+        if (answer.verdict === MomoQueryVerdict.PAID && answer.report) {
+          this.logger.warn(
+            `Booking ${bookingId} is past holdUntil but MoMo's query reports payment ${row.id} ` +
+              `(orderId ${row.txn_ref}) paid: recording it instead of expiring`,
+          );
+          return {
+            provider: PaymentProvider.MOMO,
+            paymentId: row.id,
+            txnRef: row.txn_ref,
+            report: answer.report,
+          };
+        }
+        continue;
+      }
+      if (!vnpay) continue;
       const answer = await this.querydr.lookUp({
         txnRef: row.txn_ref,
         paymentCreatedAt: row.created_at,

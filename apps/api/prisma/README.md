@@ -18,6 +18,8 @@
 | `showtime_seats_sold_check` | `showtime_seats` | `SOLD ⇒ booking_id IS NOT NULL` (a sold seat always traces back to the paying booking) |
 | `tickets_showtime_id_seat_id_live_key` | `tickets` | `UNIQUE (showtime_id, seat_id) WHERE status <> 'VOID'` |
 | `payments_booking_id_success_key` | `payments` | `UNIQUE (booking_id) WHERE status = 'SUCCESS'` |
+| `payments_momo_request_id_check` | `payments` | `provider = 'MOMO' ⇒ provider_request_id IS NOT NULL` — a MoMo attempt is re-sent with its own requestId (`*_payment_provider_momo` migration) |
+| `payments_vnp_transaction_no_provider_check` | `payments` | `vnp_transaction_no IS NOT NULL ⇒ provider = 'VNPAY'` |
 | `vouchers_code_format_check` | `vouchers` | `code ~ '^[A-Z0-9]{4,20}$'` — stored upper-case, so the plain unique index on `code` is case-insensitive in effect (`*_vouchers` migration) |
 | `vouchers_discount_check` | `vouchers` | `PERCENT` ⇒ `discount_value` 1–100 and `max_discount` NULL or > 0; `FIXED` ⇒ `discount_value` > 0 and `max_discount` NULL |
 | `vouchers_limits_check` | `vouchers` | `min_subtotal >= 0`; `usage_limit`, `per_user_limit` NULL (unlimited) or > 0 |
@@ -26,6 +28,7 @@
 Also relevant, but declared in `schema.prisma` (so Prisma manages them):
 
 - `payments_vnp_transaction_no_key` — plain `UNIQUE (vnp_transaction_no)`. Postgres' default `NULLS DISTINCT` lets any number of rows have `NULL`. VNPay may send the same placeholder number (e.g. `"0"`) for failed/cancelled attempts; phase 3 must only store a value that is unique per real transaction (to be checked against the sandbox).
+- `payments_provider_provider_transaction_id_key` — `UNIQUE (provider, provider_transaction_id)`, and `payments_provider_request_id_key` — `UNIQUE (provider_request_id)`. Both columns are nullable and `NULLS DISTINCT` applies, so attempts without a gateway transaction id (every PENDING or FAILED one) or without a requestId (every VNPay one) never collide. The transaction id is only written once a gateway reports the payment paid.
 - `outbox_events_status_next_retry_at_idx` — `(status, next_retry_at)`. It is a plain index, so it lives in the schema: if it were only in raw SQL, Prisma would see it as drift and generate a `DROP INDEX`.
 
 Every rule above is exercised by `test/integration/schema/db-constraints.int-spec.ts` (one rejected and one accepted case each).

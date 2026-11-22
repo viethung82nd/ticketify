@@ -346,10 +346,13 @@ describe('Admin review queue — /admin/bookings (real Postgres + Redis)', () =>
       expect(item.seatLabels).toEqual([fixture.seatLabel]);
       expect(item.payment).toEqual({
         id: expect.any(String) as string,
+        provider: 'VNPAY',
         txnRef: fixture.payment.txnRef,
         amount: fixture.booking.total,
         status: 'SUCCESS',
         vnpTransactionNo: expect.stringMatching(/^\d+$/) as string,
+        // The generic column holds the same VNPay number (MoMo migration, 11/2026).
+        providerTransactionId: item.payment?.vnpTransactionNo,
         bankCode: 'NCB',
         processedAt: expect.any(String) as string,
       });

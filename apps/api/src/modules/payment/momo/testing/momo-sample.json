@@ -1,0 +1,74 @@
+{
+  "comment": "Test-only credentials and data, never real ones. `raw` and `signature` of every case were computed by momo-reference.php, which concatenates exactly like MoMo's official PHP samples (github.com/momo-wallet/payment). Re-run it when a case changes.",
+  "credentials": {
+    "partnerCode": "MOMOTKF20261122",
+    "accessKey": "unitTestAccessKey01",
+    "secretKey": "unit-test-momo-secret-key-0123456789"
+  },
+  "cases": {
+    "create": {
+      "message": "create",
+      "fields": {
+        "amount": 180000,
+        "extraData": "",
+        "ipnUrl": "https://api.example.test/payments/momo/ipn",
+        "orderId": "Bq2qmIzmEDBQ2nWyKR55",
+        "orderInfo": "Thanh toan ve K7PX3MQ9TA",
+        "partnerCode": "MOMOTKF20261122",
+        "redirectUrl": "http://localhost:5173/payment/result/momo",
+        "requestId": "5f0c6d1e9a8b4c3d2e1f0a9b8c7d6e5f",
+        "requestType": "captureWallet"
+      },
+      "raw": "accessKey=unitTestAccessKey01&amount=180000&extraData=&ipnUrl=https://api.example.test/payments/momo/ipn&orderId=Bq2qmIzmEDBQ2nWyKR55&orderInfo=Thanh toan ve K7PX3MQ9TA&partnerCode=MOMOTKF20261122&redirectUrl=http://localhost:5173/payment/result/momo&requestId=5f0c6d1e9a8b4c3d2e1f0a9b8c7d6e5f&requestType=captureWallet",
+      "signature": "282b8db9dabad4321c7c1be5ae1bae096665fe7e351573fb4043a16318dab2f3"
+    },
+    "ipnSuccess": {
+      "message": "result",
+      "fields": {
+        "partnerCode": "MOMOTKF20261122",
+        "orderId": "Bq2qmIzmEDBQ2nWyKR55",
+        "requestId": "5f0c6d1e9a8b4c3d2e1f0a9b8c7d6e5f",
+        "amount": 180000,
+        "orderInfo": "Thanh toan ve K7PX3MQ9TA",
+        "orderType": "momo_wallet",
+        "transId": 4088878653,
+        "resultCode": 0,
+        "message": "Successful.",
+        "payType": "qr",
+        "responseTime": 1793534700000,
+        "extraData": ""
+      },
+      "raw": "accessKey=unitTestAccessKey01&amount=180000&extraData=&message=Successful.&orderId=Bq2qmIzmEDBQ2nWyKR55&orderInfo=Thanh toan ve K7PX3MQ9TA&orderType=momo_wallet&partnerCode=MOMOTKF20261122&payType=qr&requestId=5f0c6d1e9a8b4c3d2e1f0a9b8c7d6e5f&responseTime=1793534700000&resultCode=0&transId=4088878653",
+      "signature": "e02b518060ddf1e8705ca680dddd0b4a59fc43ab41f4570ca00cbcc4eadb1783"
+    },
+    "ipnSpecialChars": {
+      "message": "result",
+      "fields": {
+        "partnerCode": "MOMOTKF20261122",
+        "orderId": "Bq2qmIzmEDBQ2nWyKR55",
+        "requestId": "5f0c6d1e9a8b4c3d2e1f0a9b8c7d6e5f",
+        "amount": 180000,
+        "orderInfo": "Thanh toán vé #K7PX & combo=2 (bắp + nước) 100%",
+        "orderType": "momo_wallet",
+        "transId": 4088878653,
+        "resultCode": 1006,
+        "message": "Giao dịch thất bại do người dùng đã từ chối xác nhận thanh toán.",
+        "payType": "",
+        "responseTime": 1793534700000,
+        "extraData": "eyJza3VzIjoiIn0="
+      },
+      "raw": "accessKey=unitTestAccessKey01&amount=180000&extraData=eyJza3VzIjoiIn0=&message=Giao dịch thất bại do người dùng đã từ chối xác nhận thanh toán.&orderId=Bq2qmIzmEDBQ2nWyKR55&orderInfo=Thanh toán vé #K7PX & combo=2 (bắp + nước) 100%&orderType=momo_wallet&partnerCode=MOMOTKF20261122&payType=&requestId=5f0c6d1e9a8b4c3d2e1f0a9b8c7d6e5f&responseTime=1793534700000&resultCode=1006&transId=4088878653",
+      "signature": "cd38da6649522e70423851e7fff4af1823b4b2ea832e218e3e612c6bda3ec523"
+    },
+    "query": {
+      "message": "query",
+      "fields": {
+        "orderId": "Bq2qmIzmEDBQ2nWyKR55",
+        "partnerCode": "MOMOTKF20261122",
+        "requestId": "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      },
+      "raw": "accessKey=unitTestAccessKey01&orderId=Bq2qmIzmEDBQ2nWyKR55&partnerCode=MOMOTKF20261122&requestId=0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "signature": "6bc763194bb34c8c23ea64eb5ca37527944001f1df1c901d8d9d4104294bdccb"
+    }
+  }
+}

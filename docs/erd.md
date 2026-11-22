@@ -208,10 +208,14 @@ erDiagram
     payments {
         uuid id PK
         uuid booking_id FK "UK(booking_id) WHERE status = SUCCESS"
-        text txn_ref UK "vnp_TxnRef"
+        payment_provider provider "VNPAY | MOMO, default VNPAY"
+        text txn_ref UK "vnp_TxnRef (VNPay) | orderId (MoMo)"
         int amount
         payment_status status "PENDING | SUCCESS | FAILED | EXPIRED | REFUND_REQUIRED"
-        text vnp_transaction_no UK "nullable"
+        text vnp_transaction_no UK "nullable, VNPay only"
+        text provider_transaction_id "nullable, UK(provider, provider_transaction_id)"
+        text provider_request_id UK "nullable, MoMo requestId"
+        text pay_url "nullable, MoMo payUrl"
         text bank_code "nullable"
         text response_code "nullable"
         jsonb raw_payload "nullable"
