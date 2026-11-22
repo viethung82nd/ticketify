@@ -101,6 +101,10 @@ const amountNotSupported = () =>
   );
 const attemptClosed = () => PaymentErrors.notPayable('This payment attempt is no longer open');
 
+/** Log wording of a paid answer that reopened a FAILED attempt (review H2). */
+const afterFailure = (result: { afterFailure?: true }): string =>
+  result.afterFailure ? ' (it had been recorded FAILED: MoMo now reports it paid)' : '';
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -279,8 +283,12 @@ export class MomoPaymentService {
    * 1. the body is an object with every field we act on, well typed → else 400;
    * 2. its signature (the documented 13-field `result` signature) is valid → else 400;
    * 3. `partnerCode` is ours → else 400;
-   * 4. a MoMo payment has this `orderId`, created with this `requestId` → else 204 and a warning
-   *    (nothing to record; an IPN of another environment sharing the sandbox account);
+   * 4. a MoMo payment has this `orderId` → else 204 and a warning (nothing to record; an IPN
+   *    of another environment sharing the sandbox account). A `requestId` other than the one
+   *    the attempt was created with is logged as an error and does **not** stop the IPN (review
+   *    H1): that the two always match is not verified against MoMo's documentation, the order is
+   *    identified by `orderId` (unique, signed), and the signature covers the `requestId` it
+   *    carries;
    * 5. `resultCode` is not final (1000, 7000, 7002, 8000, 9000) → 204, nothing changes;
    * 6. otherwise `settlePayment` in one transaction: amount check (≠ → nothing written, error
    *    log), repeated IPN (nothing written), FAILED, REFUND_REQUIRED, CONFIRMED or NEEDS_REVIEW
@@ -306,10 +314,13 @@ export class MomoPaymentService {
     }
 
     const ref = `MoMo orderId ${fields.orderId} (transId ${fields.transId}, resultCode ${fields.resultCode})`;
-    const unknown = await this.knownAttempt(fields);
-    if (unknown !== null) {
-      this.logger.warn(`MoMo IPN: ${ref}: ${unknown}; nothing changed`);
+    const attempt = await this.attemptOf(fields.orderId);
+    if (!attempt) {
+      this.logger.warn(`MoMo IPN: ${ref}: no MoMo payment has this orderId; nothing changed`);
       return { acknowledged: true, outcome: 'ignored' };
+    }
+    if (attempt.providerRequestId !== fields.requestId) {
+      this.logRequestIdMismatch('ipn', fields, attempt);
     }
     if (momoResultState(fields.resultCode) === MomoResultState.PENDING) {
       this.logger.log(`MoMo IPN: ${ref}: not final yet; nothing changed`);
@@ -338,19 +349,45 @@ export class MomoPaymentService {
   }
 
   /**
-   * Whether the result is about one of our MoMo attempts, read without a lock: `txn_ref`,
-   * `provider` and `provider_request_id` never change once a payment exists. `null` when it is;
-   * otherwise why not.
+   * The MoMo attempt with this `orderId`, read without a lock: `txn_ref`, `provider` and
+   * `provider_request_id` never change once a payment exists. Everything that decides what is
+   * recorded is read again under the payment row lock by `settlePayment`.
    */
-  private async knownAttempt(fields: MomoResultFields): Promise<string | null> {
-    const [payment] = await this.prisma.$queryRaw<{ provider_request_id: string | null }[]>`
-      SELECT provider_request_id FROM payments
-      WHERE txn_ref = ${fields.orderId} AND provider = 'MOMO'`;
-    if (!payment) return 'no MoMo payment has this orderId';
-    if (payment.provider_request_id !== fields.requestId) {
-      return `requestId ${forLog(fields.requestId)} is not the one this order was created with`;
-    }
-    return null;
+  private async attemptOf(
+    orderId: string,
+  ): Promise<{ id: string; providerRequestId: string | null } | null> {
+    const [payment] = await this.prisma.$queryRaw<
+      { id: string; provider_request_id: string | null }[]
+    >`
+      SELECT id, provider_request_id FROM payments
+      WHERE txn_ref = ${orderId} AND provider = 'MOMO'`;
+    return payment ? { id: payment.id, providerRequestId: payment.provider_request_id } : null;
+  }
+
+  /**
+   * A signed result whose `requestId` is not the one its order was created with (review H1): one
+   * structured error line, so the mismatch can be counted and followed up, then the result is
+   * handled by `orderId` like any other. Only identifiers: never a key, a signature or a payload.
+   */
+  private logRequestIdMismatch(
+    stage: 'ipn' | 'return',
+    fields: MomoResultFields,
+    attempt: { id: string; providerRequestId: string | null },
+  ): void {
+    this.logger.error(
+      {
+        event: 'momo.request_id_mismatch',
+        provider: PaymentProvider.MOMO,
+        stage,
+        paymentId: attempt.id,
+        orderId: fields.orderId,
+        resultCode: fields.resultCode,
+        receivedRequestId: forLog(fields.requestId),
+        storedRequestId: attempt.providerRequestId,
+      },
+      `MoMo ${stage}: the signed requestId is not the one order ${fields.orderId} was created ` +
+        'with; handled by orderId',
+    );
   }
 
   private reject(orderId: string, reason: string): MomoIpnResult {
@@ -380,21 +417,23 @@ export class MomoPaymentService {
         return;
       case 'paid_twice':
         this.logger.error(
-          `MoMo IPN: ${ref}: payment ${result.paymentId} was paid, but booking ${result.bookingId} ` +
-            `was already paid by payment ${result.paidPaymentId}: REFUND_REQUIRED, refund it by hand`,
+          `MoMo IPN: ${ref}: payment ${result.paymentId} was paid${afterFailure(result)}, but booking ` +
+            `${result.bookingId} was already paid by payment ${result.paidPaymentId}: ` +
+            'REFUND_REQUIRED, refund it by hand',
         );
         return;
       case 'confirmed':
         this.logger.log(
-          `MoMo IPN: ${ref}: payment ${result.paymentId} SUCCESS, booking ${result.bookingId} ` +
-            `CONFIRMED${result.reclaimed ? ' after taking its seats back' : ''}, ` +
+          `MoMo IPN: ${ref}: payment ${result.paymentId} SUCCESS${afterFailure(result)}, booking ` +
+            `${result.bookingId} CONFIRMED${result.reclaimed ? ' after taking its seats back' : ''}, ` +
             `${result.ticketIds.length} ticket(s)`,
         );
         return;
       case 'needs_review':
         this.logger.warn(
-          `MoMo IPN: ${ref}: payment ${result.paymentId} SUCCESS, booking ${result.bookingId} ` +
-            `NEEDS_REVIEW (${result.problem.reason}), ${result.releasedSeatIds.length} of its own ` +
+          `MoMo IPN: ${ref}: payment ${result.paymentId} SUCCESS${afterFailure(result)}, booking ` +
+            `${result.bookingId} NEEDS_REVIEW (${result.problem.reason}), ` +
+            `${result.releasedSeatIds.length} of its own ` +
             'HELD seat(s) released',
         );
         return;
@@ -421,9 +460,13 @@ export class MomoPaymentService {
 
     const payment = await this.prisma.payment.findFirst({
       where: { txnRef: fields.orderId, provider: PaymentProvider.MOMO },
-      select: { bookingId: true, status: true, amount: true, providerRequestId: true },
+      select: { id: true, bookingId: true, status: true, amount: true, providerRequestId: true },
     });
-    if (!payment || payment.providerRequestId !== fields.requestId) return { verified: false };
+    if (!payment) return { verified: false };
+    // Logged, not refused (review H1); the page shows the stored status either way.
+    if (payment.providerRequestId !== fields.requestId) {
+      this.logRequestIdMismatch('return', fields, payment);
+    }
     return {
       verified: true,
       bookingId: payment.bookingId,

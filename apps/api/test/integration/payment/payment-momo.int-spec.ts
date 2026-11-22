@@ -608,16 +608,145 @@ describe('MoMo payments — create, IPN, return, expiry query (real Postgres + R
       expect(again.orderId).not.toBe(payment.orderId);
     });
 
-    it('a success after a recorded failure: 204, the payment stays FAILED (a repeat changes nothing)', async () => {
+    // Review H2 (11/2026): this test used to expect the payment to stay FAILED, i.e. a charge MoMo
+    // reports with a valid signature silently dropped. A verified paid answer now reopens a FAILED
+    // MoMo payment (VNPay keeps FAILED final: payment-ipn.int-spec "a success after a recorded
+    // failure: 02").
+    it('a verified success after a recorded failure: 204, the payment reopened to SUCCESS, booking CONFIRMED with tickets, one event', async () => {
       const { user, booking } = await pendingBooking();
       const payment = await momoPayment(user, booking.id);
-      await postIpn(await ipnBody(payment, { resultCode: 1006 }));
+      expect((await postIpn(await ipnBody(payment, { resultCode: 1006 }))).status).toBe(204);
+      expect((await paymentOf(payment.paymentId)).status).toBe('FAILED');
 
       const res = await postIpn(await ipnBody(payment));
 
       expect(res.status).toBe(204);
-      expect((await paymentOf(payment.paymentId)).status).toBe('FAILED');
-      expect(await bookingStatus(booking.id)).toBe('PENDING');
+      expect(await paymentOf(payment.paymentId)).toMatchObject({
+        status: 'SUCCESS',
+        providerTransactionId: String(transIdOf(payment.paymentId)),
+        responseCode: '0',
+      });
+      expect(await bookingStatus(booking.id)).toBe('CONFIRMED');
+      expect(await ticketsOf(booking.id)).toBe(2);
+      expect((await outboxOf(booking.id)).map((e) => e.type)).toEqual([
+        OutboxEventType.BOOKING_CONFIRMED,
+      ]);
+      await expectNoViolations();
+    });
+
+    it('a duplicate success after that reopening: 204, nothing more (one event, same tickets)', async () => {
+      const { user, booking } = await pendingBooking();
+      const payment = await momoPayment(user, booking.id);
+      await postIpn(await ipnBody(payment, { resultCode: 1006 }));
+      const paid = await ipnBody(payment);
+      await postIpn(paid);
+
+      const results = await Promise.all([postIpn(paid), postIpn(paid), postIpn(paid)]);
+
+      expect(results.map((r) => r.status)).toEqual([204, 204, 204]);
+      expect(await ticketsOf(booking.id)).toBe(2);
+      expect(await outboxOf(booking.id)).toHaveLength(1);
+      await expectNoViolations();
+    });
+
+    it('FAILED, the booking expired, then a verified success: recorded, seats taken back (branch B), CONFIRMED', async () => {
+      const { user, booking } = await pendingBooking();
+      const payment = await momoPayment(user, booking.id);
+      await postIpn(await ipnBody(payment, { resultCode: 1006 }));
+      clock.advance({ minutes: HOLD_MINUTES });
+      expect((await expiry.expire(booking.id)).outcome).toBe('expired');
+      expect(await bookingStatus(booking.id)).toBe('EXPIRED');
+
+      expect((await postIpn(await ipnBody(payment))).status).toBe(204);
+
+      expect((await paymentOf(payment.paymentId)).status).toBe('SUCCESS');
+      expect(await bookingStatus(booking.id)).toBe('CONFIRMED');
+      expect(await ticketsOf(booking.id)).toBe(2);
+      await expectNoViolations();
+    });
+
+    it('FAILED, the booking then paid with VNPay, then MoMo reports success: REFUND_REQUIRED with its transId, no second ticket set', async () => {
+      const { user, booking } = await pendingBooking();
+      const momoAttempt = await momoPayment(user, booking.id);
+      await postIpn(await ipnBody(momoAttempt, { resultCode: 1006 }));
+      const vnpayRes = await http()
+        .post('/payments/vnpay')
+        .set('Authorization', `Bearer ${tokenOf(user)}`)
+        .send({ bookingId: booking.id });
+      expect(vnpayRes.status).toBe(201);
+      const vnpayIpn = vnpay.buildSignedQuery(
+        {
+          vnp_Amount: String(booking.total * 100),
+          vnp_ResponseCode: '00',
+          vnp_TransactionStatus: '00',
+          vnp_TransactionNo: '14226188',
+          vnp_TxnRef: (vnpayRes.body as { txnRef: string }).txnRef,
+        },
+        VNPAY_ENV.VNPAY_HASH_SECRET,
+      );
+      expect((await http().get(`/payments/vnpay/ipn?${vnpayIpn}`)).body).toMatchObject({
+        RspCode: '00',
+      });
+
+      expect((await postIpn(await ipnBody(momoAttempt))).status).toBe(204);
+
+      expect(await paymentOf(momoAttempt.paymentId)).toMatchObject({
+        status: 'REFUND_REQUIRED',
+        providerTransactionId: String(transIdOf(momoAttempt.paymentId)),
+      });
+      const refund = await db.prisma.outboxEvent.findFirstOrThrow({
+        where: {
+          type: OutboxEventType.PAYMENT_REFUND_REQUIRED,
+          aggregateId: momoAttempt.paymentId,
+        },
+      });
+      expect(refund.payload).toMatchObject({
+        provider: 'MOMO',
+        providerTransactionId: String(transIdOf(momoAttempt.paymentId)),
+      });
+      expect(await bookingStatus(booking.id)).toBe('CONFIRMED');
+      expect(await ticketsOf(booking.id)).toBe(2);
+      await expectNoViolations();
+    });
+
+    it.each([
+      ['an invalid signature', (p: CreatedMomoPayment) => ipnBody(p, {}, 'another-secret'), 400],
+      ['a wrong amount (signed)', (p: CreatedMomoPayment) => ipnBody(p, { amount: 1_000 }), 204],
+    ])(
+      'FAILED, then a "success" with %s: the payment stays FAILED, the booking PENDING',
+      async (_label, body, status) => {
+        const { user, booking } = await pendingBooking();
+        const payment = await momoPayment(user, booking.id);
+        await postIpn(await ipnBody(payment, { resultCode: 1006 }));
+
+        expect((await postIpn(await body(payment))).status).toBe(status);
+
+        expect((await paymentOf(payment.paymentId)).status).toBe('FAILED');
+        expect(await bookingStatus(booking.id)).toBe('PENDING');
+        expect(await outboxOf(booking.id)).toEqual([]);
+      },
+    );
+
+    it('a valid signed IPN whose requestId differs from the stored one (review H1): still settled by orderId', async () => {
+      const { user, booking } = await pendingBooking();
+      const payment = await momoPayment(user, booking.id);
+
+      const res = await postIpn(await ipnBody(payment, { requestId: 'f'.repeat(32) }));
+
+      expect(res.status).toBe(204);
+      expect((await paymentOf(payment.paymentId)).status).toBe('SUCCESS');
+      expect(await bookingStatus(booking.id)).toBe('CONFIRMED');
+      await expectNoViolations();
+    });
+
+    it('wrong partnerCode, even signed and with the right requestId: 400, nothing changes', async () => {
+      const { user, booking } = await pendingBooking();
+      const payment = await momoPayment(user, booking.id);
+
+      expect((await postIpn(await ipnBody(payment, { partnerCode: 'MOMOOTHER' }))).status).toBe(
+        400,
+      );
+      expect((await paymentOf(payment.paymentId)).status).toBe('PENDING');
     });
 
     it('not final yet (1000): 204, nothing changes', async () => {
@@ -740,6 +869,23 @@ describe('MoMo payments — create, IPN, return, expiry query (real Postgres + R
         (await http().get(`/payments/momo/return?${asQuery(body)}`)).body,
       );
       expect(after).toMatchObject({ verified: true, paymentStatus: 'SUCCESS' });
+    });
+
+    it('a signed redirect with another requestId (review H1): verified, but the payment and the booking do not change', async () => {
+      const { user, booking } = await pendingBooking();
+      const payment = await momoPayment(user, booking.id);
+      const body = await ipnBody(payment, { requestId: 'f'.repeat(32) });
+
+      const res = await http().get(`/payments/momo/return?${asQuery(body)}`);
+
+      expect(momoReturnResultSchema.parse(res.body)).toMatchObject({
+        verified: true,
+        paymentStatus: 'PENDING',
+        resultCode: 0,
+      });
+      expect((await paymentOf(payment.paymentId)).status).toBe('PENDING');
+      expect(await bookingStatus(booking.id)).toBe('PENDING');
+      expect(await outboxOf(booking.id)).toEqual([]);
     });
 
     it('a tampered redirect (resultCode 0 on a failure): { verified: false }', async () => {

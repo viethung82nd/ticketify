@@ -49,3 +49,42 @@ describe('log redaction of the VNPay signature', () => {
     expect(logged).not.toContain('vnp_SecureHash');
   });
 });
+
+describe('log redaction of the MoMo signature (return URL, 11/2026)', () => {
+  const SIGNATURE = 'e02b518060ddf1e8705ca680dddd0b4a59fc43ab41f4570ca00cbcc4eadb1783';
+  const query =
+    'partnerCode=MOMOTKF&orderId=Bq2qmIzmEDBQ2nWyKR55&requestId=5f0c6d1e&amount=180000' +
+    `&resultCode=0&transId=4088878653&signature=${SIGNATURE}`;
+
+  it('drops signature, name and value, from the request line and keeps the useful parameters', () => {
+    expect(redactUrl(`/payments/momo/return?${query}`)).toBe(
+      '/payments/momo/return?partnerCode=MOMOTKF&orderId=Bq2qmIzmEDBQ2nWyKR55' +
+        '&requestId=5f0c6d1e&amount=180000&resultCode=0&transId=4088878653',
+    );
+    expect(redactUrl(`/payments/momo/return?signature=${SIGNATURE}`)).toBe('/payments/momo/return');
+    expect(redactUrl(`/x?sig%6Eature=${SIGNATURE}&a=1`)).toBe('/x?a=1');
+  });
+
+  it('drops it from the parsed query, and the VNPay hash still goes too', () => {
+    expect(
+      redactQuery({ orderId: 'Bq2qmIzmEDBQ2nWyKR55', resultCode: '0', signature: SIGNATURE }),
+    ).toEqual({ orderId: 'Bq2qmIzmEDBQ2nWyKR55', resultCode: '0' });
+    expect(redactQuery({ vnp_TxnRef: '1', vnp_SecureHash: HASH, signature: SIGNATURE })).toEqual({
+      vnp_TxnRef: '1',
+    });
+  });
+
+  it('a serialized request keeps no trace of the signature', () => {
+    const logged = JSON.stringify(
+      redactRequest({
+        method: 'GET',
+        url: `/payments/momo/return?${query}`,
+        query: Object.fromEntries(new URLSearchParams(query)),
+      }),
+    );
+    expect(logged).not.toContain(SIGNATURE);
+    expect(logged).not.toContain('signature');
+    expect(logged).toContain('Bq2qmIzmEDBQ2nWyKR55');
+    expect(logged).toContain('resultCode');
+  });
+});

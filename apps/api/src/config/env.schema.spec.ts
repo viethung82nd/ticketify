@@ -1,4 +1,4 @@
-import { validateEnv } from './env.schema';
+import { MOMO_SANDBOX_ENDPOINT, momoEndpointOf, validateEnv } from './env.schema';
 
 const validEnv = (): Record<string, string> => ({
   CORS_ORIGINS: 'http://localhost:5173, http://127.0.0.1:5173',
@@ -115,5 +115,109 @@ describe('validateEnv', () => {
     ['TRUST_PROXY', '-1'],
   ])('rejects invalid %s=%s', (key, value) => {
     expect(() => validateEnv({ ...validEnv(), [key]: value })).toThrow(new RegExp(key));
+  });
+});
+
+/** MoMo gateway configuration and its production rules (11/2026, review M1). Test-only values. */
+describe('validateEnv — MoMo endpoint', () => {
+  const KEYS = {
+    MOMO_PARTNER_CODE: 'MOMOTKFTEST',
+    MOMO_ACCESS_KEY: 'unitTestAccessKeyM1',
+    MOMO_SECRET_KEY: 'unit-test-momo-secret-key-m1-0123456789',
+  };
+  const env = (overrides: Record<string, string>) => ({ ...validEnv(), ...overrides });
+  const errorOf = (raw: Record<string, string>): string => {
+    try {
+      validateEnv(raw);
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+    throw new Error('expected the environment to be refused');
+  };
+
+  it('development: unset means the sandbox (convenient default kept)', () => {
+    const parsed = validateEnv(env({ NODE_ENV: 'development', ...KEYS }));
+
+    expect(parsed.MOMO_ENDPOINT).toBeUndefined();
+    expect(momoEndpointOf(parsed)).toBe(MOMO_SANDBOX_ENDPOINT);
+    expect(parsed.MOMO_ALLOW_SANDBOX_IN_PRODUCTION).toBe(false);
+  });
+
+  it('test: the sandbox endpoint, set explicitly, is accepted (trailing slash dropped)', () => {
+    const parsed = validateEnv(
+      env({ NODE_ENV: 'test', ...KEYS, MOMO_ENDPOINT: 'https://test-payment.momo.vn/' }),
+    );
+
+    expect(momoEndpointOf(parsed)).toBe('https://test-payment.momo.vn');
+  });
+
+  it('development may use http (a local fake gateway)', () => {
+    expect(
+      momoEndpointOf(validateEnv(env({ ...KEYS, MOMO_ENDPOINT: 'http://127.0.0.1:4010' }))),
+    ).toBe('http://127.0.0.1:4010');
+  });
+
+  it('production: the sandbox endpoint is refused', () => {
+    const message = errorOf(
+      env({ NODE_ENV: 'production', ...KEYS, MOMO_ENDPOINT: 'https://test-payment.momo.vn' }),
+    );
+
+    expect(message).toContain("is MoMo's sandbox, refused in production");
+    expect(message).toContain('MOMO_ENDPOINT');
+  });
+
+  it('production: http is refused', () => {
+    const message = errorOf(
+      env({ NODE_ENV: 'production', ...KEYS, MOMO_ENDPOINT: 'http://payment.momo.vn' }),
+    );
+
+    expect(message).toContain('must use https in production');
+  });
+
+  it('production: MoMo keys without an endpoint are refused (no silent sandbox default)', () => {
+    expect(errorOf(env({ NODE_ENV: 'production', ...KEYS }))).toContain(
+      'must be set in production when MoMo keys are set',
+    );
+    expect(errorOf(env({ NODE_ENV: 'production', MOMO_PARTNER_CODE: 'X' }))).toContain(
+      'must be set in production',
+    );
+  });
+
+  it('production: a valid https endpoint is accepted', () => {
+    const parsed = validateEnv(
+      env({ NODE_ENV: 'production', ...KEYS, MOMO_ENDPOINT: 'https://payment.momo.vn' }),
+    );
+
+    expect(momoEndpointOf(parsed)).toBe('https://payment.momo.vn');
+  });
+
+  it('production: the sandbox only with the explicit opt-in, and still only over https', () => {
+    const optIn = { NODE_ENV: 'production', ...KEYS, MOMO_ALLOW_SANDBOX_IN_PRODUCTION: 'true' };
+
+    expect(
+      momoEndpointOf(validateEnv(env({ ...optIn, MOMO_ENDPOINT: 'https://test-payment.momo.vn' }))),
+    ).toBe('https://test-payment.momo.vn');
+    expect(errorOf(env({ ...optIn, MOMO_ENDPOINT: 'http://test-payment.momo.vn' }))).toContain(
+      'must use https in production',
+    );
+    expect(errorOf(env({ ...optIn, MOMO_ALLOW_SANDBOX_IN_PRODUCTION: 'yes' }))).toContain(
+      'MOMO_ALLOW_SANDBOX_IN_PRODUCTION',
+    );
+  });
+
+  it('production without any MoMo key: MoMo is simply off, no endpoint, no error', () => {
+    const parsed = validateEnv(env({ NODE_ENV: 'production' }));
+
+    expect(momoEndpointOf(parsed)).toBeNull();
+  });
+
+  it('never puts a key or the endpoint value into the error', () => {
+    const message = errorOf(
+      env({ NODE_ENV: 'production', ...KEYS, MOMO_ENDPOINT: 'http://user:pw@payment.momo.vn' }),
+    );
+
+    for (const value of [...Object.values(KEYS), 'user:pw', 'payment.momo.vn']) {
+      expect(message).not.toContain(value);
+    }
   });
 });

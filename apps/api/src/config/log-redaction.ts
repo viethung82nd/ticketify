@@ -1,8 +1,12 @@
 /**
- * Query parameters left out of every log line, name and value: the VNPay signature of the return
- * URL and the IPN (ROADMAP 3.3–3.4, CONTRIBUTING "never log a whole signed query").
+ * Query parameters left out of every log line, name and value (CONTRIBUTING "never log a whole
+ * signed query"):
+ * - `vnp_SecureHash`: the VNPay signature of the return URL and the IPN (ROADMAP 3.3–3.4);
+ * - `signature`: the MoMo signature of the redirect query, `GET /payments/momo/return` (11/2026).
+ *   No other route takes a query parameter of that name. The MoMo IPN is a POST body, which
+ *   pino-http never logs.
  */
-const SECRET_QUERY_PARAMS: ReadonlySet<string> = new Set(['vnp_SecureHash']);
+const SECRET_QUERY_PARAMS: ReadonlySet<string> = new Set(['vnp_SecureHash', 'signature']);
 
 function decodedKey(raw: string): string {
   try {

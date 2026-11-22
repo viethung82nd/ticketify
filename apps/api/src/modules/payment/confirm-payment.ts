@@ -25,6 +25,25 @@ const FINAL_STATUSES: ReadonlySet<PaymentStatus> = new Set([
   PaymentStatus.REFUND_REQUIRED,
 ]);
 
+/**
+ * Final statuses that a later, verified **paid** answer of the same gateway still reopens, so the
+ * money is recorded instead of being dropped (review H2, 11/2026). The paid answer then goes
+ * through exactly the steps of a PENDING payment: the booking lock, "paid twice" →
+ * REFUND_REQUIRED, otherwise branch A, B or C.
+ * - VNPay: none. A FAILED VNPay payment stays FAILED and a later success answers `02` (ROADMAP
+ *   3.4, unchanged).
+ * - MoMo: FAILED. Only `resultCode 0` is "paid", and the list of codes MoMo documents as not
+ *   final could not be read in full, so a code recorded as a failure may not have been final;
+ *   an attempt can also be FAILED by a refused create call. If MoMo then reports the same order
+ *   paid, the customer was charged. A FAILED MoMo payment is never reopened by anything but a
+ *   paid answer (a repeated failure still changes nothing), and the amount check above comes
+ *   first.
+ */
+const REOPENED_BY_A_PAYMENT: Readonly<Record<PaymentProvider, ReadonlySet<PaymentStatus>>> = {
+  [PaymentProvider.VNPAY]: new Set(),
+  [PaymentProvider.MOMO]: new Set([PaymentStatus.FAILED]),
+};
+
 /** A VNPay IPN or querydr answer (ROADMAP 3.4, 3.7): `confirmPayment`. */
 export interface ConfirmPaymentInput {
   /** `vnp_TxnRef`. */
@@ -69,6 +88,8 @@ export type ConfirmOutcome =
       bookingId: string;
       paidPaymentId: string;
       transactionNo: string | null;
+      /** The payment was FAILED before this paid answer (MoMo only, see REOPENED_BY_A_PAYMENT). */
+      afterFailure?: true;
     }
   /** Payment FAILED; the booking stays as it was, PENDING until it expires (`00`). */
   | {
@@ -92,6 +113,8 @@ export type ConfirmOutcome =
       reclaimed: boolean;
       /** The showtime had already started (owner decision pending, ROADMAP "Quyết định chờ"). */
       showtimeStarted: boolean;
+      /** The payment was FAILED before this paid answer (MoMo only, see REOPENED_BY_A_PAYMENT). */
+      afterFailure?: true;
     }
   /**
    * Payment SUCCESS, booking NEEDS_REVIEW, no ticket (`00`). The booking's own seats that were
@@ -106,6 +129,8 @@ export type ConfirmOutcome =
       /** Seats of this booking that went back to AVAILABLE (sorted; often none). */
       releasedSeatIds: string[];
       showtimeStarted: boolean;
+      /** The payment was FAILED before this paid answer (MoMo only, see REOPENED_BY_A_PAYMENT). */
+      afterFailure?: true;
     };
 
 interface PaymentRow {
@@ -191,10 +216,13 @@ export async function settlePayment(tx: Tx, input: SettlePaymentInput): Promise<
   }
 
   // 3. Already recorded. EXPIRED is not final here: money that arrives after the booking gave up
-  //    on this attempt must still be recorded.
-  if (FINAL_STATUSES.has(payment.status)) {
+  //    on this attempt must still be recorded. Nor is a FAILED MoMo payment that MoMo now reports
+  //    paid (REOPENED_BY_A_PAYMENT); VNPay keeps FAILED final.
+  const reopened = report.paid && REOPENED_BY_A_PAYMENT[provider].has(payment.status);
+  if (FINAL_STATUSES.has(payment.status) && !reopened) {
     return { outcome: 'already_processed', paymentId: payment.id, status: payment.status };
   }
+  const after = reopened ? { afterFailure: true as const } : {};
 
   const raw = JSON.stringify(report.raw);
   // vnp_transaction_no is VNPay's own column (payments_vnp_transaction_no_provider_check);
@@ -270,6 +298,7 @@ export async function settlePayment(tx: Tx, input: SettlePaymentInput): Promise<
       bookingId: booking.id,
       paidPaymentId: paid.id,
       transactionNo,
+      ...after,
     };
   }
   // CONFIRMED and NEEDS_REVIEW only ever follow a SUCCESS payment, which step 6 would have found.
@@ -307,6 +336,7 @@ export async function settlePayment(tx: Tx, input: SettlePaymentInput): Promise<
       problem: settlement.problem,
       releasedSeatIds,
       showtimeStarted,
+      ...after,
     };
   }
 
@@ -325,6 +355,7 @@ export async function settlePayment(tx: Tx, input: SettlePaymentInput): Promise<
     voucherUse,
     reclaimed: settlement.reclaimed,
     showtimeStarted,
+    ...after,
   };
 }
 

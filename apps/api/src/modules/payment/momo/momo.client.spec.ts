@@ -93,6 +93,36 @@ const logged = () =>
   [warn, error].flatMap((spy) => spy.mock.calls.map((call) => JSON.stringify(call))).join('\n');
 
 describe('MomoClient — configuration', () => {
+  it('outside production, no MOMO_ENDPOINT means the sandbox', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(createdBody()));
+    const client = clientWith({ NODE_ENV: 'development', MOMO_ENDPOINT: undefined });
+
+    expect(client.endpoint()).toBe('https://test-payment.momo.vn');
+    await client.create(settingsOf(client), input);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`https://test-payment.momo.vn${MOMO_PATHS.create}`);
+  });
+
+  it('production without MOMO_ENDPOINT: MoMo is off, never the sandbox, no HTTP call (review M1)', async () => {
+    const client = clientWith({ NODE_ENV: 'production', MOMO_ENDPOINT: undefined });
+
+    expect(client.endpoint()).toBeNull();
+    expect(client.createSettings()).toBeNull();
+    expect(client.configured).toBe(false);
+    // The IPN can still be verified with the keys: an IPN for an earlier attempt is not lost.
+    expect(client.merchant()).not.toBeNull();
+    await expect(client.query(ORDER_ID)).resolves.toMatchObject({
+      verdict: MomoQueryVerdict.UNKNOWN,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('production with an explicit endpoint uses it', () => {
+    const client = clientWith({ NODE_ENV: 'production', MOMO_ENDPOINT: 'https://payment.momo.vn' });
+
+    expect(client.endpoint()).toBe('https://payment.momo.vn');
+    expect(client.configured).toBe(true);
+  });
+
   it.each(['MOMO_PARTNER_CODE', 'MOMO_ACCESS_KEY', 'MOMO_SECRET_KEY'] as const)(
     'missing %s: no merchant, no create settings, not configured',
     (key) => {

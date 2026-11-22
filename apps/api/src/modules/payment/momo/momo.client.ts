@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../../../config/app-config.service';
+import { momoEndpointOf } from '../../../config/env.schema';
 import type { PaymentReport } from '../payment-report';
 import { MOMO_RESULT_SUCCESS, MomoResultState, momoResultState } from './momo-result';
 import { generateMomoSignature, type MomoCredentials } from './momo-signature';
@@ -142,18 +143,29 @@ export class MomoClient {
     return { partnerCode, accessKey, secretKey };
   }
 
-  /** The merchant plus the redirect and IPN URLs, or `null` when anything is unset. */
+  /**
+   * The gateway to call (`momoEndpointOf`): `MOMO_ENDPOINT`, or the sandbox outside production;
+   * `null` in production without one, which makes MoMo unavailable rather than the sandbox.
+   */
+  endpoint(): string | null {
+    return momoEndpointOf({
+      NODE_ENV: this.config.get('NODE_ENV'),
+      MOMO_ENDPOINT: this.config.get('MOMO_ENDPOINT'),
+    });
+  }
+
+  /** The merchant plus the redirect and IPN URLs, or `null` when anything (or the endpoint) is unset. */
   createSettings(): MomoCreateSettings | null {
     const merchant = this.merchant();
     const redirectUrl = this.config.get('MOMO_REDIRECT_URL');
     const ipnUrl = this.config.get('MOMO_IPN_URL');
-    if (!merchant || !redirectUrl || !ipnUrl) return null;
+    if (!merchant || !redirectUrl || !ipnUrl || this.endpoint() === null) return null;
     return { ...merchant, redirectUrl, ipnUrl };
   }
 
-  /** `false` when the merchant keys are missing: nothing can be signed or verified. */
+  /** `false` when the merchant keys or the endpoint are missing: MoMo cannot be asked anything. */
   get configured(): boolean {
-    return this.merchant() !== null;
+    return this.merchant() !== null && this.endpoint() !== null;
   }
 
   /** The signed create body, exactly as it is sent (exported for tests through `createBody`). */
@@ -229,8 +241,8 @@ export class MomoClient {
    */
   async query(orderId: string): Promise<MomoQueryAnswer> {
     const merchant = this.merchant();
-    if (!merchant) {
-      return this.unknown(orderId, 'MOMO_PARTNER_CODE, MOMO_ACCESS_KEY or MOMO_SECRET_KEY unset');
+    if (!merchant || this.endpoint() === null) {
+      return this.unknown(orderId, 'MoMo keys or MOMO_ENDPOINT unset');
     }
     const requestId = newMomoRequestId();
     const signed = { orderId, partnerCode: merchant.partnerCode, requestId };
@@ -315,9 +327,13 @@ export class MomoClient {
     | { kind: 'ok'; status: number; body: Record<string, unknown> }
     | { kind: 'failed'; reason: string; timedOut: boolean }
   > {
+    const endpoint = this.endpoint();
+    // Unreachable through create() and query(), which check it first; never fall back to a default.
+    if (endpoint === null)
+      return { kind: 'failed', reason: 'MOMO_ENDPOINT unset', timedOut: false };
     let response: Response;
     try {
-      response = await fetch(`${this.config.get('MOMO_ENDPOINT')}${path}`, {
+      response = await fetch(`${endpoint}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=UTF-8', Accept: 'application/json' },
         body: JSON.stringify(body),

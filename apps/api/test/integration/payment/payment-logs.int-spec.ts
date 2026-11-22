@@ -18,10 +18,15 @@ import { LOG_DESTINATION } from '../../../src/config/logger.module';
 import { ClockService } from '../../../src/infra/clock/clock.service';
 import { FakeClock } from '../../../src/infra/clock/testing/fake-clock';
 import { AccessTokenIssuer } from '../../../src/modules/auth/tokens/access-token.issuer';
+import {
+  generateMomoSignature,
+  type MomoSignable,
+} from '../../../src/modules/payment/momo/momo-signature';
 import { TicketCodes } from '../../../src/modules/payment/seat-settlement';
 import { VnpayService } from '../../../src/modules/payment/vnpay/vnpay.service';
 import { appTestEnv } from '../../support/app-env';
 import { createTestDatabase, type TestDatabase } from '../../support/database';
+import { FakeMomo } from '../../support/fake-momo';
 import { bodyOf } from '../../support/http';
 import { createTestRedis, type TestRedis } from '../../support/redis';
 
@@ -35,6 +40,12 @@ const VNPAY_ENV = {
   VNPAY_RETURN_URL: 'http://localhost:5173/payment/result',
 } as const;
 /** pino-http logs a request once its response has finished; give that a moment. */
+/** Test-only MoMo merchant; never real keys. */
+const MOMO = {
+  partnerCode: 'MOMOLOGSTEST',
+  accessKey: 'logsTestMomoAccessKey9d1',
+  secretKey: 'logs-test-momo-secret-key-4be2a7',
+} as const;
 const LOG_FLUSH_MS = 100;
 
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -63,12 +74,26 @@ describe('Payment logs never carry signatures or secrets (real Postgres + Redis)
   const vnpay = new VnpayService();
   const lines: string[] = [];
   const capture: DestinationStream = { write: (line: string) => void lines.push(line) };
+  const momo = new FakeMomo(MOMO);
 
   beforeAll(async () => {
+    await momo.start();
     [db, redis] = await Promise.all([createTestDatabase(), createTestRedis()]);
     Object.assign(
       process.env,
-      appTestEnv({ databaseUrl: db.url, redisUrl: redis.url }, { LOG_LEVEL: 'info', ...VNPAY_ENV }),
+      appTestEnv(
+        { databaseUrl: db.url, redisUrl: redis.url },
+        {
+          LOG_LEVEL: 'info',
+          ...VNPAY_ENV,
+          MOMO_PARTNER_CODE: MOMO.partnerCode,
+          MOMO_ACCESS_KEY: MOMO.accessKey,
+          MOMO_SECRET_KEY: MOMO.secretKey,
+          MOMO_ENDPOINT: momo.url,
+          MOMO_REDIRECT_URL: 'http://localhost:5173/payment/result/momo',
+          MOMO_IPN_URL: 'https://api.example.test/payments/momo/ipn',
+        },
+      ),
     );
     const { AppModule } = await import('../../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -101,6 +126,7 @@ describe('Payment logs never carry signatures or secrets (real Postgres + Redis)
 
   afterAll(async () => {
     await app?.close();
+    await momo.stop();
     await Promise.all([db?.drop(), redis?.close()]);
   });
 
@@ -248,5 +274,98 @@ describe('Payment logs never carry signatures or secrets (real Postgres + Redis)
     expect(log).not.toContain('HashSecret');
     expect(log).not.toContain(VNPAY_ENV.VNPAY_HASH_SECRET);
     expect(answers).toHaveLength(7);
+  });
+
+  it('MoMo (review H1, H3): the return signature never reaches the log; a requestId mismatch is one structured line without secrets', async () => {
+    lines.length = 0;
+    const { booking } = await paidBooking(3);
+    const user = await db.prisma.booking.findUniqueOrThrow({
+      where: { id: booking.id },
+      select: { userId: true },
+    });
+    const created = await http()
+      .post('/payments/momo')
+      .set('Authorization', `Bearer ${tokenOf(user.userId, Role.USER)}`)
+      .send({ bookingId: booking.id });
+    expect(created.status).toBe(201);
+    const orderId = (created.body as { orderId: string }).orderId;
+
+    const momoSignatures: string[] = [];
+    const signed = (
+      overrides: Record<string, string | number> = {},
+      secretKey: string = MOMO.secretKey,
+    ) => {
+      const fields = {
+        partnerCode: MOMO.partnerCode,
+        orderId,
+        requestId: 'f'.repeat(32),
+        amount: booking.total,
+        orderInfo: `Thanh toan ve ${booking.code}`,
+        orderType: 'momo_wallet',
+        transId: 4_088_878_777,
+        resultCode: 0,
+        message: 'Thành công.',
+        payType: 'qr',
+        responseTime: 1_793_534_700_000,
+        extraData: '',
+        ...overrides,
+      };
+      const signature = generateMomoSignature('result', fields as MomoSignable<'result'>, {
+        accessKey: MOMO.accessKey,
+        secretKey,
+      });
+      momoSignatures.push(signature);
+      return { ...fields, signature };
+    };
+    const asQuery = (body: Record<string, unknown>) =>
+      Object.fromEntries(
+        Object.entries(body).map(([key, value]): [string, string] => [key, String(value)]),
+      );
+
+    // Return page: signed (with a requestId other than the stored one), then forged.
+    const returned = await http().get('/payments/momo/return').query(asQuery(signed()));
+    expect(returned.body).toMatchObject({ verified: true });
+    const forgedReturn = await http()
+      .get('/payments/momo/return')
+      .query(asQuery(signed({}, 'not-the-merchant-secret')));
+    expect(forgedReturn.body).toEqual({ verified: false });
+    // IPN: forged (400), then valid with the mismatched requestId (204, recorded).
+    expect((await http().post('/payments/momo/ipn').send(signed({}, 'nope'))).status).toBe(400);
+    expect((await http().post('/payments/momo/ipn').send(signed())).status).toBe(204);
+
+    await pause(LOG_FLUSH_MS);
+    const log = lines.join('');
+
+    // The requests are in the log, with what is useful to follow them up…
+    const returnLines = lines.filter(
+      (line) => /"msg":"request completed"/.test(line) && line.includes('/payments/momo/return'),
+    );
+    expect(returnLines).toHaveLength(2);
+    for (const line of returnLines) {
+      expect(line).toContain(`orderId=${orderId}`);
+      expect(line).toContain('resultCode=0');
+      expect(line).not.toContain('signature=');
+      expect(line).not.toContain('"signature"');
+    }
+    // …the requestId mismatch is one structured error line per stage, with ids only…
+    const mismatch = lines
+      .filter((line) => line.includes('"event":"momo.request_id_mismatch"'))
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(mismatch.map((entry) => entry.stage).sort()).toEqual(['ipn', 'return']);
+    for (const entry of mismatch) {
+      expect(entry).toMatchObject({
+        level: 50,
+        provider: 'MOMO',
+        orderId,
+        receivedRequestId: 'f'.repeat(32),
+      });
+      expect(typeof entry.paymentId).toBe('string');
+    }
+    // …and none of it carries a MoMo signature, a key, or the VNPay hash parameter.
+    expect(momoSignatures).toHaveLength(4);
+    for (const signature of momoSignatures) expect(log).not.toContain(signature);
+    expect(log).not.toContain(MOMO.secretKey);
+    expect(log).not.toContain(MOMO.accessKey);
+    expect(log).not.toContain('SecureHash');
   });
 });
