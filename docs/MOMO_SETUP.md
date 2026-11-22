@@ -39,7 +39,8 @@ Ticketify nhận thanh toán qua **VNPay** (giai đoạn 3) và **ví MoMo** (11
 | `MOMO_PARTNER_CODE` | *(của bạn)* | bắt buộc để dùng MoMo |
 | `MOMO_ACCESS_KEY` | *(của bạn)* | nằm trong chuỗi ký, **không** gửi trong body |
 | `MOMO_SECRET_KEY` | *(của bạn)* | chỉ dùng để tính HMAC; không bao giờ được log |
-| `MOMO_ENDPOINT` | `https://test-payment.momo.vn` | production: `https://payment.momo.vn` |
+| `MOMO_ENDPOINT` | `https://test-payment.momo.vn` | để trống = sandbox **ngoài production**; production: bắt buộc đặt, `https`, xem §9 |
+| `MOMO_ALLOW_SANDBOX_IN_PRODUCTION` | `false` | chỉ `true` cho một bản triển khai thử có kiểm soát chạy `NODE_ENV=production` với sandbox |
 | `MOMO_REDIRECT_URL` | `http://localhost:5173/payment/result/momo` | trang kết quả của web (trình duyệt tự mở, localhost dùng được) |
 | `MOMO_IPN_URL` | `https://<tên>.ngrok-free.app/payments/momo/ipn` | **phải công khai**: MoMo gọi từ máy chủ của họ |
 | `MOMO_REQUEST_TIMEOUT_MS` | `30000` | tài liệu yêu cầu ≥ 30 s cho create |
@@ -112,7 +113,8 @@ Thử thêm: bấm hủy trên trang MoMo (→ IPN mã lỗi, `Payment` `FAILED`
 | Create trả `11` | merchant chưa được mở quyền cho API/luồng này trong M4B |
 | IPN bị trả `400 invalid signature` | API đang chạy với khóa khác khóa đã tạo thanh toán; IPN của môi trường khác dùng chung tài khoản sandbox; proxy/tunnel sửa body |
 | IPN `400 a required field is missing or malformed` | body không phải JSON object, hoặc thiếu một trong các trường được ký |
-| IPN `204` nhưng đơn không đổi | log sẽ nói: `no MoMo payment has this orderId` (IPN của DB khác), `requestId … is not the one…`, `not final yet`, hoặc `expects amount …` (số tiền lệch) |
+| IPN `204` nhưng đơn không đổi | log sẽ nói: `no MoMo payment has this orderId` (IPN của DB khác), `not final yet`, hoặc `expects amount …` (số tiền lệch) |
+| Log `error` có `"event":"momo.request_id_mismatch"` | IPN/redirect có chữ ký đúng nhưng `requestId` khác cái đã lưu khi tạo. **Vẫn được xử lý theo `orderId`** (đơn vẫn được xác nhận); dòng log chỉ có id (`paymentId`, `orderId`, hai `requestId`, `resultCode`, `stage`). Nếu thấy thường xuyên, ghi lại để đối chiếu tài liệu MoMo |
 
 Quy tắc ký (để tự kiểm bằng tay):
 
@@ -132,7 +134,7 @@ Phản hồi của create và của query **không** được kiểm chữ ký (
 ## 9. Lên production an toàn
 
 1. Lấy bộ khóa **production** trong M4B (khác khóa test); đặt bằng biến môi trường/secret manager của máy chủ, không qua file commit.
-2. `MOMO_ENDPOINT=https://payment.momo.vn`. Giữ HTTPS: câu trả lời query được tin dựa trên TLS tới endpoint này.
+2. `MOMO_ENDPOINT=https://payment.momo.vn`, đặt **rõ ràng**. API kiểm lúc khởi động và **không chạy** nếu, với `NODE_ENV=production`: `MOMO_ENDPOINT` không phải `https` (câu trả lời query được tin dựa trên TLS tới endpoint này); `MOMO_ENDPOINT` là sandbox (`test-payment.momo.vn`) mà `MOMO_ALLOW_SANDBOX_IN_PRODUCTION` không phải `true`; hoặc có khóa `MOMO_*` mà để trống `MOMO_ENDPOINT` (production không bao giờ tự lùi về sandbox). Không có khóa nào thì MoMo đơn giản là tắt (`503 PAYMENT_NOT_CONFIGURED`). Thông báo lỗi chỉ nêu tên biến và quy tắc, không bao giờ in giá trị. `MOMO_ALLOW_SANDBOX_IN_PRODUCTION=true` chỉ dành cho một bản thử có kiểm soát: ở sandbox không có tiền thật, nên mọi "thanh toán" ví test sẽ xác nhận vé thật.
 3. `MOMO_IPN_URL` = domain production cố định (HTTPS), trỏ thẳng tới `/payments/momo/ipn`; `MOMO_REDIRECT_URL` = `https://<web>/payment/result/momo`.
 4. Nếu đặt sau reverse proxy, cấu hình `TRUST_PROXY` và đảm bảo proxy chuyển nguyên body JSON. Không đặt rate limit hay xác thực JWT trước IPN (đã `@Public`, chữ ký là lớp bảo vệ).
 5. Kiểm tra bằng một giao dịch nhỏ trước, đối chiếu `provider_transaction_id` với lịch sử giao dịch trên M4B.
@@ -144,6 +146,9 @@ Phản hồi của create và của query **không** được kiểm chữ ký (
 - **Timeout khi create**: lần thử giữ `PENDING`, `503 PAYMENT_PROVIDER_UNAVAILABLE`; lần bấm sau gửi lại **y nguyên** request (cùng `requestId`) — MoMo trả lời idempotent theo `requestId`, nên không bao giờ tạo order thứ hai.
 - **MoMo từ chối create** (mã lỗi cuối): lần thử `FAILED` (nó chưa từng có trang thanh toán), `502 PAYMENT_PROVIDER_ERROR`; lần sau mở lần thử mới.
 - **IPN**: `204` khi đã xử lý (ghi nhận, lặp lại, chưa cuối, hoặc order không có ở đây); `400` khi không xác minh được (body sai, chữ ký sai, `partnerCode` khác); `500` khi lỗi bất ngờ (không ghi gì). Mã chưa cuối (`1000`, `7000`, `7002`, `8000`, `9000`) không ghi gì.
+- **`requestId` khác cái đã lưu** (review H1): không còn là lý do bỏ qua IPN hay trang return. Việc hai giá trị luôn trùng chưa được xác minh với tài liệu; đơn được nhận ra bằng `orderId` (duy nhất, có trong chữ ký), và chữ ký vẫn phủ `requestId` nhận được. Lệch thì ghi một dòng log `error` có cấu trúc (`event: momo.request_id_mismatch`) rồi xử lý như thường; chữ ký, `partnerCode` và số tiền vẫn được kiểm như trước.
+- **Thành công sau một lần đã ghi `FAILED`** (review H2): với MoMo, câu trả lời **đã trả** có chữ ký hợp lệ và đúng số tiền **mở lại** `Payment` `FAILED` và đi đúng các bước của một `Payment` `PENDING`: đơn còn ghế → `CONFIRMED` + vé; đơn đã hết hạn → giành lại ghế (nhánh B) hoặc `NEEDS_REVIEW`; đơn đã được lần khác trả → `REFUND_REQUIRED` (lưu `transId`, outbox `payment.refund_required`, admin hoàn tay). Một thất bại lặp lại, chữ ký sai hay số tiền lệch không bao giờ mở lại. **VNPay giữ nguyên**: `FAILED` vẫn là trạng thái cuối, IPN thành công sau đó trả `02`.
+- **Log**: tham số `signature` của trang return bị bỏ khỏi log request (cả tên lẫn giá trị), như `vnp_SecureHash` của VNPay (review H3).
 - **Số tiền**: `amount` (đồng) phải bằng đúng `payments.amount`; lệch → không ghi gì, log `error`, `204`.
 - **Ngoài hạn mức ví** (< 1.000 hoặc > 50.000.000 đ): `422 PAYMENT_AMOUNT_NOT_SUPPORTED`, web gợi ý VNPay.
 - **Worker hết hạn** hỏi MoMo (query) cho lần thử MoMo `PENDING`, VNPay (querydr) cho lần thử VNPay; chỉ `resultCode 0` đúng order mới ghi tiền thay vì cho hết hạn.
