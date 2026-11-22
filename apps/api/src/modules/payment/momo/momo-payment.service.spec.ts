@@ -356,7 +356,8 @@ describe('MomoPaymentService.create', () => {
 });
 
 describe('MomoPaymentService.ipn', () => {
-  const known = [{ provider_request_id: REQUEST_ID }];
+  const known = [{ id: PAYMENT_ID, provider_request_id: REQUEST_ID }];
+  const OTHER_REQUEST_ID = 'f'.repeat(32);
   const paymentRow = (status: PaymentStatus = PaymentStatus.PENDING, amount = AMOUNT) => [
     { id: PAYMENT_ID, booking_id: BOOKING_ID, amount, status },
   ];
@@ -473,14 +474,77 @@ describe('MomoPaymentService.ipn', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('a requestId that is not the one the order was created with: ignored, 204', async () => {
-    const { service, prisma } = setup({ rows: [[{ provider_request_id: 'f'.repeat(32) }]] });
+  it('a valid signed IPN whose requestId differs from the stored one: settled by orderId (review H1), one structured error line, nothing secret', async () => {
+    const error = jest.spyOn(Logger.prototype, 'error');
+    const { service, statements, seatEvents } = setup({
+      rows: [[{ id: PAYMENT_ID, provider_request_id: OTHER_REQUEST_ID }]],
+      txRows: [paymentRow(), bookingLocked, [], seats, showtime],
+      txAffected: [1, 1, 1],
+    });
+    const body = signedIpn();
+
+    await expect(service.ipn(body)).resolves.toEqual({
+      acknowledged: true,
+      outcome: 'confirmed',
+    });
+    expect(statements.some((s) => s.sql.includes("SET status = 'SUCCESS'"))).toBe(true);
+    expect(seatEvents.sold).toHaveBeenCalledWith(SHOWTIME_ID, [SEAT_A]);
+
+    const mismatch = error.mock.calls.filter(
+      ([first]) => (first as { event?: string }).event === 'momo.request_id_mismatch',
+    );
+    expect(mismatch).toHaveLength(1);
+    expect(mismatch[0]?.[0]).toEqual({
+      event: 'momo.request_id_mismatch',
+      provider: 'MOMO',
+      stage: 'ipn',
+      paymentId: PAYMENT_ID,
+      orderId: ORDER_ID,
+      resultCode: 0,
+      receivedRequestId: REQUEST_ID,
+      storedRequestId: OTHER_REQUEST_ID,
+    });
+    const logged = JSON.stringify(error.mock.calls);
+    for (const secret of [credentials.secretKey, credentials.accessKey, body.signature]) {
+      expect(logged).not.toContain(secret);
+    }
+  });
+
+  it('a matching requestId logs no mismatch', async () => {
+    const error = jest.spyOn(Logger.prototype, 'error');
+    const { service } = setup({
+      rows: [known],
+      txRows: [paymentRow(), bookingLocked, [], seats, showtime],
+      txAffected: [1, 1, 1],
+    });
+
+    await expect(service.ipn(signedIpn())).resolves.toMatchObject({ outcome: 'confirmed' });
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('a different requestId does not bypass the signature: forged IPN rejected (400), no database work', async () => {
+    const { service, prisma } = setup({
+      rows: [[{ id: PAYMENT_ID, provider_request_id: OTHER_REQUEST_ID }]],
+    });
+
+    await expect(
+      service.ipn(signedIpn({ requestId: OTHER_REQUEST_ID }, 'another-secret')),
+    ).resolves.toMatchObject({ acknowledged: false, reason: 'invalid signature' });
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('a different requestId does not bypass the amount check: nothing written', async () => {
+    const { service, statements } = setup({
+      rows: [[{ id: PAYMENT_ID, provider_request_id: OTHER_REQUEST_ID }]],
+      txRows: [paymentRow(PaymentStatus.PENDING, 90_000)],
+    });
 
     await expect(service.ipn(signedIpn())).resolves.toEqual({
       acknowledged: true,
-      outcome: 'ignored',
+      outcome: 'invalid_amount',
     });
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(writes(statements)).toEqual([]);
   });
 
   it.each([
@@ -543,9 +607,32 @@ describe('MomoPaymentService.verifyReturn', () => {
     ['a bad signature', asQuery(signedIpn({}, 'another-secret')), stored],
     ['a repeated key (array)', { ...asQuery(signedIpn()), orderId: [ORDER_ID, ORDER_ID] }, stored],
     ['an unknown orderId', asQuery(signedIpn()), null],
-    ['another requestId', asQuery(signedIpn()), { ...stored, providerRequestId: 'f'.repeat(32) }],
+    ['another partnerCode (signed)', asQuery(signedIpn({ partnerCode: 'MOMOOTHER' })), stored],
   ])('%s: { verified: false } and nothing else', async (_label, query, findFirst) => {
     const { service } = setup({ findFirst });
     await expect(service.verifyReturn(query)).resolves.toEqual({ verified: false });
+  });
+
+  it('another requestId (review H1): verified with the stored status, an error line, and still nothing written', async () => {
+    const error = jest.spyOn(Logger.prototype, 'error');
+    const { service, prisma } = setup({
+      findFirst: { ...stored, id: PAYMENT_ID, providerRequestId: 'f'.repeat(32) },
+    });
+
+    await expect(service.verifyReturn(asQuery(signedIpn()))).resolves.toEqual({
+      verified: true,
+      bookingId: BOOKING_ID,
+      paymentStatus: PaymentStatus.PENDING,
+      resultCode: 0,
+      amountMismatch: false,
+    });
+    expect(error.mock.calls[0]?.[0]).toMatchObject({
+      event: 'momo.request_id_mismatch',
+      stage: 'return',
+      paymentId: PAYMENT_ID,
+    });
+    // The browser redirect never settles anything, whatever it says.
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
