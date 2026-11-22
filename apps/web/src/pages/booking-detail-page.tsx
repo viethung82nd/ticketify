@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { useBooking } from '@/features/bookings/bookings-api';
 import { formatCountdown, useCountdown } from '@/features/bookings/use-countdown';
 import { errorCodeOf } from '@/features/catalog/catalog-errors';
-import { PayWithVnpayButton } from '@/features/payments/pay-with-vnpay-button';
+import { PaymentOptions } from '@/features/payments/payment-options';
 import { SEAT_TYPE_NAMES } from '@/features/seats/seat-selection';
 import { useTicketPdf } from '@/features/tickets/tickets-api';
 import { cinemaDate, cinemaTime, longDayLabel } from '@/lib/cinema-time';
@@ -251,10 +251,10 @@ export function BookingDetailPage() {
         </div>
         {showClock && (
           <div className="space-y-3 border-t border-white/10 pt-4">
-            <PayWithVnpayButton bookingId={booking.id} onStale={() => void refetch()} />
+            <PaymentOptions bookingId={booking.id} onStale={() => void refetch()} />
             <p className="text-xs text-muted-foreground">
-              Bạn sẽ được chuyển sang cổng VNPay. Hiện chưa thể hủy giữ ghế trên trang này: nếu bạn
-              rời trang, ghế vẫn được giữ đến khi hết hạn.
+              Bạn sẽ được chuyển sang cổng thanh toán đã chọn. Hiện chưa thể hủy giữ ghế trên trang
+              này: nếu bạn rời trang, ghế vẫn được giữ đến khi hết hạn.
             </p>
           </div>
         )}

@@ -1,4 +1,4 @@
-import { Role } from '@ticketify/shared';
+import { PaymentProvider, Role } from '@ticketify/shared';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { AppLayout } from '@/components/layout/app-layout';
 import { GuestOnly, RequireAuth } from '@/features/auth/route-guards';
@@ -76,6 +76,11 @@ export const router = createBrowserRouter([
           { path: 'me/bookings', element: <MyBookingsPage /> },
           // vnp_ReturnUrl. Behind login: a guest is sent to /login with the query kept in `from`.
           { path: 'payment/result', element: <PaymentResultPage /> },
+          // MoMo redirectUrl (MOMO_REDIRECT_URL), same rules.
+          {
+            path: 'payment/result/momo',
+            element: <PaymentResultPage provider={PaymentProvider.MOMO} />,
+          },
         ],
       },
       {
