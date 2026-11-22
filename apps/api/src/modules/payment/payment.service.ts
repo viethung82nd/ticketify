@@ -227,7 +227,9 @@ export class PaymentService {
     const claimedRef = typeof query.vnp_TxnRef === 'string' ? query.vnp_TxnRef : '-';
 
     if (!this.vnpay.verifySignature(query, hashSecret)) {
-      this.logger.warn(`IPN 97: invalid signature (vnp_TxnRef ${claimedRef}), nothing changed`);
+      this.logger.warn(
+        `IPN 97: invalid signature (vnp_TxnRef ${claimedRef}), nothing changed; ${signatureDiagnostics(query)}`,
+      );
       return VnpayIpnResponse.INVALID_SIGNATURE;
     }
     const params = signedParams(query);
@@ -321,6 +323,39 @@ export class PaymentService {
     if (!tmnCode || !hashSecret || !returnUrl) throw PaymentErrors.notConfigured();
     return { tmnCode, hashSecret, returnUrl, paymentUrl: this.config.get('VNPAY_PAYMENT_URL') };
   }
+}
+
+/**
+ * What an unverifiable VNPay query looked like, by parameter **name** only (never a value, never
+ * the hash): enough to tell the usual causes of `97` apart in the log — no hash at all, a hash of
+ * the wrong length, a repeated parameter, parameters that are not `vnp_*` (added by a proxy or
+ * the IPN URL itself), or empty values (left out of the signed data here).
+ */
+export function signatureDiagnostics(query: Readonly<Record<string, unknown>>): string {
+  const hash = query.vnp_SecureHash;
+  const hashState =
+    typeof hash !== 'string'
+      ? hash === undefined
+        ? 'absent'
+        : 'repeated'
+      : `${hash.length} chars`;
+  // Both signature parameters are left out by name: not even their names may reach the log.
+  const names = Object.keys(query).filter((key) => !/SecureHash/.test(key));
+  // Names come from the request: bounded, so a forged query cannot flood the log.
+  const list = (keys: string[]) =>
+    keys.length > 0
+      ? keys
+          .slice(0, 40)
+          .map((key) => key.slice(0, 40))
+          .join(',')
+      : '-';
+  return [
+    `hash ${hashState}`,
+    `params ${list(names.sort())}`,
+    `non-vnp ${list(names.filter((key) => !key.startsWith('vnp_')))}`,
+    `empty ${list(names.filter((key) => query[key] === ''))}`,
+    `repeated ${list(names.filter((key) => Array.isArray(query[key])))}`,
+  ].join('; ');
 }
 
 /** The `RspCode` of each outcome (PLAN §5 IPN table). */
