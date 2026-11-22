@@ -1,4 +1,4 @@
-import { BookingStatus, PaymentStatus, TicketStatus } from '@ticketify/shared';
+import { BookingStatus, PaymentProvider, PaymentStatus, TicketStatus } from '@ticketify/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import {
   OutboxEventType,
@@ -6,6 +6,7 @@ import {
   writeOutboxEvent,
 } from '../../infra/outbox/outbox-events';
 import { lockSeatsOfBooking, type ShowtimeState, showtimeOf } from './booking-seats';
+import { gatewayAmount, type PaymentReport } from './payment-report';
 import { reclaimSeatsForExpiredBooking } from './reclaim-seats';
 import { heldSeatsProblem, type SeatProblem, showtimeProblem } from './seat-settlement';
 import {
@@ -13,8 +14,7 @@ import {
   releaseVoucherUse,
   type VoucherUseOnConfirm,
 } from '../vouchers/voucher-usages';
-import { vnpayAmount } from './vnpay/vnpay-format';
-import { readVnpayIpn, type VnpayIpnResult } from './vnpay/vnpay-ipn';
+import { readVnpayReport } from './vnpay/vnpay-ipn';
 
 type Tx = Prisma.TransactionClient;
 
@@ -25,6 +25,7 @@ const FINAL_STATUSES: ReadonlySet<PaymentStatus> = new Set([
   PaymentStatus.REFUND_REQUIRED,
 ]);
 
+/** A VNPay IPN or querydr answer (ROADMAP 3.4, 3.7): `confirmPayment`. */
 export interface ConfirmPaymentInput {
   /** `vnp_TxnRef`. */
   txnRef: string;
@@ -35,11 +36,24 @@ export interface ConfirmPaymentInput {
   ticketCode: () => string;
 }
 
+/** Any gateway's final answer about one attempt: `settlePayment`. */
+export interface SettlePaymentInput {
+  /** The gateway that answered; a payment of another gateway with this reference is not found. */
+  provider: PaymentProvider;
+  /** Our order reference at that gateway (`txn_ref`: VNPay `vnp_TxnRef`, MoMo `orderId`). */
+  txnRef: string;
+  /** What the gateway reported, read from an answer whose signature was checked. */
+  report: PaymentReport;
+  now: Date;
+  /** Draws one ticket code (`TicketCodes.next`). */
+  ticketCode: () => string;
+}
+
 /** What `confirmPayment` did. Only `failed`, `confirmed` and `needs_review` wrote anything. */
 export type ConfirmOutcome =
-  /** No payment has this `vnp_TxnRef` (`01`). */
+  /** No payment of this gateway has this reference (`01`). */
   | { outcome: 'not_found' }
-  /** `vnp_Amount` ≠ amount × 100 (`04`). */
+  /** The reported amount ≠ the payment amount (VNPay: `vnp_Amount` ≠ amount × 100) (`04`). */
   | { outcome: 'invalid_amount'; paymentId: string; expected: string; received: string | null }
   /** The payment is SUCCESS, FAILED or REFUND_REQUIRED already, e.g. a repeated IPN (`02`). */
   | { outcome: 'already_processed'; paymentId: string; status: PaymentStatus }
@@ -140,19 +154,38 @@ interface Settlement {
  * (`payments_booking_id_success_key`) or a second live ticket for a seat
  * (`tickets_showtime_id_seat_id_live_key`) fails the statement and the whole transaction.
  */
-export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promise<ConfirmOutcome> {
-  const { txnRef, params, now } = input;
+export function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promise<ConfirmOutcome> {
+  return settlePayment(tx, {
+    provider: PaymentProvider.VNPAY,
+    txnRef: input.txnRef,
+    report: readVnpayReport(input.params),
+    now: input.now,
+    ticketCode: input.ticketCode,
+  });
+}
 
-  // 1. The payment, locked.
+/**
+ * Records one gateway's final answer about one payment attempt: the provider-neutral core of
+ * `confirmPayment` (VNPay) and of the MoMo IPN and query. Same transaction, same locks, same
+ * outcomes for every gateway; the gateway only decides how its answer was read into
+ * `input.report`, and VNPay's transaction number also goes into its own legacy column
+ * `vnp_transaction_no` (every gateway's goes into `provider_transaction_id`).
+ */
+export async function settlePayment(tx: Tx, input: SettlePaymentInput): Promise<ConfirmOutcome> {
+  const { provider, txnRef, report, now } = input;
+
+  // 1. The payment of this gateway, locked. A reference is unique across gateways, so an answer
+  //    can never settle another gateway's payment.
   const [payment] = await tx.$queryRaw<PaymentRow[]>`
     SELECT id, booking_id, amount, status::text AS status FROM payments
-    WHERE txn_ref = ${txnRef}
+    WHERE txn_ref = ${txnRef} AND provider = ${provider}::payment_provider
     FOR UPDATE`;
   if (!payment) return { outcome: 'not_found' };
 
-  // 2. Amount: exactly amount × 100, compared as the string VNPay sent.
-  const expected = vnpayAmount(payment.amount);
-  const received = params.vnp_Amount ?? null;
+  // 2. Amount: exactly what this gateway must report for it, compared as text (VNPay: amount ×
+  //    100 as VNPay sent it; MoMo: the amount in dong).
+  const expected = gatewayAmount(provider, payment.amount);
+  const received = report.amount;
   if (received !== expected) {
     return { outcome: 'invalid_amount', paymentId: payment.id, expected, received };
   }
@@ -163,24 +196,27 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
     return { outcome: 'already_processed', paymentId: payment.id, status: payment.status };
   }
 
-  const ipn = readVnpayIpn(params);
-  const raw = JSON.stringify(params);
+  const raw = JSON.stringify(report.raw);
+  // vnp_transaction_no is VNPay's own column (payments_vnp_transaction_no_provider_check);
+  // provider_transaction_id is every gateway's, unique per gateway.
+  const transactionNo = report.transactionNo;
+  const vnpTransactionNo = provider === PaymentProvider.VNPAY ? transactionNo : null;
 
   // 4. Not paid: the payment FAILED, the booking is left alone (the user may pay again before
-  //    expiresAt). vnp_TransactionNo is not stored for a failure: VNPay may send `0` for a
-  //    cancelled payment and the column is unique; it stays in raw_payload.
-  if (!ipn.succeeded) {
+  //    expiresAt). The transaction number is not stored for a failure: VNPay may send `0` for a
+  //    cancelled payment and the columns are unique; it stays in raw_payload.
+  if (!report.paid) {
     await tx.$executeRaw`
       UPDATE payments
-      SET status = 'FAILED', bank_code = ${ipn.bankCode}, response_code = ${ipn.responseCode},
+      SET status = 'FAILED', bank_code = ${report.bankCode}, response_code = ${report.responseCode},
           raw_payload = ${raw}::jsonb, processed_at = ${now}, updated_at = ${now}
       WHERE id = ${payment.id}::uuid`;
     return {
       outcome: 'failed',
       paymentId: payment.id,
       bookingId: payment.booking_id,
-      responseCode: ipn.responseCode,
-      transactionStatus: ipn.transactionStatus,
+      responseCode: report.responseCode,
+      transactionStatus: report.transactionStatus,
     };
   }
 
@@ -194,8 +230,8 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
 
   // 6. Paid twice: another payment of this booking already succeeded, and a booking is paid at
   //    most once (payments_booking_id_success_key). This money goes back to the customer: the
-  //    payment is recorded as REFUND_REQUIRED, with everything VNPay sent (the refund needs
-  //    vnp_TransactionNo), and an admin is told through the outbox. Booking and seats stay.
+  //    payment is recorded as REFUND_REQUIRED, with everything the gateway sent (the refund needs
+  //    its transaction number), and an admin is told through the outbox. Booking and seats stay.
   const [paid] = await tx.$queryRaw<{ id: string }[]>`
     SELECT id FROM payments
     WHERE booking_id = ${booking.id}::uuid AND status = 'SUCCESS'
@@ -203,8 +239,9 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
   if (paid) {
     await tx.$executeRaw`
       UPDATE payments
-      SET status = 'REFUND_REQUIRED', vnp_transaction_no = ${ipn.transactionNo},
-          bank_code = ${ipn.bankCode}, response_code = ${ipn.responseCode},
+      SET status = 'REFUND_REQUIRED', vnp_transaction_no = ${vnpTransactionNo},
+          provider_transaction_id = ${transactionNo},
+          bank_code = ${report.bankCode}, response_code = ${report.responseCode},
           raw_payload = ${raw}::jsonb, processed_at = ${now}, updated_at = ${now}
       WHERE id = ${payment.id}::uuid`;
     await writeOutboxEvent(
@@ -219,7 +256,9 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
           bookingCode: booking.code,
           userId: booking.user_id,
           amount: payment.amount,
-          vnpTransactionNo: ipn.transactionNo,
+          provider,
+          vnpTransactionNo,
+          providerTransactionId: transactionNo,
           paidPaymentId: paid.id,
         },
       },
@@ -230,7 +269,7 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
       paymentId: payment.id,
       bookingId: booking.id,
       paidPaymentId: paid.id,
-      transactionNo: ipn.transactionNo,
+      transactionNo,
     };
   }
   // CONFIRMED and NEEDS_REVIEW only ever follow a SUCCESS payment, which step 6 would have found.
@@ -241,8 +280,9 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
   // 7. The money is ours whatever happens to the seats.
   await tx.$executeRaw`
     UPDATE payments
-    SET status = 'SUCCESS', vnp_transaction_no = ${ipn.transactionNo}, bank_code = ${ipn.bankCode},
-        response_code = ${ipn.responseCode}, raw_payload = ${raw}::jsonb,
+    SET status = 'SUCCESS', vnp_transaction_no = ${vnpTransactionNo},
+        provider_transaction_id = ${transactionNo}, bank_code = ${report.bankCode},
+        response_code = ${report.responseCode}, raw_payload = ${raw}::jsonb,
         processed_at = ${now}, updated_at = ${now}
     WHERE id = ${payment.id}::uuid`;
 
@@ -256,7 +296,7 @@ export async function confirmPayment(tx: Tx, input: ConfirmPaymentInput): Promis
   if (settlement.problem) {
     const releasedSeatIds = await sendToReview(
       tx,
-      { booking, payment, ipn, problem: settlement.problem },
+      { booking, payment, provider, transactionNo, problem: settlement.problem },
       now,
     );
     return {
@@ -322,7 +362,7 @@ async function settleExpiredBooking(tx: Tx, booking: BookingRow, now: Date): Pro
 async function confirmBooking(
   tx: Tx,
   ctx: { booking: BookingRow; payment: PaymentRow; seatIds: string[]; reclaimed: boolean },
-  input: ConfirmPaymentInput,
+  input: Pick<SettlePaymentInput, 'now' | 'ticketCode'>,
 ): Promise<{ ticketIds: string[]; voucherUse: VoucherUseOnConfirm }> {
   const { booking, payment, seatIds, reclaimed } = ctx;
   const { now } = input;
@@ -394,10 +434,16 @@ async function confirmBooking(
  */
 async function sendToReview(
   tx: Tx,
-  ctx: { booking: BookingRow; payment: PaymentRow; ipn: VnpayIpnResult; problem: SeatProblem },
+  ctx: {
+    booking: BookingRow;
+    payment: PaymentRow;
+    provider: PaymentProvider;
+    transactionNo: string | null;
+    problem: SeatProblem;
+  },
   now: Date,
 ): Promise<string[]> {
-  const { booking, payment, ipn, problem } = ctx;
+  const { booking, payment, provider, transactionNo, problem } = ctx;
   const updated = await tx.$executeRaw`
     UPDATE bookings SET status = 'NEEDS_REVIEW', updated_at = ${now}
     WHERE id = ${booking.id}::uuid AND status IN ('PENDING', 'EXPIRED')`;
@@ -428,7 +474,9 @@ async function sendToReview(
         showtimeId: booking.showtime_id,
         paymentId: payment.id,
         amount: payment.amount,
-        vnpTransactionNo: ipn.transactionNo,
+        provider,
+        vnpTransactionNo: provider === PaymentProvider.VNPAY ? transactionNo : null,
+        providerTransactionId: transactionNo,
         reason: problem.reason,
         seatIds: problem.seatIds,
         releasedSeatIds,

@@ -1,3 +1,4 @@
+import type { PaymentReport } from '../payment-report';
 import type { VnpayQuery } from './vnpay.service';
 
 /** What the IPN URL answers VNPay, as JSON (pay.html, "Cài đặt Code IPN URL"). */
@@ -54,6 +55,23 @@ export function readVnpayIpn(params: Readonly<Record<string, string>>): VnpayIpn
     transactionStatus,
     bankCode: params.vnp_BankCode || null,
     transactionNo: params.vnp_TransactionNo || null,
+  };
+}
+
+/**
+ * The `PaymentReport` of a VNPay IPN or querydr answer whose signature was checked: what
+ * `readVnpayIpn` reads, plus `vnp_Amount` as sent and every parameter for `raw_payload`.
+ */
+export function readVnpayReport(params: Readonly<Record<string, string>>): PaymentReport {
+  const ipn = readVnpayIpn(params);
+  return {
+    amount: params.vnp_Amount ?? null,
+    paid: ipn.succeeded,
+    responseCode: ipn.responseCode,
+    transactionStatus: ipn.transactionStatus,
+    bankCode: ipn.bankCode,
+    transactionNo: ipn.transactionNo,
+    raw: params,
   };
 }
 

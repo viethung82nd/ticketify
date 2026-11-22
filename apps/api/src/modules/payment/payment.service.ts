@@ -1,18 +1,12 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
-import {
-  BookingStatus,
-  type CreatedVnpayPayment,
-  PaymentErrorCode,
-  PaymentStatus,
-  type VnpayReturnResult,
-} from '@ticketify/shared';
-import { apiException } from '../../common/errors/api-error';
+import { Injectable, Logger } from '@nestjs/common';
+import { type CreatedVnpayPayment, PaymentStatus, type VnpayReturnResult } from '@ticketify/shared';
 import { AppConfig } from '../../config/app-config.service';
 import type { Prisma } from '../../generated/prisma/client';
 import { ClockService } from '../../infra/clock/clock.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { SeatEvents } from '../realtime/seat-events';
 import { confirmPayment, type ConfirmOutcome } from './confirm-payment';
+import { lockPayableBooking, PaymentErrors } from './payable-booking';
 import { TicketCodes } from './seat-settlement';
 import { newTxnRef, vnpayAmount, vnpayDate, vnpayIpAddr } from './vnpay/vnpay-format';
 import { signedParams, VnpayIpnResponse } from './vnpay/vnpay-ipn';
@@ -65,36 +59,6 @@ interface VnpaySettings {
   returnUrl: string;
   paymentUrl: string;
 }
-
-interface PayableBookingRow {
-  code: string;
-  status: BookingStatus;
-  total: number;
-  expires_at: Date;
-}
-
-const bookingNotFound = () =>
-  apiException(HttpStatus.NOT_FOUND, PaymentErrorCode.BOOKING_NOT_FOUND, 'Booking not found');
-const notPayable = (message = 'Only a booking waiting for payment can be paid') =>
-  apiException(HttpStatus.CONFLICT, PaymentErrorCode.BOOKING_NOT_PAYABLE, message);
-const bookingExpired = () =>
-  apiException(
-    HttpStatus.UNPROCESSABLE_ENTITY,
-    PaymentErrorCode.BOOKING_EXPIRED,
-    'The time to pay for this booking is over',
-  );
-const alreadyPaid = () =>
-  apiException(
-    HttpStatus.CONFLICT,
-    PaymentErrorCode.BOOKING_ALREADY_PAID,
-    'This booking has already been paid',
-  );
-const notConfigured = () =>
-  apiException(
-    HttpStatus.SERVICE_UNAVAILABLE,
-    PaymentErrorCode.PAYMENT_NOT_CONFIGURED,
-    'Online payment is not available right now',
-  );
 
 /**
  * VNPay payments (PLAN §5, ROADMAP 3.2–3.4): creation, the return page and the IPN. Payment
@@ -170,31 +134,18 @@ export class PaymentService {
   }
 
   private async createInTransaction(tx: Tx, input: CreateVnpayPaymentInput, now: Date) {
-    // 1. FOR KEY SHARE, not FOR UPDATE: concurrent payment attempts do not block each other, but a
-    //    cancel or an expiry (both FOR UPDATE) cannot run at the same time (see createVnpay).
-    //    Another user's booking is "not found" as well (never 403).
-    const [booking] = await tx.$queryRaw<PayableBookingRow[]>`
-      SELECT code, status::text AS status, total, expires_at FROM bookings
-      WHERE id = ${input.bookingId}::uuid AND user_id = ${input.userId}::uuid
-      FOR KEY SHARE`;
-    if (!booking) throw bookingNotFound();
-
-    // 2. Payable: PENDING, before expiresAt (on the clock and in VNPay's whole seconds), unpaid.
-    if (booking.status !== BookingStatus.PENDING) throw notPayable();
-    if (now >= booking.expires_at || vnpayDate(booking.expires_at) <= vnpayDate(now)) {
-      throw bookingExpired();
-    }
-    const [paid] = await tx.$queryRaw<{ id: string }[]>`
-      SELECT id FROM payments
-      WHERE booking_id = ${input.bookingId}::uuid AND status = 'SUCCESS'
-      LIMIT 1`;
-    if (paid) throw alreadyPaid();
-
-    // 3. The amount is the booking total as stored (VND, whole dong).
+    // 1–3. FOR KEY SHARE, not FOR UPDATE: concurrent payment attempts do not block each other,
+    //    but a cancel or an expiry (both FOR UPDATE) cannot run at the same time (see createVnpay).
+    //    Payable: PENDING, before expiresAt (on the clock and in VNPay's whole seconds), unpaid;
+    //    the amount is the booking total as stored (VND, whole dong).
+    const booking = await lockPayableBooking(tx, {
+      userId: input.userId,
+      bookingId: input.bookingId,
+      now,
+      lock: 'KEY_SHARE',
+      tooLate: (expiresAt) => vnpayDate(expiresAt) <= vnpayDate(now),
+    });
     const amount = booking.total;
-    if (!Number.isInteger(amount) || amount <= 0) {
-      throw notPayable('This booking has nothing to pay online');
-    }
 
     // 4. A new attempt. payments_txn_ref_key decides uniqueness; a collision inserts nothing.
     for (let attempt = 0; attempt < TXN_REF_ATTEMPTS; attempt++) {
@@ -218,7 +169,7 @@ export class PaymentService {
           txnRef,
           amount,
           bookingCode: booking.code,
-          expiresAt: booking.expires_at,
+          expiresAt: booking.expiresAt,
         };
       }
     }
@@ -367,7 +318,7 @@ export class PaymentService {
     const tmnCode = this.config.get('VNPAY_TMN_CODE');
     const hashSecret = this.config.get('VNPAY_HASH_SECRET');
     const returnUrl = this.config.get('VNPAY_RETURN_URL');
-    if (!tmnCode || !hashSecret || !returnUrl) throw notConfigured();
+    if (!tmnCode || !hashSecret || !returnUrl) throw PaymentErrors.notConfigured();
     return { tmnCode, hashSecret, returnUrl, paymentUrl: this.config.get('VNPAY_PAYMENT_URL') };
   }
 }

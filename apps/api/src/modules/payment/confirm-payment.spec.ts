@@ -89,12 +89,14 @@ const shape = (statements: readonly Statement[]) =>
 const rspCode = (outcome: ConfirmOutcome) => ipnResponseOf(outcome).RspCode;
 
 describe('confirmPayment — classification (RspCode)', () => {
-  it('locks the payment FOR UPDATE by txnRef, first', async () => {
+  it('locks the payment FOR UPDATE by txnRef and provider (VNPay), first', async () => {
     const { result, statements } = run([[]]);
 
     await result;
-    expect(statements[0]?.sql).toMatch(/FROM payments WHERE txn_ref = \$ FOR UPDATE$/);
-    expect(statements[0]?.values).toEqual([TXN_REF]);
+    expect(statements[0]?.sql).toMatch(
+      /FROM payments WHERE txn_ref = \$ AND provider = \$::payment_provider FOR UPDATE$/,
+    );
+    expect(statements[0]?.values).toEqual([TXN_REF, 'VNPAY']);
   });
 
   it('01: no payment with this txnRef; nothing written', async () => {
@@ -227,9 +229,10 @@ describe('confirmPayment — classification (RspCode)', () => {
       expect(shape(writes(statements))).toEqual(['UPDATE payments', 'INSERT outbox_events']);
       const [update] = writes(statements);
       expect(update?.sql).toContain(
-        "SET status = 'REFUND_REQUIRED', vnp_transaction_no = $, bank_code = $, response_code = $, raw_payload = $::jsonb, processed_at = $, updated_at = $ WHERE id = $::uuid",
+        "SET status = 'REFUND_REQUIRED', vnp_transaction_no = $, provider_transaction_id = $, bank_code = $, response_code = $, raw_payload = $::jsonb, processed_at = $, updated_at = $ WHERE id = $::uuid",
       );
       expect(update?.values).toEqual([
+        '14226112',
         '14226112',
         'NCB',
         '00',
@@ -249,7 +252,9 @@ describe('confirmPayment — classification (RspCode)', () => {
           bookingCode: 'K7PX3MQ9TA',
           userId: USER_ID,
           amount: AMOUNT,
+          provider: 'VNPAY',
           vnpTransactionNo: '14226112',
+          providerTransactionId: '14226112',
           paidPaymentId: OTHER_PAYMENT_ID,
         },
         nextRetryAt: NOW,
