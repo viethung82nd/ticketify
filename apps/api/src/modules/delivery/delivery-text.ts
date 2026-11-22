@@ -3,6 +3,7 @@ import type {
   BookingNeedsReviewPayload,
   PaymentRefundRequiredPayload,
 } from '../../infra/outbox/outbox-payloads';
+import { PROVIDER_LABELS } from '../payment/payment-report';
 import { ReviewReason } from '../payment/seat-settlement';
 import type { DeliveryBooking } from './booking-delivery';
 
@@ -17,8 +18,24 @@ export function cinemaMoment(instant: Date, timeZone: string): string {
   return `${cinemaTimeOf(instant, timeZone)} ngày ${day}/${month}/${year}`;
 }
 
+const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
 /** `150.000 đ` — amounts are whole dong (PLAN §3: no decimals in VND). */
 export const money = (amount: number): string => `${amount.toLocaleString('vi-VN')} đ`;
+
+/**
+ * `mã giao dịch MoMo 4088878653`: the gateway's transaction id an admin refunds with. Events
+ * from before MoMo carry only `vnpTransactionNo` (and `provider` defaults to VNPay).
+ */
+function transactionText(
+  payload: Pick<
+    BookingNeedsReviewPayload,
+    'provider' | 'vnpTransactionNo' | 'providerTransactionId'
+  >,
+): string {
+  const id = payload.providerTransactionId ?? payload.vnpTransactionNo;
+  return `mã giao dịch ${PROVIDER_LABELS[payload.provider]} ${id ?? 'không có'}`;
+}
 
 /** What the user is told when a paid booking could not keep its seats. */
 const REVIEW_REASON_TEXT: Readonly<Record<ReviewReason, string>> = {
@@ -99,7 +116,7 @@ export function needsReviewAdminText(
     body:
       `${booking.user.fullName} (${booking.user.email}) đã trả ${money(payload.amount)} cho ` +
       `${where(booking, timeZone)} nhưng ${reviewReasonText(payload.reason)}. ` +
-      `Mã giao dịch VNPay ${payload.vnpTransactionNo ?? 'không có'}. Hoàn tiền bằng tay.`,
+      `${capitalized(transactionText(payload))}. Hoàn tiền bằng tay.`,
     data: {
       bookingId: booking.id,
       bookingCode: booking.code,
@@ -118,7 +135,7 @@ export function refundRequiredAdminText(payload: PaymentRefundRequiredPayload): 
     title: `Cần hoàn tiền: đơn ${payload.bookingCode} được trả hai lần`,
     body:
       `Đơn ${payload.bookingCode} đã được thanh toán bởi một giao dịch khác, nên lần trả này ` +
-      `(${money(payload.amount)}, mã giao dịch VNPay ${payload.vnpTransactionNo ?? 'không có'}, ` +
+      `(${money(payload.amount)}, ${transactionText(payload)}, ` +
       `mã đơn hàng ${payload.txnRef}) phải được hoàn bằng tay. Đơn và vé không thay đổi.`,
     data: {
       bookingId: payload.bookingId,

@@ -45,10 +45,12 @@ const QUEUE_INCLUDE = {
     where: { status: PaymentStatus.SUCCESS },
     select: {
       id: true,
+      provider: true,
       txnRef: true,
       amount: true,
       status: true,
       vnpTransactionNo: true,
+      providerTransactionId: true,
       bankCode: true,
       processedAt: true,
     },
@@ -256,10 +258,12 @@ export class AdminReviewService {
       payment: payment
         ? {
             id: payment.id,
+            provider: payment.provider,
             txnRef: payment.txnRef,
             amount: payment.amount,
             status: payment.status,
             vnpTransactionNo: payment.vnpTransactionNo,
+            providerTransactionId: payment.providerTransactionId,
             bankCode: payment.bankCode,
             processedAt: payment.processedAt?.toISOString() ?? null,
           }
