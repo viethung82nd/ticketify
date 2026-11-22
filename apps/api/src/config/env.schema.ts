@@ -166,6 +166,34 @@ export const envSchema = z.object({
    * own job timeout.
    */
   VNPAY_QUERYDR_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(5_000),
+
+  // MoMo (API v2 gateway, one-time wallet payment). Sandbox credentials come from the MoMo
+  // Business portal (docs/MOMO_SETUP.md). Optional like VNPay: without them the API still boots
+  // and POST /payments/momo answers 503 PAYMENT_NOT_CONFIGURED.
+  MOMO_PARTNER_CODE: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  MOMO_ACCESS_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  MOMO_SECRET_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  /** Base URL of the gateway; `/v2/gateway/api/create` and `/v2/gateway/api/query` are appended. */
+  MOMO_ENDPOINT: z
+    .url({ protocol: /^https?$/ })
+    .default('https://test-payment.momo.vn')
+    .transform((value) => value.replace(/\/+$/, '')),
+  /** Where MoMo sends the browser back: the web page `/payment/result/momo`. */
+  MOMO_REDIRECT_URL: z.preprocess(blankAsUndefined, z.url({ protocol: /^https?$/ }).optional()),
+  /** Public URL MoMo POSTs the result to: `https://<public host>/payments/momo/ipn`. */
+  MOMO_IPN_URL: z.preprocess(blankAsUndefined, z.url({ protocol: /^https?$/ }).optional()),
+  /**
+   * How long `POST /payments/momo` waits for MoMo's create answer. MoMo's documentation asks for a
+   * timeout of at least 30 s on this call; a shorter value is allowed for tests but the default
+   * follows the documentation. Past it the attempt stays PENDING and is re-sent unchanged.
+   */
+  MOMO_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().max(60_000).default(30_000),
+  /**
+   * How long the booking expiry waits for MoMo's query answer. Shorter than the create timeout on
+   * purpose: an unanswered query only means the booking expires as it would without one (a late
+   * IPN still records the money), and the expiry job must stay well inside its own time limit.
+   */
+  MOMO_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(5_000),
 });
 
 export type Env = z.infer<typeof envSchema>;
