@@ -1,6 +1,6 @@
 # Ticketify
 
-Web đặt vé xem phim **thời gian thực** cho một rạp: giữ ghế chống bán trùng bằng PostgreSQL, thanh toán VNPay (sandbox), vé PDF có QR, thông báo realtime.
+Web đặt vé xem phim **thời gian thực** cho một rạp: giữ ghế chống bán trùng bằng PostgreSQL, thanh toán VNPay và ví MoMo (sandbox), vé PDF có QR, thông báo realtime.
 
 - Kế hoạch & thiết kế: [PLAN.md](PLAN.md) · Lộ trình: [ROADMAP.md](ROADMAP.md) · Quy ước: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Sơ đồ CSDL: [docs/erd.md](docs/erd.md) · Ràng buộc SQL viết tay: [apps/api/prisma/README.md](apps/api/prisma/README.md)
@@ -123,7 +123,7 @@ pnpm test:integration
 
 - Đơn `PENDING` → `204`: đơn thành `EXPIRED`, các ghế còn `HELD` của đơn trở lại `AVAILABLE` ngay (không chờ `holdUntil`), phát `seat:released` **sau khi commit**. Ghế mà đơn khác đã lấy (hết hạn lười) và ghế `SOLD` không bị đụng tới.
 - Đơn đã `EXPIRED` (hủy rồi, hoặc worker đã đánh dấu) → `204`, không đổi gì, không phát sự kiện: gọi lại bao nhiêu lần cũng vậy.
-- Đơn `CONFIRMED` hoặc `NEEDS_REVIEW` → `409 BOOKING_NOT_CANCELLABLE`. Đơn `PENDING` đã có `Payment` `SUCCESS` → `409 BOOKING_NOT_CANCELLABLE`; có `Payment` `PENDING` (đang thanh toán ở VNPay) → `409 BOOKING_HAS_PAYMENT_IN_PROGRESS`, chờ kết quả rồi thử lại. `Payment` `FAILED`/`EXPIRED` không chặn. Cả hai trường hợp `409` không đổi gì. Đơn không tồn tại hoặc của người khác → `404 BOOKING_NOT_FOUND`, không phân biệt hai trường hợp; id sai định dạng → `400 VALIDATION_FAILED`.
+- Đơn `CONFIRMED` hoặc `NEEDS_REVIEW` → `409 BOOKING_NOT_CANCELLABLE`. Đơn `PENDING` đã có `Payment` `SUCCESS` → `409 BOOKING_NOT_CANCELLABLE`; có `Payment` `PENDING` (đang thanh toán ở VNPay hoặc MoMo) → `409 BOOKING_HAS_PAYMENT_IN_PROGRESS`, chờ kết quả rồi thử lại. `Payment` `FAILED`/`EXPIRED` không chặn. Cả hai trường hợp `409` không đổi gì. Đơn không tồn tại hoặc của người khác → `404 BOOKING_NOT_FOUND`, không phân biệt hai trường hợp; id sai định dạng → `400 VALIDATION_FAILED`.
 - Đơn bị hủy được lưu là `EXPIRED` (không đổi schema), nên hiện chưa phân biệt được "người dùng hủy" với "hết giờ". Muốn phân biệt cần thêm giá trị mới cho enum `BookingStatus`; đang chờ quyết định (ROADMAP "Quyết định chờ").
 - Thứ tự khóa giống `expireBooking`: dòng `bookings` `FOR UPDATE`, rồi các `showtime_seats` `HELD` của đơn `FOR UPDATE ORDER BY seat_id`. Job hết hạn đến sau gặp `SKIP LOCKED` → `skipped`; job `expire-booking` của đơn đã hủy vẫn chạy ở `holdUntil` và kết thúc `noop`.
 - Sequence diagram của giữ ghế, hết hạn và hủy: [docs/sequence-hold.md](docs/sequence-hold.md).
@@ -171,9 +171,20 @@ Trước khi nhả ghế của một đơn quá `holdUntil`, worker hỏi VNPay 
 - Log request không bao giờ chứa `vnp_SecureHash` (bỏ hẳn khỏi `url` và `query`) hay `VNPAY_HASH_SECRET`.
 - Trả hai lần cho một đơn (hai trang thanh toán): lần sau thành `Payment` `REFUND_REQUIRED`, admin hoàn tay. Suất đã bắt đầu nhưng chưa kết thúc vẫn được xác nhận (khách vào muộn); suất đã kết thúc → `NEEDS_REVIEW`.
 
+### Thanh toán ví MoMo (11/2026)
+
+Cổng thứ hai, cạnh VNPay (VNPay giữ nguyên). Cài đặt sandbox, ngrok, xử lý sự cố chữ ký và lên production: **[docs/MOMO_SETUP.md](docs/MOMO_SETUP.md)**. MoMo payment gateway API v2 (tài liệu v3), luồng one-time `captureWallet`; kết quả được ghi bằng cùng lõi `settlePayment()` với IPN VNPay (cùng khóa, cùng nhánh A/B/C, cùng outbox), nên vé, PDF, email, thông báo không khác gì.
+
+- `POST /payments/momo` (đăng nhập, chủ đơn), body `{ bookingId }` (trường khác, kể cả `amount`, → `400 VALIDATION_FAILED`) → `201 { paymentId, orderId, payUrl, expiresAt, reused }`. Mỗi đơn **một** lần thử MoMo đang mở: gọi lại khi nó còn `PENDING` trả lại đúng lần đó (`reused: true`). Lỗi giống VNPay (`404`/`409`/`422`/`429`/`503 PAYMENT_NOT_CONFIGURED`, cùng ngân sách rate limit), thêm `422 PAYMENT_AMOUNT_NOT_SUPPORTED` (ngoài 1.000–50.000.000 đ), `502 PAYMENT_PROVIDER_ERROR` (MoMo từ chối; lần thử `FAILED`) và `503 PAYMENT_PROVIDER_UNAVAILABLE` (MoMo không trả lời kịp `MOMO_REQUEST_TIMEOUT_MS`; lần thử giữ `PENDING`, lần sau gửi lại y nguyên cùng `requestId`).
+- `POST /payments/momo/ipn` (công khai, MoMo gọi, JSON): kiểm trường → chữ ký (HMAC-SHA256, 13 trường) → `partnerCode` → `orderId` + `requestId` → mã chưa cuối → `settlePayment()`. Trả **`204`** khi đã xử lý (kể cả lặp lại, chưa cuối, order lạ, số tiền lệch — không ghi gì), **`400`** khi không xác minh được, **`500`** khi lỗi bất ngờ (không ghi gì).
+- `GET /payments/momo/return` (công khai, rate limit theo IP): **chỉ hiển thị**, `{ verified: false }` hoặc `{ verified: true, bookingId, paymentStatus, resultCode, amountMismatch }`. Web: `/payment/result/momo`.
+- Worker hết hạn hỏi MoMo (`/v2/gateway/api/query`, `MOMO_QUERY_TIMEOUT_MS`) cho lần thử MoMo còn `PENDING`, giống querydr của VNPay.
+- Bảng `payments`: thêm `provider` (`VNPAY` | `MOMO`, dòng cũ = `VNPAY`), `provider_request_id`, `provider_transaction_id` (`transId` MoMo; với VNPay = `vnp_transaction_no`, đã backfill), `pay_url`. Migration `20261122120000_payment_provider_momo`, chỉ mở rộng.
+- Log IPN VNPay `97` nay kèm **tên** tham số nhận được (không giá trị, không hash): thiếu hash, tham số rỗng, tham số không phải `vnp_*`, khóa lặp — để chẩn đoán chữ ký sai mà không lộ dữ liệu.
+
 ### Hàng đợi xử lý tay — đơn `NEEDS_REVIEW` (3.8)
 
-**Hoàn tiền tự động nằm ngoài phạm vi dự án.** Khi IPN thu được tiền nhưng không giữ được ghế, đơn thành `NEEDS_REVIEW` và việc còn lại là của admin: hoàn tiền trên cổng merchant VNPay (cần `vnp_transaction_no`) hoặc liên hệ khách.
+**Hoàn tiền tự động nằm ngoài phạm vi dự án.** Khi IPN thu được tiền nhưng không giữ được ghế, đơn thành `NEEDS_REVIEW` và việc còn lại là của admin: hoàn tiền trên cổng merchant của cổng đã thu tiền — VNPay (cần `vnp_transaction_no`) hoặc MoMo M4B (cần `transId` = `provider_transaction_id`) — hoặc liên hệ khách.
 
 - Trang `/admin/review` (ADMIN) liệt kê các đơn đó kèm khách hàng, suất chiếu, ghế, số tiền, `vnp_transaction_no`, `txn_ref` và lý do mất ghế; lọc theo `Chưa xử lý` / `Đã xử lý` / `Tất cả`, phân trang.
 - Nút **"Đã xử lý"** bắt buộc kèm ghi chú (1–1000 ký tự) và **không hoàn tiền, không đổi trạng thái đơn**: đơn vẫn `NEEDS_REVIEW`. Nó chỉ đặt `bookings.review_resolved_at`/`review_resolved_by` và ghi một dòng `audit_logs` (`booking.review_resolved`: ai, lúc nào, ghi chú, trạng thái trước/sau). `audit_logs` chỉ ghi thêm, không bao giờ sửa hay xóa.
@@ -277,6 +288,10 @@ Tích hợp VNPay bắt đầu ở giai đoạn 3, nhưng nên đăng ký sớm 
    ```
 
    Tunnel nhanh của cloudflared (`trycloudflare.com`, không cần tài khoản) đổi tên **mỗi lần chạy**, nên mỗi lần lại phải gửi URL mới cho VNPay. Muốn URL cố định thì dùng named tunnel của cloudflared (cần tài khoản Cloudflare và một domain) hoặc domain tĩnh của ngrok. Kiểm tra tunnel trước khi gửi: `curl https://<địa chỉ>/payments/vnpay/ipn` phải trả `{"RspCode":"97","Message":"Invalid signature"}`. Trang kết quả (`VNPAY_RETURN_URL`) do chính trình duyệt mở nên `http://localhost:5173/payment/result` dùng được khi thanh toán trên cùng máy; chỉ cần tunnel cho web (cổng 5173) khi mở từ máy khác, và khi đó Vite phải cho phép host của tunnel (`server.allowedHosts`).
+
+## MoMo sandbox (việc làm tay)
+
+Đăng ký MoMo Business (môi trường test), điền `MOMO_PARTNER_CODE` / `MOMO_ACCESS_KEY` / `MOMO_SECRET_KEY`, `MOMO_REDIRECT_URL` và `MOMO_IPN_URL` (công khai, ví dụ ngrok `https://<tên>.ngrok-free.app/payments/momo/ipn`): xem **[docs/MOMO_SETUP.md](docs/MOMO_SETUP.md)**. Khác VNPay, `ipnUrl` nằm trong từng request create, nên đổi tunnel chỉ cần đổi `.env`.
 
 ## Quyết định đáng chú ý
 
