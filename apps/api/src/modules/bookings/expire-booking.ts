@@ -1,6 +1,7 @@
-import { BookingStatus } from '@ticketify/shared';
+import { BookingStatus, PaymentProvider } from '@ticketify/shared';
 import type { Prisma } from '../../generated/prisma/client';
-import { type ConfirmOutcome, confirmPayment } from '../payment/confirm-payment';
+import { type ConfirmOutcome, confirmPayment, settlePayment } from '../payment/confirm-payment';
+import type { PaymentReport } from '../payment/payment-report';
 import {
   OutboxEventType,
   SeatsReleasedCause,
@@ -38,14 +39,21 @@ export type ExpireOutcome =
 
 export type ExpireOutcomeKind = ExpireOutcome['outcome'];
 
-/** A querydr answer that said "paid", for one PENDING payment of the booking (ROADMAP 3.7). */
+/**
+ * A gateway's answer that said "paid", for one PENDING payment of the booking (ROADMAP 3.7):
+ * VNPay's querydr, or MoMo's query (11/2026).
+ */
 export interface PaidQuerydr {
-  /** The payment the caller asked VNPay about. Ignored unless it is still PENDING here. */
+  /** The gateway that answered; VNPay when absent (the shape from before MoMo). */
+  provider?: PaymentProvider;
+  /** The payment the caller asked about. Ignored unless it is still PENDING here. */
   paymentId: string;
-  /** `vnp_TxnRef` it was asked about. Ignored unless it is still that payment's `txn_ref`. */
+  /** Its `txn_ref` (`vnp_TxnRef`, MoMo `orderId`). Ignored unless it is still that payment's. */
   txnRef: string;
-  /** The querydr response as received; stored verbatim as the payment's `raw_payload`. */
-  params: Readonly<Record<string, string>>;
+  /** VNPay: the querydr response as received; stored verbatim as the payment's `raw_payload`. */
+  params?: Readonly<Record<string, string>>;
+  /** MoMo: what its query answered, read by `MomoClient.query`. */
+  report?: PaymentReport;
 }
 
 export interface ExpireBookingInput {
@@ -57,6 +65,28 @@ export interface ExpireBookingInput {
   paid?: PaidQuerydr | null;
   /** Draws one ticket code. Required only together with `paid`. */
   ticketCode?: () => string;
+}
+
+/** Records a "paid" answer with the reader of the gateway that gave it. */
+function settlePaid(
+  tx: Tx,
+  paid: PaidQuerydr,
+  txnRef: string,
+  now: Date,
+  ticketCode: () => string,
+): Promise<ConfirmOutcome> {
+  if ((paid.provider ?? PaymentProvider.VNPAY) === PaymentProvider.VNPAY) {
+    if (!paid.params) throw new Error('expireBooking: a VNPay answer needs its params');
+    return confirmPayment(tx, { txnRef, params: paid.params, now, ticketCode });
+  }
+  if (!paid.report) throw new Error('expireBooking: a MoMo answer needs its report');
+  return settlePayment(tx, {
+    provider: PaymentProvider.MOMO,
+    txnRef,
+    report: paid.report,
+    now,
+    ticketCode,
+  });
 }
 
 /** Outcomes of `confirmPayment` that wrote something, so the booking must not also expire. */
@@ -144,19 +174,15 @@ export async function expireBooking(
     if (asked) {
       const ticketCode = input.ticketCode;
       if (!ticketCode) throw new Error('expireBooking: a querydr answer needs a ticketCode source');
-      const confirmation = await confirmPayment(tx, {
-        txnRef: asked.txn_ref,
-        params: input.paid.params,
-        now,
-        ticketCode,
-      });
+      const confirmation = await settlePaid(tx, input.paid, asked.txn_ref, now, ticketCode);
       if (CONFIRM_WROTE.has(confirmation.outcome)) {
         return { outcome: 'paid', paymentId: asked.id, confirmation };
       }
       if (confirmation.outcome === 'failed') {
         // Unreachable: a querydr answer only counts as "paid" when vnp_ResponseCode and
-        // vnp_TransactionStatus are both 00, which is exactly what `readVnpayIpn` calls a success.
-        // Reaching it means the two readings disagree; roll the transaction back and retry.
+        // vnp_TransactionStatus are both 00, which is exactly what `readVnpayIpn` calls a success
+        // (and a MoMo query only when resultCode is 0, which its report marks paid). Reaching it
+        // means the two readings disagree; roll the transaction back and retry.
         throw new Error(
           `Payment ${asked.id} was reported paid by querydr but read as a failure; nothing written`,
         );
