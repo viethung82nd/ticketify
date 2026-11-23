@@ -58,8 +58,11 @@ export const PaymentStatus = {
 } as const;
 export type PaymentStatus = ValueOf<typeof PaymentStatus>;
 
-/** The gateway a payment attempt goes through (MoMo added 11/2026; older rows are VNPAY). */
-export const PaymentProvider = { VNPAY: 'VNPAY', MOMO: 'MOMO' } as const;
+/**
+ * The gateway a payment attempt goes through (MoMo added 11/2026, SePay bank transfer 11/2026;
+ * older rows are VNPAY).
+ */
+export const PaymentProvider = { VNPAY: 'VNPAY', MOMO: 'MOMO', SEPAY: 'SEPAY' } as const;
 export type PaymentProvider = ValueOf<typeof PaymentProvider>;
 
 /** ISSUED ──► CHECKED_IN; ISSUED ──► VOID */
@@ -74,6 +77,30 @@ export const OutboxStatus = {
   FAILED: 'FAILED',
 } as const;
 export type OutboxStatus = ValueOf<typeof OutboxStatus>;
+
+/**
+ * What one SePay bank-transaction webhook amounted to (`sepay_transactions.outcome`). Internal to
+ * the API; shared so the enum check covers every Prisma enum. Only SETTLED applied the money to a
+ * payment; every other incoming transfer is money on the account that a person must reconcile
+ * (docs/SEPAY_SETUP.md "Đối soát").
+ */
+export const SepayTransactionOutcome = {
+  /** Handed to `settlePayment`: confirmed, sent to review, or REFUND_REQUIRED (paid twice). */
+  SETTLED: 'SETTLED',
+  /** Money going out of the account: never settles anything. */
+  OUTGOING: 'OUTGOING',
+  /** Not our receiving account (nor its VA). */
+  WRONG_ACCOUNT: 'WRONG_ACCOUNT',
+  /** No Ticketify payment code in the transfer. */
+  NO_REFERENCE: 'NO_REFERENCE',
+  /** A well-formed payment code that no SePay payment has. */
+  UNKNOWN_REFERENCE: 'UNKNOWN_REFERENCE',
+  /** The amount differs from the payment's: nothing recorded on the payment. */
+  AMOUNT_MISMATCH: 'AMOUNT_MISMATCH',
+  /** A second transfer for a payment that was already settled (a different SePay id). */
+  DUPLICATE_TRANSFER: 'DUPLICATE_TRANSFER',
+} as const;
+export type SepayTransactionOutcome = ValueOf<typeof SepayTransactionOutcome>;
 
 /** PERCENT: 1–100 % of the subtotal, optionally capped. FIXED: VND off the subtotal. */
 export const VoucherDiscountType = { PERCENT: 'PERCENT', FIXED: 'FIXED' } as const;

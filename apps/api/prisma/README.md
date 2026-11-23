@@ -20,6 +20,8 @@
 | `payments_booking_id_success_key` | `payments` | `UNIQUE (booking_id) WHERE status = 'SUCCESS'` |
 | `payments_momo_request_id_check` | `payments` | `provider = 'MOMO' ⇒ provider_request_id IS NOT NULL` — a MoMo attempt is re-sent with its own requestId (`*_payment_provider_momo` migration) |
 | `payments_vnp_transaction_no_provider_check` | `payments` | `vnp_transaction_no IS NOT NULL ⇒ provider = 'VNPAY'` |
+| `sepay_transactions_transfer_check` | `sepay_transactions` | `transfer_type IN ('in', 'out') AND transfer_amount >= 0` (`*_payment_provider_sepay` migration) |
+| `sepay_transactions_settled_payment_check` | `sepay_transactions` | `outcome = 'SETTLED' ⇒ payment_id IS NOT NULL` |
 | `vouchers_code_format_check` | `vouchers` | `code ~ '^[A-Z0-9]{4,20}$'` — stored upper-case, so the plain unique index on `code` is case-insensitive in effect (`*_vouchers` migration) |
 | `vouchers_discount_check` | `vouchers` | `PERCENT` ⇒ `discount_value` 1–100 and `max_discount` NULL or > 0; `FIXED` ⇒ `discount_value` > 0 and `max_discount` NULL |
 | `vouchers_limits_check` | `vouchers` | `min_subtotal >= 0`; `usage_limit`, `per_user_limit` NULL (unlimited) or > 0 |

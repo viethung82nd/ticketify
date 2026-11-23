@@ -108,6 +108,8 @@ enum PaymentStatus {
 enum PaymentProvider {
   VNPAY
   MOMO
+  /// SePay bank transfer: VietQR shown by Ticketify, money reported by SePay's webhook.
+  SEPAY
 
   @@map("payment_provider")
 }
@@ -520,8 +522,9 @@ model Payment {
   id                    String          @id @default(uuid(7)) @db.Uuid
   bookingId             String          @map("booking_id") @db.Uuid
   provider              PaymentProvider @default(VNPAY)
-  /// Our order reference at the gateway: vnp_TxnRef (VNPay) or orderId (MoMo). Unique across
-  /// every provider, so a reference always names one payment.
+  /// Our order reference at the gateway: vnp_TxnRef (VNPay), orderId (MoMo) or the payment code
+  /// in the transfer content (SePay). Unique across every provider, so a reference always names
+  /// one payment.
   txnRef                String          @unique @map("txn_ref")
   amount                Int
   status                PaymentStatus   @default(PENDING)
@@ -529,7 +532,7 @@ model Payment {
   /// UNIQUE: Postgres treats NULLs as distinct, so many attempts without a number are allowed.
   vnpTransactionNo      String?         @unique @map("vnp_transaction_no")
   /// The gateway's own transaction id once it reported the payment paid: vnp_TransactionNo
-  /// (VNPay) or transId (MoMo). Unique per provider; NULLs are distinct.
+  /// (VNPay), transId (MoMo) or the webhook `id` (SePay). Unique per provider; NULLs are distinct.
   providerTransactionId String?         @map("provider_transaction_id")
   /// MoMo requestId of the create call: one per attempt, re-sent unchanged on a retry so MoMo
   /// answers it idempotently. NULL for VNPay.
@@ -543,7 +546,8 @@ model Payment {
   createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  booking Booking @relation(fields: [bookingId], references: [id])
+  booking           Booking            @relation(fields: [bookingId], references: [id])
+  sepayTransactions SepayTransaction[]
 
   @@unique([provider, providerTransactionId])
   @@index([bookingId])
@@ -615,4 +619,54 @@ model AuditLog {
   @@index([entityType, entityId, createdAt])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+/// What one SePay bank-transaction webhook amounted to. See SepayTransaction.
+enum SepayTransactionOutcome {
+  SETTLED
+  OUTGOING
+  WRONG_ACCOUNT
+  NO_REFERENCE
+  UNKNOWN_REFERENCE
+  AMOUNT_MISMATCH
+  DUPLICATE_TRANSFER
+
+  @@map("sepay_transaction_outcome")
+}
+
+/// Every bank transaction SePay's webhook reported, once (11/2026, docs/SEPAY_SETUP.md). The
+/// unique `sepay_id` is the webhook's own `id`, the same on every retry and replay, so a repeated
+/// delivery inserts nothing and settles nothing. Kept apart from `payments` because most rows here
+/// match no payment (another transfer to the account, a wrong amount, a second transfer) and are
+/// still money a person has to reconcile or refund.
+model SepayTransaction {
+  id              String                  @id @default(uuid(7)) @db.Uuid
+  /// SePay's transaction id (webhook `id`).
+  sepayId         BigInt                  @unique @map("sepay_id")
+  /// The payment the transfer named, when its payment code matched one (any outcome).
+  paymentId       String?                 @map("payment_id") @db.Uuid
+  outcome         SepayTransactionOutcome
+  /// `in` or `out`.
+  transferType    String                  @map("transfer_type")
+  transferAmount  BigInt                  @map("transfer_amount")
+  accountNumber   String                  @map("account_number")
+  subAccount      String?                 @map("sub_account")
+  /// The payment code SePay extracted (`code`), as sent.
+  code            String?
+  /// Our payment code as Ticketify read it from `code` or `content`.
+  reference       String?
+  content         String?
+  referenceCode   String?                 @map("reference_code")
+  gateway         String?
+  /// `transactionDate` as sent ("YYYY-MM-DD HH:mm:ss", Vietnam time).
+  transactionDate String?                 @map("transaction_date")
+  /// The webhook body as received (no header, so never a signature).
+  rawPayload      Json                    @map("raw_payload")
+  receivedAt      DateTime                @map("received_at") @db.Timestamptz(3)
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+  @@index([outcome, receivedAt])
+  @@map("sepay_transactions")
 }
