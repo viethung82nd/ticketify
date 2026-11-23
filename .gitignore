@@ -44,3 +44,6 @@ Thumbs.db
 .eslintcache
 .turbo/
 .vite/
+
+# Load tests (ROADMAP 6.1): generated data with signed tokens, local runs
+load-tests/.data/

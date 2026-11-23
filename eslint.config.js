@@ -75,6 +75,15 @@ export default defineConfig(
     },
   },
 
+  // k6 load-test scripts (ROADMAP 6.1): run by k6, not Node, which provides these globals.
+  {
+    files: ['load-tests/**/*.js'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { __ENV: 'readonly', __VU: 'readonly', __ITER: 'readonly', open: 'readonly' },
+    },
+  },
+
   // Must stay last: turns off stylistic rules that conflict with Prettier.
   prettier,
 );
