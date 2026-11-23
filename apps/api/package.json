@@ -20,6 +20,7 @@
     "test:scenarios": "node --experimental-vm-modules --no-warnings=ExperimentalWarning node_modules/jest/bin/jest.js --config jest.scenarios.config.js",
     "db:seed": "prisma db seed",
     "db:cleanup-test-data": "tsx scripts/cleanup-dev-test-data.ts",
+    "loadtest:seed": "tsx scripts/load-test-seed.ts",
     "sample:ticket-pdf": "tsx scripts/sample-ticket-pdf.ts",
     "smoke:delivery": "tsx scripts/smoke-delivery.ts"
   },
