@@ -19,7 +19,8 @@ import {
   errorCode,
   HOLD_EXPECTED,
   idempotencyKey,
-  loadData,
+  futureShowtimes,
+  movies,
   nextUser,
   pick,
   SUMMARY_TREND_STATS,
@@ -92,7 +93,7 @@ function browse() {
 }
 
 function movieDetail() {
-  const movie = pick(loadData().movies);
+  const movie = pick(movies);
   ok(
     http.get(`${BASE_URL}/movies/${movie.slug}`, { tags: { name: 'movie_detail' } }),
     'movie_detail',
@@ -106,7 +107,7 @@ function movieDetail() {
 }
 
 function showtimesOfDay() {
-  const showtime = pick(loadData().futureShowtimes);
+  const showtime = pick(futureShowtimes);
   ok(
     http.get(`${BASE_URL}/showtimes?movieId=${showtime.movieId}&date=${showtime.day}`, {
       tags: { name: 'showtime_list' },
@@ -130,12 +131,12 @@ function myBookings(user) {
 }
 
 function book(user) {
-  const showtime = pick(loadData().futureShowtimes);
+  const showtime = pick(futureShowtimes);
   const map = http.get(`${BASE_URL}/showtimes/${showtime.id}/seats`, {
     tags: { name: 'seat_map' },
   });
   if (!ok(map, 'seat_map')) return;
-  const seatIds = chooseSeats(map.json('seats'), MAX_SEATS);
+  const seatIds = chooseSeats(map, MAX_SEATS);
   if (seatIds.length === 0) return;
 
   const res = http.post(

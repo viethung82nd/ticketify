@@ -12,14 +12,31 @@ export const RESULTS_DIR = __ENV.RESULTS_DIR || '';
 /** Hold requests answered with one of these are the system working as designed, not failures. */
 export const HOLD_EXPECTED = http.expectedStatuses(200, 201, 409);
 
-/** Read once and shared by every VU (a plain `open()` would copy the file into each VU). */
-const shared = new SharedArray('load-data', () => {
-  const data = JSON.parse(open(DATA_FILE));
-  return [data];
+/**
+ * Read once and shared by every VU (a plain `open()` would copy the file into each VU). One
+ * SharedArray per list, read element by element: k6 decodes a SharedArray element on EVERY
+ * access, so a single element holding the whole file (≈ 1.5 MB with 5 000 tokens) was decoded on
+ * every iteration and made k6 the bottleneck (about 5 cores at 100 iterations/s, 24/11/2026).
+ */
+const meta = new SharedArray('meta', () => {
+  const { hotShowtimeId, hotShowtimeStartsAt, generatedAt, tokenExpiresAt } = JSON.parse(
+    open(DATA_FILE),
+  );
+  return [{ hotShowtimeId, hotShowtimeStartsAt, generatedAt, tokenExpiresAt }];
 });
 const users = new SharedArray('users', () => JSON.parse(open(DATA_FILE)).users);
+export const movies = new SharedArray('movies', () => JSON.parse(open(DATA_FILE)).movies);
+export const futureShowtimes = new SharedArray(
+  'future-showtimes',
+  () => JSON.parse(open(DATA_FILE)).futureShowtimes,
+);
 
-export const loadData = () => shared[0];
+let metaOfThisVu;
+/** Hot showtime id and the data file's timestamps (decoded once per VU). */
+export function loadMeta() {
+  if (!metaOfThisVu) metaOfThisVu = meta[0];
+  return metaOfThisVu;
+}
 
 /**
  * A different user for each iteration, cycling through all of them: with U users and R
@@ -46,12 +63,27 @@ export function idempotencyKey() {
 
 export const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
+/** GJSON path (evaluated in Go by `res.json(path)`) to the free, non-couple seats of a seat map. */
+const FREE_SEATS = 'seats.#(status=="AVAILABLE")#';
+
 /**
  * 1–`max` adjacent AVAILABLE seats in one row, starting at a random available seat, like a
  * customer clicking neighbours on the map. Couple seats are left out (the load rooms have none).
+ *
+ * Takes the seat-map RESPONSE, not parsed JSON: the free seats are filtered with GJSON in Go, and
+ * only their ids, rows and numbers reach JavaScript. Parsing the whole 31 KB map in k6's JS engine
+ * on every iteration made k6 itself the bottleneck (about 6 cores at 100 iterations/s, measured
+ * 24/11/2026), on the same machine as the API.
  */
-export function chooseSeats(seats, max) {
-  const free = seats.filter((s) => s.status === 'AVAILABLE' && s.type !== 'COUPLE');
+export function chooseSeats(res, max) {
+  const ids = res.json(`${FREE_SEATS}.id`) || [];
+  if (ids.length === 0) return [];
+  const rows = res.json(`${FREE_SEATS}.row`);
+  const numbers = res.json(`${FREE_SEATS}.number`);
+  const types = res.json(`${FREE_SEATS}.type`);
+  const free = ids
+    .map((id, i) => ({ id, row: rows[i], number: numbers[i], type: types[i] }))
+    .filter((s) => s.type !== 'COUPLE');
   if (free.length === 0) return [];
   const want = 1 + Math.floor(Math.random() * max);
   const first = pick(free);
@@ -72,7 +104,7 @@ export function errorCode(res) {
   }
 }
 
-const TREND_STATS = ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'];
+const TREND_STATS = ['count', 'avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'];
 export const SUMMARY_TREND_STATS = TREND_STATS;
 
 function fmt(ms) {
@@ -95,7 +127,7 @@ export function summarize(data, settings) {
     );
   }
   for (const [name, metric] of Object.entries(data.metrics)) {
-    if (metric.type === 'counter' && !name.startsWith('http_') && !name.startsWith('data_')) {
+    if (metric.type === 'counter' && !/^(http_|data_|dropped_iterations)/.test(name)) {
       lines.push(`${name}: ${metric.values.count}`);
     }
   }

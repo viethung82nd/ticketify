@@ -17,7 +17,7 @@ import {
   errorCode,
   HOLD_EXPECTED,
   idempotencyKey,
-  loadData,
+  loadMeta,
   nextUser,
   SUMMARY_TREND_STATS,
   summaryOutputs,
@@ -56,14 +56,14 @@ export const options = {
 };
 
 export function rush() {
-  const { hotShowtimeId } = loadData();
+  const { hotShowtimeId } = loadMeta();
   const user = nextUser();
   const map = http.get(`${BASE_URL}/showtimes/${hotShowtimeId}/seats`, {
     tags: { name: 'seat_map' },
   });
   if (!check(map, { 'seat map 200': (r) => r.status === 200 })) return;
 
-  const seatIds = chooseSeats(map.json('seats'), MAX_SEATS);
+  const seatIds = chooseSeats(map, MAX_SEATS);
   if (seatIds.length === 0) {
     soldOutViews.add(1);
     return;
@@ -95,6 +95,6 @@ export function handleSummary(data) {
     preAllocatedVUs: PRE_VUS,
     maxVUs: MAX_VUS,
     maxSeats: MAX_SEATS,
-    hotShowtimeId: loadData().hotShowtimeId,
+    hotShowtimeId: loadMeta().hotShowtimeId,
   });
 }
