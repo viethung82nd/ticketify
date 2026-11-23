@@ -1,0 +1,110 @@
+Timing is on.
+CREATE INDEX
+Time: 70.781 ms
+ANALYZE
+Time: 229.085 ms
+                                                                  QUERY PLAN                                                                   
+-----------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate (actual time=172.115..172.209 rows=31 loops=1)
+   Group Key: to_char((b.confirmed_at AT TIME ZONE 'Asia/Ho_Chi_Minh'::text), 'YYYY-MM-DD'::text)
+   Batches: 1  Memory Usage: 793kB
+   Buffers: shared hit=159449 read=3600 written=104
+   ->  Bitmap Heap Scan on bookings b (actual time=11.959..56.640 rows=53176 loops=1)
+         Recheck Cond: ((confirmed_at >= (now() - '30 days'::interval)) AND (confirmed_at < now()) AND (status = 'CONFIRMED'::booking_status))
+         Heap Blocks: exact=3381
+         Buffers: shared hit=373 read=3147 written=104
+         ->  Bitmap Index Scan on bookings_confirmed_at_idx (actual time=11.492..11.493 rows=53176 loops=1)
+               Index Cond: ((confirmed_at >= (now() - '30 days'::interval)) AND (confirmed_at < now()))
+               Buffers: shared read=139
+   SubPlan 1
+     ->  Aggregate (actual time=0.002..0.002 rows=1 loops=53176)
+           Buffers: shared hit=159076 read=453
+           ->  Index Only Scan using booking_seats_booking_id_seat_id_key on booking_seats bs (actual time=0.001..0.001 rows=2 loops=53176)
+                 Index Cond: (booking_id = b.id)
+                 Heap Fetches: 0
+                 Buffers: shared hit=159076 read=453
+ Planning:
+   Buffers: shared hit=148 read=3
+ Planning Time: 1.418 ms
+ Execution Time: 188.467 ms
+(22 rows)
+
+Time: 193.340 ms
+                                                                     QUERY PLAN                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate (actual time=16.872..36.130 rows=8 loops=1)
+   Group Key: (to_char((b.confirmed_at AT TIME ZONE 'Asia/Ho_Chi_Minh'::text), 'YYYY-MM-DD'::text))
+   Buffers: shared hit=42394
+   ->  Sort (actual time=14.717..15.775 rows=13047 loops=1)
+         Sort Key: (to_char((b.confirmed_at AT TIME ZONE 'Asia/Ho_Chi_Minh'::text), 'YYYY-MM-DD'::text))
+         Sort Method: quicksort  Memory: 1098kB
+         Buffers: shared hit=3252
+         ->  Bitmap Heap Scan on bookings b (actual time=1.036..11.904 rows=13047 loops=1)
+               Recheck Cond: ((confirmed_at >= (now() - '7 days'::interval)) AND (confirmed_at < now()) AND (status = 'CONFIRMED'::booking_status))
+               Heap Blocks: exact=3223
+               Buffers: shared hit=3252
+               ->  Bitmap Index Scan on bookings_confirmed_at_idx (actual time=0.723..0.725 rows=13047 loops=1)
+                     Index Cond: ((confirmed_at >= (now() - '7 days'::interval)) AND (confirmed_at < now()))
+                     Buffers: shared hit=29
+   SubPlan 1
+     ->  Aggregate (actual time=0.001..0.001 rows=1 loops=13047)
+           Buffers: shared hit=39142
+           ->  Index Only Scan using booking_seats_booking_id_seat_id_key on booking_seats bs (actual time=0.001..0.001 rows=2 loops=13047)
+                 Index Cond: (booking_id = b.id)
+                 Heap Fetches: 0
+                 Buffers: shared hit=39142
+ Planning Time: 0.180 ms
+ Execution Time: 36.395 ms
+(23 rows)
+
+Time: 37.194 ms
+DROP INDEX
+Time: 3.412 ms
+ANALYZE
+Time: 228.134 ms
+                                                                     QUERY PLAN                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate (actual time=37.605..58.355 rows=8 loops=1)
+   Group Key: (to_char((b.confirmed_at AT TIME ZONE 'Asia/Ho_Chi_Minh'::text), 'YYYY-MM-DD'::text))
+   ->  Gather Merge (actual time=35.071..37.501 rows=13047 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         ->  Sort (actual time=21.007..21.342 rows=4349 loops=3)
+               Sort Key: (to_char((b.confirmed_at AT TIME ZONE 'Asia/Ho_Chi_Minh'::text), 'YYYY-MM-DD'::text))
+               Sort Method: quicksort  Memory: 631kB
+               Worker 0:  Sort Method: quicksort  Memory: 271kB
+               Worker 1:  Sort Method: quicksort  Memory: 149kB
+               ->  Parallel Seq Scan on bookings b (actual time=0.118..19.480 rows=4349 loops=3)
+                     Filter: ((status = 'CONFIRMED'::booking_status) AND (confirmed_at < now()) AND (confirmed_at >= (now() - '7 days'::interval)))
+                     Rows Removed by Filter: 56423
+   SubPlan 1
+     ->  Aggregate (actual time=0.001..0.001 rows=1 loops=13047)
+           ->  Index Only Scan using booking_seats_booking_id_seat_id_key on booking_seats bs (actual time=0.001..0.001 rows=2 loops=13047)
+                 Index Cond: (booking_id = b.id)
+                 Heap Fetches: 0
+ Planning Time: 0.404 ms
+ Execution Time: 58.520 ms
+(20 rows)
+
+Time: 59.585 ms
+                                                                     QUERY PLAN                                                                      
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate (actual time=214.378..214.471 rows=31 loops=1)
+   Group Key: to_char((b.confirmed_at AT TIME ZONE 'Asia/Ho_Chi_Minh'::text), 'YYYY-MM-DD'::text)
+   Batches: 1  Memory Usage: 793kB
+   ->  Hash Join (actual time=89.833..205.656 rows=53176 loops=1)
+         Hash Cond: (booking_seats.booking_id = b.id)
+         ->  GroupAggregate (actual time=0.041..85.809 rows=182316 loops=1)
+               Group Key: booking_seats.booking_id
+               ->  Index Only Scan using booking_seats_booking_id_seat_id_key on booking_seats (actual time=0.034..42.389 rows=369176 loops=1)
+                     Heap Fetches: 35717
+         ->  Hash (actual time=38.585..38.586 rows=53176 loops=1)
+               Buckets: 65536 (originally 32768)  Batches: 1 (originally 1)  Memory Usage: 3628kB
+               ->  Seq Scan on bookings b (actual time=0.015..30.441 rows=53176 loops=1)
+                     Filter: ((status = 'CONFIRMED'::booking_status) AND (confirmed_at < now()) AND (confirmed_at >= (now() - '30 days'::interval)))
+                     Rows Removed by Filter: 129140
+ Planning Time: 0.441 ms
+ Execution Time: 215.542 ms
+(16 rows)
+
+Time: 216.654 ms

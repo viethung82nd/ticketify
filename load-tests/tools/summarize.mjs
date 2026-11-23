@@ -5,7 +5,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
-const runs = process.argv.slice(2);
+// Anything that is not a run folder (a README, an EXPLAIN output) is skipped, so a shell glob works.
+const runs = process.argv.slice(2).filter((dir) => existsSync(join(dir, 'meta.json')));
 if (runs.length === 0) {
   console.error('usage: node summarize.mjs <run folder>...');
   process.exit(2);

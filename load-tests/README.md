@@ -7,6 +7,8 @@ Kịch bản k6 cho ROADMAP 6.1–6.2 (PLAN mục 10, "Load test"). Số liệu 
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `hot-showtime.js`               | Kịch bản 1: dồn dập vào **một** suất chiếu hot. Mỗi lượt: xem sơ đồ ghế → chọn 1–4 ghế liền nhau đang trống → giữ ghế                   |
 | `mixed-traffic.js`              | Kịch bản 2: traffic hỗn hợp trên toàn bộ suất chiếu tương lai (xem phim, chi tiết, lịch chiếu, sơ đồ ghế, "vé của tôi", giữ ghế, hủy)   |
+| `seat-map.js`                   | Chỉ tải `GET /showtimes/:id/seats` (suất tương lai ngẫu nhiên, không đưa body vào JS): so sánh trước/sau một thay đổi (6.3)              |
+| `sql/explain-hot-queries.sql`   | `EXPLAIN (ANALYZE, BUFFERS)` các truy vấn nóng trên DB tải, với giá trị mẫu tự chọn (6.3)                                               |
 | `lib/common.js`                 | Hàm dùng chung: đọc dữ liệu seed, chọn user, chọn ghế, ghi summary                                                                     |
 | `run.sh`                        | Chạy một kịch bản trong Docker, ghi cấu hình máy/DB/API, summary JSON thô của k6 và kết quả SQL kiểm trùng                             |
 | `sql/verify-no-duplicates.sql`  | Kiểm sau **mỗi** lần chạy: 0 ghế/vé trùng, không giữ ghế dở dang. Khác 0 là lỗi đúng đắn, không phải số liệu hiệu năng                  |

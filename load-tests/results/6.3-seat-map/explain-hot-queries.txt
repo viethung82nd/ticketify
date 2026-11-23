@@ -1,0 +1,327 @@
+Pager usage is off.
+showtime 01a1c855-5d00-7fe2-9798-98583c78ed89 movie 01a20455-dbaa-7693-a344-dd0ea4cc4e98 day 2026-11-25 user 019f67c6-42cb-76b7-8182-cdb8338a4e4c
+=== 1a. Seat map, BEFORE 6.3: the 5 statements Prisma sent (showtime, movie, room, seats, showtime_seats IN 192 ids)
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Limit (actual time=0.058..0.059 rows=1 loops=1)
+   Buffers: shared hit=6
+   ->  Index Scan using showtimes_pkey on showtimes (actual time=0.057..0.057 rows=1 loops=1)
+         Index Cond: (id = '01a1c855-5d00-7fe2-9798-98583c78ed89'::uuid)
+         Buffers: shared hit=6
+ Planning:
+   Buffers: shared hit=9
+ Planning Time: 0.193 ms
+ Execution Time: 0.084 ms
+(9 rows)
+
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Seq Scan on movies (actual time=0.040..0.045 rows=1 loops=1)
+   Filter: (id = '01a20455-dbaa-7693-a344-dd0ea4cc4e98'::uuid)
+   Rows Removed by Filter: 63
+   Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=44
+ Planning Time: 0.337 ms
+ Execution Time: 0.051 ms
+(8 rows)
+
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Seq Scan on rooms (actual time=0.005..0.005 rows=1 loops=1)
+   Filter: (id = '019e0384-57aa-7920-9775-52616b0db4fc'::uuid)
+   Rows Removed by Filter: 8
+   Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=41
+ Planning Time: 0.258 ms
+ Execution Time: 0.010 ms
+(8 rows)
+
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Sort (actual time=0.167..0.173 rows=192 loops=1)
+   Sort Key: "row", number
+   Sort Method: quicksort  Memory: 39kB
+   Buffers: shared hit=18
+   ->  Bitmap Heap Scan on seats (actual time=0.046..0.094 rows=192 loops=1)
+         Recheck Cond: (room_id = '019e0384-57aa-7920-9775-52616b0db4fc'::uuid)
+         Heap Blocks: exact=4
+         Buffers: shared hit=12
+         ->  Bitmap Index Scan on seats_room_id_row_number_key (actual time=0.023..0.023 rows=192 loops=1)
+               Index Cond: (room_id = '019e0384-57aa-7920-9775-52616b0db4fc'::uuid)
+               Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=73
+ Planning Time: 0.412 ms
+ Execution Time: 0.210 ms
+(15 rows)
+
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Index Scan using showtime_seats_pkey on showtime_seats (actual time=0.254..0.529 rows=192 loops=1)
+   Index Cond: ((showtime_id = '01a1c855-5d00-7fe2-9798-98583c78ed89'::uuid) AND (seat_id = ANY ($0)))
+   Buffers: shared hit=716 dirtied=2
+   InitPlan 1 (returns $0)
+     ->  Bitmap Heap Scan on seats (actual time=0.030..0.046 rows=192 loops=1)
+           Recheck Cond: (room_id = '019e0384-57aa-7920-9775-52616b0db4fc'::uuid)
+           Heap Blocks: exact=4
+           Buffers: shared hit=8
+           ->  Bitmap Index Scan on seats_room_id_row_number_key (actual time=0.023..0.023 rows=192 loops=1)
+                 Index Cond: (room_id = '019e0384-57aa-7920-9775-52616b0db4fc'::uuid)
+                 Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=48
+ Planning Time: 0.387 ms
+ Execution Time: 0.584 ms
+(15 rows)
+
+=== 1b. Seat map, AFTER 6.3: one statement
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
+ Sort (actual time=0.511..0.517 rows=192 loops=1)
+   Sort Key: seat."row", seat.number
+   Sort Method: quicksort  Memory: 65kB
+   Buffers: shared hit=29
+   ->  Hash Right Join (actual time=0.205..0.312 rows=192 loops=1)
+         Hash Cond: (ss.seat_id = seat.id)
+         Buffers: shared hit=29
+         ->  Bitmap Heap Scan on showtime_seats ss (actual time=0.018..0.040 rows=192 loops=1)
+               Recheck Cond: (showtime_id = '01a1c855-5d00-7fe2-9798-98583c78ed89'::uuid)
+               Heap Blocks: exact=10
+               Buffers: shared hit=15
+               ->  Bitmap Index Scan on showtime_seats_pkey (actual time=0.015..0.015 rows=192 loops=1)
+                     Index Cond: (showtime_id = '01a1c855-5d00-7fe2-9798-98583c78ed89'::uuid)
+                     Buffers: shared hit=5
+         ->  Hash (actual time=0.173..0.174 rows=192 loops=1)
+               Buckets: 1024  Batches: 1  Memory Usage: 45kB
+               Buffers: shared hit=14
+               ->  Nested Loop Left Join (actual time=0.069..0.107 rows=192 loops=1)
+                     Buffers: shared hit=14
+                     ->  Nested Loop (actual time=0.048..0.055 rows=1 loops=1)
+                           Join Filter: (r.id = s.room_id)
+                           Rows Removed by Join Filter: 5
+                           Buffers: shared hit=6
+                           ->  Hash Join (actual time=0.045..0.052 rows=1 loops=1)
+                                 Hash Cond: (m.id = s.movie_id)
+                                 Buffers: shared hit=5
+                                 ->  Seq Scan on movies m (actual time=0.005..0.008 rows=64 loops=1)
+                                       Buffers: shared hit=2
+                                 ->  Hash (actual time=0.016..0.016 rows=1 loops=1)
+                                       Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                       Buffers: shared hit=3
+                                       ->  Index Scan using showtimes_pkey on showtimes s (actual time=0.010..0.011 rows=1 loops=1)
+                                             Index Cond: (id = '01a1c855-5d00-7fe2-9798-98583c78ed89'::uuid)
+                                             Buffers: shared hit=3
+                           ->  Seq Scan on rooms r (actual time=0.001..0.001 rows=6 loops=1)
+                                 Buffers: shared hit=1
+                     ->  Bitmap Heap Scan on seats seat (actual time=0.019..0.032 rows=192 loops=1)
+                           Recheck Cond: (room_id = r.id)
+                           Heap Blocks: exact=4
+                           Buffers: shared hit=8
+                           ->  Bitmap Index Scan on seats_room_id_row_number_key (actual time=0.015..0.015 rows=192 loops=1)
+                                 Index Cond: (room_id = r.id)
+                                 Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=39
+ Planning Time: 0.604 ms
+ Execution Time: 0.699 ms
+(47 rows)
+
+=== 2. Showtimes of a movie on a day, with available/total seats (ScheduleService.listForMovie)
+                                                                                                                              QUERY PLAN                                                                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort (actual time=0.805..0.807 rows=2 loops=1)
+   Sort Key: s.starts_at, r.name
+   Sort Method: quicksort  Memory: 25kB
+   Buffers: shared hit=150
+   ->  HashAggregate (actual time=0.776..0.778 rows=2 loops=1)
+         Group Key: s.id, r.id
+         Batches: 1  Memory Usage: 24kB
+         Buffers: shared hit=147
+         ->  Nested Loop Left Join (actual time=0.221..0.723 rows=384 loops=1)
+               Buffers: shared hit=147
+               ->  Nested Loop (actual time=0.041..0.045 rows=2 loops=1)
+                     Join Filter: (r.id = s.room_id)
+                     Rows Removed by Join Filter: 12
+                     Buffers: shared hit=6
+                     ->  Index Scan using showtimes_movie_id_starts_at_idx on showtimes s (actual time=0.036..0.038 rows=2 loops=1)
+                           Index Cond: ((movie_id = '01a20455-dbaa-7693-a344-dd0ea4cc4e98'::uuid) AND (starts_at > now()) AND (starts_at >= '2026-11-24 17:00:00+00'::timestamp with time zone) AND (starts_at < '2026-11-25 17:00:00+00'::timestamp with time zone))
+                           Filter: (status = 'SCHEDULED'::showtime_status)
+                           Buffers: shared hit=4
+                     ->  Seq Scan on rooms r (actual time=0.002..0.002 rows=7 loops=2)
+                           Buffers: shared hit=2
+               ->  Hash Right Join (actual time=0.245..0.321 rows=192 loops=2)
+                     Hash Cond: (seat.id = ss.seat_id)
+                     Buffers: shared hit=141
+                     ->  Seq Scan on seats seat (actual time=0.001..0.072 rows=1656 loops=2)
+                           Buffers: shared hit=42
+                     ->  Hash (actual time=0.138..0.139 rows=192 loops=2)
+                           Buckets: 1024  Batches: 1  Memory Usage: 21kB
+                           Buffers: shared hit=99
+                           ->  Bitmap Heap Scan on showtime_seats ss (actual time=0.025..0.109 rows=192 loops=2)
+                                 Recheck Cond: (showtime_id = s.id)
+                                 Heap Blocks: exact=89
+                                 Buffers: shared hit=99
+                                 ->  Bitmap Index Scan on showtime_seats_pkey (actual time=0.019..0.019 rows=192 loops=2)
+                                       Index Cond: (showtime_id = s.id)
+                                       Buffers: shared hit=10
+ Planning:
+   Buffers: shared hit=30 read=1
+ Planning Time: 0.561 ms
+ Execution Time: 0.903 ms
+(39 rows)
+
+=== 3. Days with showtimes of a movie (datesForMovie)
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Index Scan using showtimes_starts_at_idx on showtimes (actual time=0.020..0.075 rows=17 loops=1)
+   Index Cond: (starts_at > now())
+   Filter: ((movie_id = '01a20455-dbaa-7693-a344-dd0ea4cc4e98'::uuid) AND (status = 'SCHEDULED'::showtime_status))
+   Rows Removed by Filter: 583
+   Buffers: shared hit=12
+ Planning Time: 0.052 ms
+ Execution Time: 0.087 ms
+(7 rows)
+
+=== 4. Movie list page (count + page; genres are a second Prisma statement by movie id)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Aggregate (actual time=0.015..0.015 rows=1 loops=1)
+   Buffers: shared hit=2
+   ->  Seq Scan on movies (actual time=0.006..0.011 rows=45 loops=1)
+         Filter: (status = 'NOW_SHOWING'::movie_status)
+         Rows Removed by Filter: 19
+         Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=3
+ Planning Time: 0.051 ms
+ Execution Time: 0.026 ms
+(10 rows)
+
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Limit (actual time=0.073..0.074 rows=12 loops=1)
+   Buffers: shared hit=8
+   ->  Sort (actual time=0.071..0.072 rows=24 loops=1)
+         Sort Key: release_date DESC, title, id
+         Sort Method: quicksort  Memory: 28kB
+         Buffers: shared hit=8
+         ->  Seq Scan on movies (actual time=0.006..0.011 rows=45 loops=1)
+               Filter: (status = 'NOW_SHOWING'::movie_status)
+               Rows Removed by Filter: 19
+               Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=16
+ Planning Time: 0.086 ms
+ Execution Time: 0.089 ms
+(14 rows)
+
+=== 5. Title search (accent-insensitive, sequential by design)
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Seq Scan on movies (actual time=0.108..0.108 rows=0 loops=1)
+   Filter: (lower(translate(title, 'ÀÁẢÃẠàáảãạ'::text, 'AAAAAaaaaa'::text)) ~~ '%load phim 1%'::text)
+   Rows Removed by Filter: 64
+   Buffers: shared hit=2
+ Planning Time: 0.035 ms
+ Execution Time: 0.113 ms
+(6 rows)
+
+=== 6. My bookings, busiest user (count + first page)
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ Aggregate (actual time=0.083..0.084 rows=1 loops=1)
+   Buffers: shared hit=6 read=1 dirtied=1
+   ->  Index Only Scan using bookings_user_id_idempotency_key_key on bookings (actual time=0.048..0.077 rows=60 loops=1)
+         Index Cond: (user_id = '019f67c6-42cb-76b7-8182-cdb8338a4e4c'::uuid)
+         Heap Fetches: 4
+         Buffers: shared hit=6 read=1 dirtied=1
+ Planning Time: 0.043 ms
+ Execution Time: 0.106 ms
+(8 rows)
+
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Limit (actual time=0.060..0.061 rows=10 loops=1)
+   Buffers: shared hit=8 read=2
+   ->  Sort (actual time=0.059..0.060 rows=10 loops=1)
+         Sort Key: created_at DESC, id DESC
+         Sort Method: top-N heapsort  Memory: 26kB
+         Buffers: shared hit=8 read=2
+         ->  Bitmap Heap Scan on bookings (actual time=0.029..0.046 rows=60 loops=1)
+               Recheck Cond: (user_id = '019f67c6-42cb-76b7-8182-cdb8338a4e4c'::uuid)
+               Heap Blocks: exact=6
+               Buffers: shared hit=8 read=2
+               ->  Bitmap Index Scan on bookings_user_id_idempotency_key_key (actual time=0.015..0.015 rows=60 loops=1)
+                     Index Cond: (user_id = '019f67c6-42cb-76b7-8182-cdb8338a4e4c'::uuid)
+                     Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=18 dirtied=1
+ Planning Time: 0.179 ms
+ Execution Time: 0.105 ms
+(17 rows)
+
+=== 7. Hold: lock the requested seats (rolled back)
+BEGIN
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ LockRows (actual time=0.074..0.077 rows=4 loops=1)
+   Buffers: shared hit=49
+   InitPlan 1 (returns $0)
+     ->  Limit (actual time=0.014..0.030 rows=4 loops=1)
+           Buffers: shared hit=30
+           ->  Index Scan using seats_pkey on seats (actual time=0.014..0.029 rows=4 loops=1)
+                 Filter: (room_id = '019e0384-57aa-7920-9775-52616b0db4fc'::uuid)
+                 Rows Removed by Filter: 25
+                 Buffers: shared hit=30
+   ->  Sort (actual time=0.059..0.059 rows=4 loops=1)
+         Sort Key: showtime_seats.seat_id
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=45
+         ->  Index Scan using showtime_seats_pkey on showtime_seats (actual time=0.046..0.051 rows=4 loops=1)
+               Index Cond: ((showtime_id = '01a1c855-5d00-7fe2-9798-98583c78ed89'::uuid) AND (seat_id = ANY ($0)))
+               Buffers: shared hit=45
+ Planning Time: 0.067 ms
+ Execution Time: 0.121 ms
+(18 rows)
+
+ROLLBACK
+=== 8. Expiry sweep: PENDING bookings past their hold
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Limit (actual time=0.073..0.073 rows=0 loops=1)
+   Buffers: shared hit=30
+   ->  Index Scan using bookings_status_hold_until_idx on bookings (actual time=0.072..0.073 rows=0 loops=1)
+         Index Cond: ((status = 'PENDING'::booking_status) AND (hold_until <= now()))
+         Buffers: shared hit=30
+ Planning:
+   Buffers: shared hit=12
+ Planning Time: 0.144 ms
+ Execution Time: 0.088 ms
+(9 rows)
+
+=== 9. Admin revenue, last 30 days (DashboardService.revenue)
+                                                                 QUERY PLAN                                                                 
+--------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate (actual time=205.129..205.240 rows=31 loops=1)
+   Group Key: to_char((b.confirmed_at AT TIME ZONE 'Asia/Ho_Chi_Minh'::text), 'YYYY-MM-DD'::text)
+   Batches: 1  Memory Usage: 793kB
+   Buffers: shared hit=160206 read=4859
+   ->  Seq Scan on bookings b (actual time=8.118..68.382 rows=53217 loops=1)
+         Filter: ((status = 'CONFIRMED'::booking_status) AND (confirmed_at < now()) AND (confirmed_at >= (now() - '30 days'::interval)))
+         Rows Removed by Filter: 122014
+         Buffers: shared hit=1683 read=3730
+   SubPlan 1
+     ->  Aggregate (actual time=0.002..0.002 rows=1 loops=53217)
+           Buffers: shared hit=158523 read=1129
+           ->  Index Only Scan using booking_seats_booking_id_seat_id_key on booking_seats bs (actual time=0.002..0.002 rows=2 loops=53217)
+                 Index Cond: (booking_id = b.id)
+                 Heap Fetches: 0
+                 Buffers: shared hit=158523 read=1129
+ Planning:
+   Buffers: shared hit=65 read=2 dirtied=1
+ Planning Time: 0.554 ms
+ Execution Time: 221.222 ms
+(19 rows)
+
