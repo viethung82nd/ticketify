@@ -13,3 +13,9 @@ allowBuilds:
   protobufjs: false
   ssh2: false
   unrs-resolver: true
+# Security fixes for exact-pinned transitive dependencies (ROADMAP 6.5, pnpm audit, high):
+# multer 2.4.0 (via @nestjs/platform-express 12.2.0) and effect 3.20.0 (via @prisma/config 7.10.1)
+# move to their patched MINOR versions. Drop a line once its parent depends on the fixed version.
+overrides:
+  multer@>=2.0.0 <2.5.0: 2.5.0
+  effect@<=3.22.0: 3.22.5
