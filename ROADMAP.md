@@ -242,9 +242,11 @@ Tài liệu này chia nhỏ mục 12 của [PLAN.md](PLAN.md) thành công việ
   - cấu hình cookie, CORS, helmet
   - rate limit
   - `pnpm audit`
-- [ ] **6.6** Viết `docs/LOAD_TEST.md` với số liệu đo thực tế. Số liệu load test phải ghi rõ `DATABASE_POOL_MAX` đang dùng; không lấy số liệu với pool 40 (chỉ dùng cho kịch bản A, 2.14) làm kết quả production, mặc định production là 10
+- [x] **6.6** Viết `docs/LOAD_TEST.md` với số liệu đo thực tế. **Xong 24/11/2026**: [docs/LOAD_TEST.md](docs/LOAD_TEST.md) chỉ ghi số đã đo ở 6.2 và 6.3 (`DATABASE_POOL_MAX=10`; các lần pool 20 ghi rõ là thử nghiệm), mỗi bảng trỏ về thư mục kết quả thô trong `load-tests/results/`, kèm cấu hình máy/DB, giới hạn "máy phát tải và máy chủ là một máy 4 lõi" và cách đọc số. Số liệu load test phải ghi rõ `DATABASE_POOL_MAX` đang dùng; không lấy số liệu với pool 40 (chỉ dùng cho kịch bản A, 2.14) làm kết quả production, mặc định production là 10
 
 **DoD:** có báo cáo load test; đạt ngưỡng coverage; không còn lỗ hổng mức cao.
+
+**Giai đoạn 6: đã đạt DoD (24/11/2026).** Báo cáo load test có số đo thật: [docs/LOAD_TEST.md](docs/LOAD_TEST.md) (6.2, 6.3; 0 ghế/vé trùng sau cả 40 lần chạy). Coverage đạt ngưỡng và được CI giữ trên mọi PR: API tổng lines 98,2 %, module lõi 98,1–100 % (6.4, cổng `test:coverage`). Không còn lỗ hổng high/critical trong `pnpm audit` (6.5). Các lựa chọn Claude tự quyết của giai đoạn này nằm trong "Đã chốt" (6.1–6.5) với nhãn **chờ duyệt**; việc còn mở (rate limit đăng ký và check-in nhập mã tay, HOT update của `showtime_seats`) nằm ở "Quyết định chờ".
 
 ---
 
