@@ -1,0 +1,15 @@
+
+Ticketify load test — hot-showtime
+settings: {"script":"hot-showtime","baseUrl":"http://host.docker.internal:3100","rate":50,"duration":"2m","preAllocatedVUs":50,"maxVUs":500,"maxSeats":4,"hotShowtimeId":"01a1ca6c-f260-7161-87d4-9e798c84cb8a"}
+requests: 6142 (51.2/s)
+http_req_failed: 0.000 %
+http_req_duration{name:hold}: p50 64.1 ms  p95 197.8 ms  p99 251.4 ms  max 279.8 ms
+http_req_duration{name:seat_map}: p50 14.9 ms  p95 55.9 ms  p99 92.0 ms  max 188.0 ms
+http_req_duration: p50 15.1 ms  p95 61.1 ms  p99 112.9 ms  max 279.8 ms
+http_req_duration{expected_response:true}: p50 15.1 ms  p95 61.1 ms  p99 112.9 ms  max 279.8 ms
+iterations: 6000
+sold_out_views: 5858
+holds_created: 120
+holds_lost_race: 22
+dropped_iterations: 0
+k6 exit code: 0 (99 = a threshold was crossed)

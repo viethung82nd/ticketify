@@ -1,0 +1,8 @@
+duplicate_live_tickets 0
+seat_in_two_live_bookings 0
+pending_hold_incomplete 0
+confirmed_not_sold 0
+owner_without_line 0
+held_by_finished_booking 0
+sold_without_paid_booking 0
+info_deadlocks_detected 0

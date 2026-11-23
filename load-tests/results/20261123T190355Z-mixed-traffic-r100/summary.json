@@ -1,0 +1,498 @@
+{
+  "settings": {
+    "script": "mixed-traffic",
+    "baseUrl": "http://host.docker.internal:3100",
+    "rate": 100,
+    "duration": "3m",
+    "preAllocatedVUs": 30,
+    "maxVUs": 300,
+    "maxSeats": 4,
+    "weights": "browse:35 movieDetail:20 showtimesOfDay:25 myBookings:5 book:15"
+  },
+  "options": {
+    "summaryTrendStats": [
+      "count",
+      "avg",
+      "min",
+      "med",
+      "max",
+      "p(90)",
+      "p(95)",
+      "p(99)"
+    ],
+    "summaryTimeUnit": "",
+    "noColor": false
+  },
+  "state": {
+    "isStdOutTTY": false,
+    "isStdErrTTY": false,
+    "testRunDurationMs": 180036.064074
+  },
+  "metrics": {
+    "http_req_duration{name:cancel}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(95)": 51.99210259999992,
+        "p(99)": 74.29807035999994,
+        "count": 797,
+        "avg": 21.835962731493076,
+        "min": 9.439002,
+        "med": 16.754472,
+        "max": 166.762905,
+        "p(90)": 38.850435
+      },
+      "thresholds": {
+        "p(95)<500": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_tls_handshaking": {
+      "values": {
+        "avg": 0,
+        "min": 0,
+        "med": 0,
+        "max": 0,
+        "p(90)": 0,
+        "p(95)": 0,
+        "p(99)": 0,
+        "count": 29252
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "http_req_duration{name:my_bookings}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(90)": 40.02922720000001,
+        "p(95)": 59.55856619999998,
+        "p(99)": 101.50888059999996,
+        "count": 913,
+        "avg": 22.54043944797373,
+        "min": 9.671953,
+        "med": 16.522036,
+        "max": 177.356235
+      },
+      "thresholds": {
+        "p(95)<300": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_failed": {
+      "values": {
+        "rate": 0,
+        "passes": 0,
+        "fails": 29252
+      },
+      "thresholds": {
+        "rate<0.01": {
+          "ok": true
+        }
+      },
+      "type": "rate",
+      "contains": "default"
+    },
+    "http_req_duration{name:showtime_dates}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "count": 3535,
+        "avg": 4.359066715417253,
+        "min": 1.89393,
+        "med": 3.185288,
+        "max": 60.090091,
+        "p(90)": 6.793545999999999,
+        "p(95)": 9.727317499999998,
+        "p(99)": 22.105203159999952
+      },
+      "thresholds": {
+        "p(95)<300": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_blocked": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "med": 0.006581,
+        "max": 6.762633,
+        "p(90)": 0.010383900000000001,
+        "p(95)": 0.011688449999999998,
+        "p(99)": 0.035459059999999605,
+        "count": 29252,
+        "avg": 0.009885525502529718,
+        "min": 0.002231
+      }
+    },
+    "iterations": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 18001,
+        "rate": 99.98552285947038
+      }
+    },
+    "checks": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "fails": 0,
+        "rate": 1,
+        "passes": 29252
+      }
+    },
+    "data_received": {
+      "type": "counter",
+      "contains": "data",
+      "values": {
+        "rate": 1572014.6097154785,
+        "count": 283019323
+      }
+    },
+    "iteration_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(90)": 49.64587,
+        "p(95)": 67.129289,
+        "p(99)": 128.244327,
+        "count": 18001,
+        "avg": 22.038575619687748,
+        "min": 4.544711,
+        "med": 13.573206,
+        "max": 379.160882
+      }
+    },
+    "http_req_receiving": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(95)": 2.669195299999998,
+        "p(99)": 5.200290649999986,
+        "count": 29252,
+        "avg": 0.6939187091480926,
+        "min": 0.019426,
+        "med": 0.13929950000000002,
+        "max": 112.588361,
+        "p(90)": 1.978588300000001
+      }
+    },
+    "holds_created": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "rate": 13.402870210538415,
+        "count": 2413
+      }
+    },
+    "vus": {
+      "type": "gauge",
+      "contains": "default",
+      "values": {
+        "min": 1,
+        "max": 16,
+        "value": 9
+      }
+    },
+    "http_req_duration{name:movies_list}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "count": 5703,
+        "avg": 11.370560439943924,
+        "min": 4.289221,
+        "med": 8.267508,
+        "max": 144.929938,
+        "p(90)": 19.532871200000006,
+        "p(95)": 28.815723299999988,
+        "p(99)": 51.43306505999993
+      },
+      "thresholds": {
+        "p(95)<300": {
+          "ok": true
+        }
+      }
+    },
+    "http_reqs": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 29252,
+        "rate": 162.47855756264804
+      }
+    },
+    "http_req_duration{name:movies_search}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "count": 651,
+        "avg": 12.448566259600605,
+        "min": 5.283214,
+        "med": 8.914621,
+        "max": 109.137411,
+        "p(90)": 20.566488,
+        "p(95)": 33.2893945,
+        "p(99)": 57.17365
+      },
+      "thresholds": {
+        "p(95)<300": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_connecting": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "med": 0,
+        "max": 3.133682,
+        "p(90)": 0,
+        "p(95)": 0,
+        "p(99)": 0,
+        "count": 29252,
+        "avg": 0.0017496981061124021,
+        "min": 0
+      }
+    },
+    "holds_refused": {
+      "values": {
+        "count": 3,
+        "rate": 0.016663328069463426
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "vus_max": {
+      "contains": "default",
+      "values": {
+        "value": 30,
+        "min": 30,
+        "max": 30
+      },
+      "type": "gauge"
+    },
+    "data_sent": {
+      "type": "counter",
+      "contains": "data",
+      "values": {
+        "rate": 29419.222349934164,
+        "count": 5296521
+      }
+    },
+    "http_req_duration{name:movie_detail}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(99)": 42.525394299999824,
+        "count": 3535,
+        "avg": 7.363581661669041,
+        "min": 3.146107,
+        "med": 5.374197,
+        "max": 99.631657,
+        "p(90)": 11.440676199999995,
+        "p(95)": 17.206119100000002
+      },
+      "thresholds": {
+        "p(95)<300": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_duration{name:showtime_list}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "count": 4503,
+        "avg": 6.471256251165877,
+        "min": 2.361018,
+        "med": 4.996404,
+        "max": 135.834482,
+        "p(90)": 9.6819482,
+        "p(95)": 13.568521399999984,
+        "p(99)": 27.21193235999998
+      },
+      "thresholds": {
+        "p(95)<300": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_duration{name:seat_map}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(95)": 30.834894599999966,
+        "p(99)": 57.53678719999995,
+        "count": 7199,
+        "avg": 13.765904802333617,
+        "min": 6.517767,
+        "med": 10.601427,
+        "max": 199.846864,
+        "p(90)": 22.07975619999999
+      },
+      "thresholds": {
+        "p(95)<300": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_waiting": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(99)": 72.40908317999988,
+        "count": 29252,
+        "avg": 12.367951178620293,
+        "min": 1.781846,
+        "med": 7.622167,
+        "max": 230.611206,
+        "p(90)": 27.583786600000007,
+        "p(95)": 37.994204249999996
+      }
+    },
+    "http_req_duration": {
+      "values": {
+        "p(99)": 74.15603219999984,
+        "count": 29252,
+        "avg": 13.103614981471218,
+        "min": 1.89393,
+        "med": 8.615637,
+        "max": 230.794814,
+        "p(90)": 28.346519700000005,
+        "p(95)": 39.12130364999998
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "bookings_cancelled": {
+      "contains": "default",
+      "values": {
+        "count": 797,
+        "rate": 4.42689082378745
+      },
+      "type": "counter"
+    },
+    "http_req_duration{name:hold}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(99)": 158.53648639999986,
+        "count": 2416,
+        "avg": 42.505613210678774,
+        "min": 8.2929,
+        "med": 33.2205345,
+        "max": 230.794814,
+        "p(90)": 71.089973,
+        "p(95)": 96.1009755
+      },
+      "thresholds": {
+        "p(95)<500": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_sending": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "max": 9.574629,
+        "p(90)": 0.061839700000000004,
+        "p(95)": 0.07298569999999999,
+        "p(99)": 0.11591626999999995,
+        "count": 29252,
+        "avg": 0.041745093702994354,
+        "min": 0.007076,
+        "med": 0.0381
+      }
+    },
+    "http_req_duration{expected_response:true}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "min": 1.89393,
+        "med": 8.615637,
+        "max": 230.794814,
+        "p(90)": 28.346519700000005,
+        "p(95)": 39.12130364999998,
+        "p(99)": 74.15603219999984,
+        "count": 29252,
+        "avg": 13.103614981471218
+      }
+    }
+  },
+  "root_group": {
+    "name": "",
+    "path": "",
+    "id": "d41d8cd98f00b204e9800998ecf8427e",
+    "groups": [],
+    "checks": [
+      {
+        "name": "showtime_list 200",
+        "path": "::showtime_list 200",
+        "id": "b8794c422e62c0900d649b9f6db0390a",
+        "passes": 4503,
+        "fails": 0
+      },
+      {
+        "name": "movies_list 200",
+        "path": "::movies_list 200",
+        "id": "03d1b086ca6768d3f2fb600b7c7497e3",
+        "passes": 5703,
+        "fails": 0
+      },
+      {
+        "name": "seat_map 200",
+        "path": "::seat_map 200",
+        "id": "dafe845bef23052c587db01c801b987e",
+        "passes": 7199,
+        "fails": 0
+      },
+      {
+        "fails": 0,
+        "name": "movies_search 200",
+        "path": "::movies_search 200",
+        "id": "040edc059d6808d3cf2284cc81df33ba",
+        "passes": 651
+      },
+      {
+        "name": "my_bookings 200",
+        "path": "::my_bookings 200",
+        "id": "0ad3c33afc7402df5fdd3934e3d90269",
+        "passes": 913,
+        "fails": 0
+      },
+      {
+        "id": "9e27f8cfca66ae31f5da9325159c0690",
+        "passes": 2416,
+        "fails": 0,
+        "name": "hold 201 or 409",
+        "path": "::hold 201 or 409"
+      },
+      {
+        "name": "movie_detail 200",
+        "path": "::movie_detail 200",
+        "id": "ba86d911b63c449045190e1dbdbc6b26",
+        "passes": 3535,
+        "fails": 0
+      },
+      {
+        "name": "showtime_dates 200",
+        "path": "::showtime_dates 200",
+        "id": "c8563c239f43ed198de0597802754b31",
+        "passes": 3535,
+        "fails": 0
+      },
+      {
+        "name": "cancel 204",
+        "path": "::cancel 204",
+        "id": "d4eee8e9a208394fb23b117c3c6b23a1",
+        "passes": 797,
+        "fails": 0
+      }
+    ]
+  }
+}
