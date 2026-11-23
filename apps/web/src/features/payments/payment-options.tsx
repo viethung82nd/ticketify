@@ -1,12 +1,13 @@
 import { PaymentErrorCode, PaymentProvider } from '@ticketify/shared';
 import { useMutation } from '@tanstack/react-query';
-import { CreditCard, Loader2, Wallet } from 'lucide-react';
+import { CreditCard, Landmark, Loader2, Wallet } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { apiErrorOf } from '@/lib/api-error';
 import { leaveTo } from '@/lib/navigation';
 import { paymentErrorMessage } from './payment-errors';
-import { createMomoPayment, createVnpayPayment } from './payments-api';
+import { createMomoPayment, createSepayPayment, createVnpayPayment } from './payments-api';
+import { SepayTransferPanel } from './sepay-transfer-panel';
 
 /** Codes after which the booking shown is out of date (expired, paid, no longer PENDING). */
 const STALE_BOOKING_CODES = new Set<string>([
@@ -45,30 +46,54 @@ const GATEWAYS: readonly Gateway[] = [
 ];
 
 /**
- * The payment methods of a PENDING booking: VNPay or the MoMo wallet. The click asks the API for
- * the gateway's page (the amount is the booking's, on the server) and sends the browser there.
- * From the click until the page has left, every button is disabled: one click, one gateway.
- * Paying is only ever confirmed by the gateway's server-to-server notification, never here.
+ * The payment methods of a PENDING booking: VNPay, the MoMo wallet, or a bank transfer through
+ * SePay. VNPay and MoMo: the click asks the API for the gateway's page (the amount is the
+ * booking's, on the server) and sends the browser there. SePay: the click asks the API for the
+ * transfer details and shows them here (QR, amount, content), waiting for the booking to change.
+ * From the click until the answer, every button is disabled: one click, one request (the API
+ * also hands an open attempt back instead of opening a second one). Paying is only ever
+ * confirmed by the gateway's server-to-server notification, never here.
  */
 export function PaymentOptions({
   bookingId,
   onStale,
+  serverOffsetMs = 0,
 }: {
   bookingId: string;
   /** The API says the booking changed: reload it. */
   onStale: () => void;
+  /** Server clock − local clock, for the transfer countdown. */
+  serverOffsetMs?: number;
 }) {
+  const onError = (error: unknown) => {
+    const code = apiErrorOf(error)?.code;
+    if (code && STALE_BOOKING_CODES.has(code)) onStale();
+  };
   const pay = useMutation({
     mutationFn: async (gateway: Gateway) => gateway.start(bookingId),
     onSuccess: (url) => leaveTo(url),
-    onError: (error) => {
-      const code = apiErrorOf(error)?.code;
-      if (code && STALE_BOOKING_CODES.has(code)) onStale();
-    },
+    onError,
+  });
+  const transfer = useMutation({
+    mutationFn: () => createSepayPayment(bookingId),
+    onError,
   });
   // Still busy after success: the browser is on its way to the gateway.
-  const busy = pay.isPending || pay.isSuccess;
-  const chosen = pay.variables?.provider;
+  const busy = pay.isPending || pay.isSuccess || transfer.isPending;
+  const chosen = transfer.isPending ? PaymentProvider.SEPAY : pay.variables?.provider;
+
+  if (transfer.data) {
+    return (
+      <SepayTransferPanel
+        payment={transfer.data}
+        bookingId={bookingId}
+        serverOffsetMs={serverOffsetMs}
+        onBack={() => transfer.reset()}
+      />
+    );
+  }
+  const sepayLoading = busy && chosen === PaymentProvider.SEPAY;
+  const failure = pay.isError ? pay.error : transfer.isError ? transfer.error : null;
 
   return (
     <div className="space-y-3">
@@ -87,7 +112,10 @@ export function PaymentOptions({
               key={gateway.provider}
               type="button"
               variant={gateway.provider === PaymentProvider.VNPAY ? 'default' : 'outline'}
-              onClick={() => pay.mutate(gateway)}
+              onClick={() => {
+                transfer.reset();
+                pay.mutate(gateway);
+              }}
               disabled={busy}
               aria-busy={loading}
               className="h-12 w-full rounded-xl text-base font-semibold"
@@ -98,10 +126,29 @@ export function PaymentOptions({
             </Button>
           );
         })}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            pay.reset();
+            transfer.mutate();
+          }}
+          disabled={busy}
+          aria-busy={sepayLoading}
+          className="h-12 w-full rounded-xl text-base font-semibold sm:col-span-2"
+          data-testid="pay-sepay"
+        >
+          {sepayLoading ? (
+            <Loader2 className="animate-spin" aria-hidden />
+          ) : (
+            <Landmark aria-hidden />
+          )}
+          {sepayLoading ? 'Đang tạo mã chuyển khoản…' : 'Chuyển khoản ngân hàng (VietQR)'}
+        </Button>
       </div>
-      {pay.isError && (
+      {failure !== null && (
         <p role="alert" className="text-sm text-destructive">
-          {paymentErrorMessage(pay.error)}
+          {paymentErrorMessage(failure)}
         </p>
       )}
     </div>

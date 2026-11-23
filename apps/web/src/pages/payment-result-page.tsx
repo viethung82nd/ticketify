@@ -29,6 +29,7 @@ const FINAL_STATUSES = new Set<BookingStatus>([
 const GATEWAY_NAMES: Record<PaymentProvider, string> = {
   [PaymentProvider.VNPAY]: 'VNPay',
   [PaymentProvider.MOMO]: 'MoMo',
+  [PaymentProvider.SEPAY]: 'SePay',
 };
 
 /**

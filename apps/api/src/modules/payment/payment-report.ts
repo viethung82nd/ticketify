@@ -5,7 +5,8 @@ import { vnpayAmount } from './vnpay/vnpay-format';
 /**
  * A gateway's answer about one payment attempt, in the terms `settlePayment` records it. Built
  * only from an answer whose signature was checked, by that gateway's reader: `readVnpayReport`
- * (VNPay IPN and querydr) or `readMomoReport` (MoMo IPN and query). An answer that says the
+ * (VNPay IPN and querydr), `readMomoReport` (MoMo IPN and query) or `sepayReport` (SePay
+ * webhook, incoming transfers only). An answer that says the
  * transaction is still in progress never becomes a report: it changes nothing.
  */
 export interface PaymentReport {
@@ -27,7 +28,7 @@ export interface PaymentReport {
   raw: Prisma.InputJsonObject;
 }
 
-/** What a gateway must report as the amount of a payment of `amount` VND. */
+/** What a gateway must report as the amount of a payment of `amount` VND (MoMo, SePay: dong). */
 export function gatewayAmount(provider: PaymentProvider, amount: number): string {
   return provider === PaymentProvider.VNPAY ? vnpayAmount(amount) : String(amount);
 }
@@ -36,4 +37,5 @@ export function gatewayAmount(provider: PaymentProvider, amount: number): string
 export const PROVIDER_LABELS: Readonly<Record<PaymentProvider, string>> = {
   [PaymentProvider.VNPAY]: 'VNPay',
   [PaymentProvider.MOMO]: 'MoMo',
+  [PaymentProvider.SEPAY]: 'SePay',
 };

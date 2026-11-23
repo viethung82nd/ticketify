@@ -37,6 +37,7 @@ erDiagram
     bookings ||--o{ tickets : "issues"
     showtime_seats ||--o{ tickets : ""
     bookings ||--o{ payments : "attempts"
+    payments |o--o{ sepay_transactions : "transfers naming it"
 
     vouchers ||--o{ voucher_usages : "used by"
     bookings ||--o| voucher_usages : "applies"
@@ -208,8 +209,8 @@ erDiagram
     payments {
         uuid id PK
         uuid booking_id FK "UK(booking_id) WHERE status = SUCCESS"
-        payment_provider provider "VNPAY | MOMO, default VNPAY"
-        text txn_ref UK "vnp_TxnRef (VNPay) | orderId (MoMo)"
+        payment_provider provider "VNPAY | MOMO | SEPAY, default VNPAY"
+        text txn_ref UK "vnp_TxnRef (VNPay) | orderId (MoMo) | payment code (SePay)"
         int amount
         payment_status status "PENDING | SUCCESS | FAILED | EXPIRED | REFUND_REQUIRED"
         text vnp_transaction_no UK "nullable, VNPay only"
@@ -222,6 +223,25 @@ erDiagram
         timestamptz processed_at "nullable"
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    sepay_transactions {
+        uuid id PK
+        bigint sepay_id UK "SePay webhook id, same on every retry"
+        uuid payment_id FK "nullable, the payment its code named"
+        sepay_transaction_outcome outcome "SETTLED | OUTGOING | WRONG_ACCOUNT | NO_REFERENCE | UNKNOWN_REFERENCE | AMOUNT_MISMATCH | DUPLICATE_TRANSFER"
+        text transfer_type "in | out"
+        bigint transfer_amount ">= 0"
+        text account_number
+        text sub_account "nullable, VA"
+        text code "nullable, SePay-extracted code"
+        text reference "nullable, our payment code"
+        text content "nullable"
+        text reference_code "nullable, bank reference"
+        text gateway "nullable, bank name"
+        text transaction_date "nullable, as sent"
+        jsonb raw_payload
+        timestamptz received_at
     }
 
     outbox_events {
@@ -294,6 +314,7 @@ erDiagram
 
 - `showtime_seats` is the **only** place that decides who holds a seat (PLAN section 4); `bookings.hold_until` mirrors `held_until` for the expiry cron.
 - `booking_seats` and `tickets` reference `showtime_seats` through the composite key `(showtime_id, seat_id)`.
+- `sepay_transactions` has one row per bank transaction SePay reported (deduplicated by `sepay_id`), whether or not it settled a payment: it is the reconciliation record for bank transfers (docs/SEPAY_SETUP.md).
 - `payments` has one row per payment attempt; `tickets` has one row per seat and is created in the same transaction that confirms the booking.
 - `outbox_events` and `notifications` are written by the API and consumed by the worker (phase 4).
 - `audit_logs` is append-only: one row per admin action taken by hand (ROADMAP 3.8). `bookings.review_resolved_at` is the current state, the log is the history; marking a NEEDS_REVIEW booking handled changes neither the booking status nor the payment, because refunds are manual.

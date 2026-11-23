@@ -149,6 +149,10 @@ export class BookingExpiryService {
     }
 
     for (const row of rows) {
+      // SePay has no status query in this integration: a transfer arrives through the webhook
+      // only, before or after the expiry (settlePayment's branch B or C then decides). It must
+      // never fall through to VNPay's querydr below.
+      if (row.provider === PaymentProvider.SEPAY) continue;
       if (row.provider === PaymentProvider.MOMO) {
         if (!momo) continue;
         const answer = await this.momo.query(row.txn_ref);

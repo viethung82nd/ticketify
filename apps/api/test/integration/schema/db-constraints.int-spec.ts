@@ -486,6 +486,73 @@ describe('database constraints (raw SQL migration)', () => {
         });
       });
     });
+
+    describe('SePay ledger (*_payment_provider_sepay migration)', () => {
+      let s = 0;
+      const ledgerRow = (data: Partial<Prisma.SepayTransactionUncheckedCreateInput> = {}) =>
+        prisma.sepayTransaction.create({
+          data: {
+            sepayId: BigInt(900_000 + ++s),
+            outcome: 'NO_REFERENCE',
+            transferType: 'in',
+            transferAmount: 90_000n,
+            accountNumber: '0071000888999',
+            rawPayload: {},
+            receivedAt: new Date('2026-11-01T10:00:00Z'),
+            ...data,
+          },
+        });
+
+      it('sepay_transactions_transfer_check: rejects an unknown transfer type', async () => {
+        await expectViolation(ledgerRow({ transferType: 'refund' }), {
+          sqlState: SQLSTATE.checkViolation,
+          constraint: 'sepay_transactions_transfer_check',
+        });
+      });
+
+      it('sepay_transactions_transfer_check: rejects a negative amount', async () => {
+        await expectViolation(ledgerRow({ transferAmount: -1n }), {
+          sqlState: SQLSTATE.checkViolation,
+          constraint: 'sepay_transactions_transfer_check',
+        });
+      });
+
+      it('sepay_transactions_settled_payment_check: rejects SETTLED without a payment', async () => {
+        await expectViolation(ledgerRow({ outcome: 'SETTLED', paymentId: null }), {
+          sqlState: SQLSTATE.checkViolation,
+          constraint: 'sepay_transactions_settled_payment_check',
+        });
+      });
+
+      it('sepay_transactions_sepay_id_key: a SePay transaction id is recorded once', async () => {
+        await ledgerRow({ sepayId: 123_456_789n });
+
+        await expectViolation(ledgerRow({ sepayId: 123_456_789n }), {
+          sqlState: SQLSTATE.uniqueViolation,
+          constraint: 'sepay_transactions_sepay_id_key',
+        });
+      });
+
+      it('accepts: money out, an unmatched transfer, and SETTLED on a SePay payment', async () => {
+        const { booking } = await bookingWithPayments();
+        const sepay = await prisma.payment.create({
+          data: {
+            bookingId: booking.id,
+            provider: 'SEPAY',
+            txnRef: `TKF${booking.id.slice(-8)}`,
+            amount: 90_000,
+          },
+        });
+
+        await expect(
+          Promise.all([
+            ledgerRow({ transferType: 'out', outcome: 'OUTGOING' }),
+            ledgerRow({ outcome: 'UNKNOWN_REFERENCE', transferAmount: 0n }),
+            ledgerRow({ outcome: 'SETTLED', paymentId: sepay.id }),
+          ]),
+        ).resolves.toHaveLength(3);
+      });
+    });
   });
 
   describe('vouchers (ROADMAP 5.1)', () => {

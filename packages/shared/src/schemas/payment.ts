@@ -97,6 +97,37 @@ export const MOMO_SUCCESS_CODE = 0;
  */
 export const MOMO_PENDING_RESULT_CODES: readonly number[] = [1000, 7000, 7002, 8000, 9000];
 
+// ─── SePay (bank transfer: VietQR shown here, money reported by SePay's webhook) ───
+
+/** `POST /payments/sepay`: start (or resume) a bank transfer for one of the user's PENDING bookings. */
+export const createSepayPaymentRequestSchema = z.object({ bookingId: z.uuid() });
+export type CreateSepayPaymentRequest = z.infer<typeof createSepayPaymentRequestSchema>;
+
+/**
+ * `201` body of `POST /payments/sepay`: what the customer transfers, and where. A booking has at
+ * most one open SePay attempt: while it is PENDING, calling again hands the same one back
+ * (`reused: true`, same `transferContent`). Nothing here is a credential. The booking is confirmed
+ * only when SePay's webhook reports the transfer; this answer never means "paid".
+ */
+export const createdSepayPaymentSchema = z.object({
+  paymentId: z.uuid(),
+  provider: z.literal('SEPAY'),
+  /** VND, whole dong: the exact amount to transfer (any other amount is not applied). */
+  amount: z.number().int().positive(),
+  /** The exact transfer content: the payment code (prefix + 8 digits). */
+  transferContent: z.string(),
+  /** VietQR image (account, bank, amount and content already filled in). */
+  qrCodeUrl: z.url(),
+  /** Bank as VietQR names it. */
+  bankCode: z.string(),
+  accountNumber: z.string(),
+  accountHolder: z.string().nullable(),
+  /** ISO instant: the booking's `expiresAt`; a transfer after it may not get the seats. */
+  expiresAt: z.string(),
+  reused: z.boolean(),
+});
+export type CreatedSepayPayment = z.infer<typeof createdSepayPaymentSchema>;
+
 /** Machine-readable `code` values of payment API errors (also BOOKING_NOT_FOUND, TOO_MANY_ATTEMPTS). */
 export const PaymentErrorCode = {
   /** 404: no such booking, or it belongs to another user (never 403). */
@@ -109,7 +140,8 @@ export const PaymentErrorCode = {
   BOOKING_ALREADY_PAID: 'BOOKING_ALREADY_PAID',
   /**
    * 503: the gateway is not configured on this server (VNPay: TMN code, hash secret or return URL
-   * missing; MoMo: partner code, access key, secret key, redirect URL or IPN URL missing).
+   * missing; MoMo: partner code, access key, secret key, redirect URL or IPN URL missing; SePay:
+   * webhook secret, account number or bank missing).
    */
   PAYMENT_NOT_CONFIGURED: 'PAYMENT_NOT_CONFIGURED',
   /** 422: the gateway does not accept this amount (MoMo wallet: 1 000 – 50 000 000 VND). */

@@ -251,10 +251,15 @@ export function BookingDetailPage() {
         </div>
         {showClock && (
           <div className="space-y-3 border-t border-white/10 pt-4">
-            <PaymentOptions bookingId={booking.id} onStale={() => void refetch()} />
+            <PaymentOptions
+              bookingId={booking.id}
+              onStale={() => void refetch()}
+              serverOffsetMs={serverOffsetMs ?? 0}
+            />
             <p className="text-xs text-muted-foreground">
-              Bạn sẽ được chuyển sang cổng thanh toán đã chọn. Hiện chưa thể hủy giữ ghế trên trang
-              này: nếu bạn rời trang, ghế vẫn được giữ đến khi hết hạn.
+              VNPay và MoMo: bạn sẽ được chuyển sang cổng thanh toán đã chọn. Chuyển khoản: quét mã
+              VietQR, đơn được xác nhận khi ngân hàng báo nhận tiền. Hiện chưa thể hủy giữ ghế trên
+              trang này: nếu bạn rời trang, ghế vẫn được giữ đến khi hết hạn.
             </p>
           </div>
         )}

@@ -210,6 +210,47 @@ export const envSchema = z
      * IPN still records the money), and the expiry job must stay well inside its own time limit.
      */
     MOMO_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(5_000),
+
+    // SePay bank transfer (docs/SEPAY_SETUP.md): Ticketify shows a VietQR for the receiving account
+    // and SePay's webhook reports the money. Optional like VNPay and MoMo: without the secret, the
+    // account number or the bank, POST /payments/sepay answers 503 PAYMENT_NOT_CONFIGURED and the
+    // webhook 503. SePay's payment-gateway Merchant ID / Secret Key are not used by this flow.
+    /**
+     * Secret Key of the SePay webhook's "HMAC-SHA256" authentication (SePay → Webhooks → Bảo mật).
+     * Signs `{X-SePay-Timestamp}.{raw body}`; never logged, never sent anywhere.
+     */
+    SEPAY_WEBHOOK_SECRET: z.preprocess(
+      blankAsUndefined,
+      z.string().min(16, { error: 'must be at least 16 characters' }).optional(),
+    ),
+    /** The receiving account (or its VA) the QR names; a webhook for another account settles nothing. */
+    SEPAY_BANK_ACCOUNT_NUMBER: z.preprocess(
+      blankAsUndefined,
+      z
+        .string()
+        .regex(/^[A-Za-z0-9]{4,32}$/, { error: 'must be 4–32 letters or digits' })
+        .optional(),
+    ),
+    /** Bank of that account as VietQR knows it: short name, code or BIN (vietqr.app/banks.json). */
+    SEPAY_BANK_CODE: z.preprocess(
+      blankAsUndefined,
+      z
+        .string()
+        .regex(/^[A-Za-z0-9 ._-]{2,40}$/, {
+          error: 'must be a VietQR bank short name, code or BIN',
+        })
+        .optional(),
+    ),
+    /** Account holder printed on the page and the QR (unaccented, optional). */
+    SEPAY_ACCOUNT_HOLDER: z.preprocess(blankAsUndefined, z.string().max(100).optional()),
+    /**
+     * Prefix of the payment code put in the transfer content; must match SePay's "Cấu trúc mã thanh
+     * toán" (2–5 letters on Live). The code is this prefix + 8 digits, e.g. `TKF12345678`.
+     */
+    SEPAY_PAYMENT_CODE_PREFIX: z
+      .string()
+      .regex(/^[A-Z]{2,5}$/, { error: 'must be 2–5 upper-case letters' })
+      .default('TKF'),
   })
   .superRefine((env, ctx) => checkMomoForProduction(env, ctx));
 

@@ -38,6 +38,14 @@ import { cn } from '@/lib/utils';
 const GATEWAY_NAMES: Record<PaymentProvider, string> = {
   [PaymentProvider.VNPAY]: 'VNPay',
   [PaymentProvider.MOMO]: 'MoMo',
+  [PaymentProvider.SEPAY]: 'SePay (chuyển khoản)',
+};
+
+/** What each gateway calls our reference of the attempt. */
+const REFERENCE_NAMES: Record<PaymentProvider, string> = {
+  [PaymentProvider.VNPAY]: 'txnRef',
+  [PaymentProvider.MOMO]: 'orderId',
+  [PaymentProvider.SEPAY]: 'nội dung CK',
 };
 
 /** The gateway's transaction id to refund with (`transId` for MoMo, `vnp_TransactionNo` for VNPay). */
@@ -96,8 +104,7 @@ function ReviewRow({ item, onResolve }: { item: NeedsReviewBooking; onResolve: (
         )}
         {item.payment && (
           <span className="block text-xs text-muted-foreground">
-            {item.payment.provider === PaymentProvider.MOMO ? 'orderId' : 'txnRef'}:{' '}
-            {item.payment.txnRef}
+            {REFERENCE_NAMES[item.payment.provider]}: {item.payment.txnRef}
           </span>
         )}
       </td>

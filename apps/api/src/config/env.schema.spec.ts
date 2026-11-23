@@ -221,3 +221,58 @@ describe('validateEnv — MoMo endpoint', () => {
     }
   });
 });
+
+/** SePay bank transfer (11/2026): optional, validated when set. Test-only values. */
+describe('validateEnv — SePay', () => {
+  const env = (overrides: Record<string, string>) => ({ ...validEnv(), ...overrides });
+
+  it('is off by default: no secret, no account, prefix TKF', () => {
+    const parsed = validateEnv(validEnv());
+
+    expect(parsed.SEPAY_WEBHOOK_SECRET).toBeUndefined();
+    expect(parsed.SEPAY_BANK_ACCOUNT_NUMBER).toBeUndefined();
+    expect(parsed.SEPAY_BANK_CODE).toBeUndefined();
+    expect(parsed.SEPAY_PAYMENT_CODE_PREFIX).toBe('TKF');
+  });
+
+  it('treats empty values as unset', () => {
+    const parsed = validateEnv(
+      env({ SEPAY_WEBHOOK_SECRET: '', SEPAY_BANK_ACCOUNT_NUMBER: '', SEPAY_BANK_CODE: '' }),
+    );
+
+    expect(parsed.SEPAY_WEBHOOK_SECRET).toBeUndefined();
+  });
+
+  it('accepts a complete configuration', () => {
+    const parsed = validateEnv(
+      env({
+        SEPAY_WEBHOOK_SECRET: 'unit-test-sepay-secret-0123',
+        SEPAY_BANK_ACCOUNT_NUMBER: 'SBSEPAYX9KA2B7MN4QR',
+        SEPAY_BANK_CODE: 'MBBank',
+        SEPAY_ACCOUNT_HOLDER: 'CONG TY TICKETIFY',
+        SEPAY_PAYMENT_CODE_PREFIX: 'TKFT',
+      }),
+    );
+
+    expect(parsed.SEPAY_PAYMENT_CODE_PREFIX).toBe('TKFT');
+  });
+
+  it.each([
+    ['SEPAY_WEBHOOK_SECRET', 'short'],
+    ['SEPAY_BANK_ACCOUNT_NUMBER', '1017-588-888'],
+    ['SEPAY_BANK_CODE', 'Vietcombank<script>'],
+    ['SEPAY_PAYMENT_CODE_PREFIX', 'tkf'],
+    ['SEPAY_PAYMENT_CODE_PREFIX', 'T'],
+    ['SEPAY_PAYMENT_CODE_PREFIX', 'TICKET'],
+    ['SEPAY_PAYMENT_CODE_PREFIX', 'TK1'],
+  ])('rejects %s=%s without echoing the value', (key, value) => {
+    let message = '';
+    try {
+      validateEnv(env({ [key]: value }));
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toMatch(new RegExp(key));
+    if (key === 'SEPAY_WEBHOOK_SECRET') expect(message).not.toContain(value);
+  });
+});

@@ -1,6 +1,6 @@
 # Ticketify
 
-Web đặt vé xem phim **thời gian thực** cho một rạp: giữ ghế chống bán trùng bằng PostgreSQL, thanh toán VNPay và ví MoMo (sandbox), vé PDF có QR, thông báo realtime.
+Web đặt vé xem phim **thời gian thực** cho một rạp: giữ ghế chống bán trùng bằng PostgreSQL, thanh toán VNPay, ví MoMo (sandbox) và chuyển khoản ngân hàng VietQR qua SePay (Test mode), vé PDF có QR, thông báo realtime.
 
 - Kế hoạch & thiết kế: [PLAN.md](PLAN.md) · Lộ trình: [ROADMAP.md](ROADMAP.md) · Quy ước: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Sơ đồ CSDL: [docs/erd.md](docs/erd.md) · Ràng buộc SQL viết tay: [apps/api/prisma/README.md](apps/api/prisma/README.md)
@@ -182,9 +182,19 @@ Cổng thứ hai, cạnh VNPay (VNPay giữ nguyên). Cài đặt sandbox, ngrok
 - Bảng `payments`: thêm `provider` (`VNPAY` | `MOMO`, dòng cũ = `VNPAY`), `provider_request_id`, `provider_transaction_id` (`transId` MoMo; với VNPay = `vnp_transaction_no`, đã backfill), `pay_url`. Migration `20261122120000_payment_provider_momo`, chỉ mở rộng.
 - Log IPN VNPay `97` nay kèm **tên** tham số nhận được (không giá trị, không hash): thiếu hash, tham số rỗng, tham số không phải `vnp_*`, khóa lặp — để chẩn đoán chữ ký sai mà không lộ dữ liệu.
 
+### Chuyển khoản ngân hàng SePay (11/2026)
+
+Cổng thứ ba, cạnh VNPay và MoMo (hai cổng này giữ nguyên). Dùng sản phẩm **SePay Webhooks**: Ticketify tự hiện QR VietQR (số tài khoản, số tiền, nội dung = mã thanh toán), SePay báo biến động số dư bằng webhook ký HMAC-SHA256. Merchant ID/Secret Key của *cổng thanh toán* SePay **không** dùng. Cài đặt Test mode, tunnel, mô phỏng giao dịch, đối soát và lên production: **[docs/SEPAY_SETUP.md](docs/SEPAY_SETUP.md)**. Kết quả ghi bằng cùng `settlePayment()` (cùng khóa, nhánh A/B/C, outbox).
+
+- `POST /payments/sepay` (đăng nhập, chủ đơn), body `{ bookingId }` → `201 { paymentId, provider: "SEPAY", amount, transferContent, qrCodeUrl, bankCode, accountNumber, accountHolder, expiresAt, reused }`. Một lần thử SePay đang mở mỗi đơn (`reused: true` khi gọi lại). Lỗi giống VNPay/MoMo; `503 PAYMENT_NOT_CONFIGURED` khi thiếu `SEPAY_WEBHOOK_SECRET` / `SEPAY_BANK_ACCOUNT_NUMBER` / `SEPAY_BANK_CODE`.
+- `POST /payments/sepay/webhook` (công khai, SePay gọi, JSON): HMAC trên raw body + timestamp ±300 s → `401`; payload sai → `400`; chưa cấu hình → `503`; còn lại **`200 {"success": true}`**. Chỉ tiền **vào**, đúng tài khoản, đúng mã, **đúng số tiền** mới được áp vào đơn; mọi giao dịch (kể cả không khớp) được ghi một lần vào bảng `sepay_transactions` (`sepay_id` UNIQUE = chống trùng/song song) để đối soát và hoàn tiền tay.
+- Web: nút "Chuyển khoản ngân hàng (VietQR)" trên trang đơn → QR, số tiền, nội dung (nút chép), đếm ngược, đọc lại đơn mỗi 3 s cho tới khi webhook xác nhận.
+- Worker hết hạn không hỏi SePay (không có API tra cứu trong tích hợp này): chuyển khoản muộn đi theo nhánh B (lấy lại ghế) hoặc C (`NEEDS_REVIEW`) khi webhook đến.
+- Migration `20261123100000_payment_provider_sepay`, chỉ mở rộng (enum `SEPAY`, bảng `sepay_transactions`). API bật `rawBody` (chữ ký tính trên byte body).
+
 ### Hàng đợi xử lý tay — đơn `NEEDS_REVIEW` (3.8)
 
-**Hoàn tiền tự động nằm ngoài phạm vi dự án.** Khi IPN thu được tiền nhưng không giữ được ghế, đơn thành `NEEDS_REVIEW` và việc còn lại là của admin: hoàn tiền trên cổng merchant của cổng đã thu tiền — VNPay (cần `vnp_transaction_no`) hoặc MoMo M4B (cần `transId` = `provider_transaction_id`) — hoặc liên hệ khách.
+**Hoàn tiền tự động nằm ngoài phạm vi dự án.** Khi IPN thu được tiền nhưng không giữ được ghế, đơn thành `NEEDS_REVIEW` và việc còn lại là của admin: hoàn tiền trên cổng merchant của cổng đã thu tiền — VNPay (cần `vnp_transaction_no`) hoặc MoMo M4B (cần `transId` = `provider_transaction_id`); SePay không có API hoàn tiền, admin chuyển khoản trả tay (đối chiếu `sepay_transactions`) — hoặc liên hệ khách.
 
 - Trang `/admin/review` (ADMIN) liệt kê các đơn đó kèm khách hàng, suất chiếu, ghế, số tiền, `vnp_transaction_no`, `txn_ref` và lý do mất ghế; lọc theo `Chưa xử lý` / `Đã xử lý` / `Tất cả`, phân trang.
 - Nút **"Đã xử lý"** bắt buộc kèm ghi chú (1–1000 ký tự) và **không hoàn tiền, không đổi trạng thái đơn**: đơn vẫn `NEEDS_REVIEW`. Nó chỉ đặt `bookings.review_resolved_at`/`review_resolved_by` và ghi một dòng `audit_logs` (`booking.review_resolved`: ai, lúc nào, ghi chú, trạng thái trước/sau). `audit_logs` chỉ ghi thêm, không bao giờ sửa hay xóa.
@@ -292,6 +302,10 @@ Tích hợp VNPay bắt đầu ở giai đoạn 3, nhưng nên đăng ký sớm 
 ## MoMo sandbox (việc làm tay)
 
 Đăng ký MoMo Business (môi trường test), điền `MOMO_PARTNER_CODE` / `MOMO_ACCESS_KEY` / `MOMO_SECRET_KEY`, `MOMO_REDIRECT_URL` và `MOMO_IPN_URL` (công khai, ví dụ ngrok `https://<tên>.ngrok-free.app/payments/momo/ipn`): xem **[docs/MOMO_SETUP.md](docs/MOMO_SETUP.md)**. Khác VNPay, `ipnUrl` nằm trong từng request create, nên đổi tunnel chỉ cần đổi `.env`.
+
+## SePay Test mode (việc làm tay)
+
+Bật Test mode trên `my.sepay.vn`, tạo tài khoản ngân hàng ảo, cấu hình "Cấu trúc mã thanh toán" (tiền tố `TKF`, hậu tố 8 chữ số), tạo webhook (Tiền vào, JSON, HMAC-SHA256, URL công khai `https://<tunnel>/payments/sepay/webhook`), điền `SEPAY_WEBHOOK_SECRET` / `SEPAY_BANK_ACCOUNT_NUMBER` / `SEPAY_BANK_CODE`, rồi "Mô phỏng giao dịch": xem **[docs/SEPAY_SETUP.md](docs/SEPAY_SETUP.md)** §4–§7.
 
 ## Quyết định đáng chú ý
 

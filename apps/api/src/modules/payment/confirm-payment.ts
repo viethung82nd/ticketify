@@ -42,6 +42,8 @@ const FINAL_STATUSES: ReadonlySet<PaymentStatus> = new Set([
 const REOPENED_BY_A_PAYMENT: Readonly<Record<PaymentProvider, ReadonlySet<PaymentStatus>>> = {
   [PaymentProvider.VNPAY]: new Set(),
   [PaymentProvider.MOMO]: new Set([PaymentStatus.FAILED]),
+  // SePay never records a failure (no such message): nothing to reopen.
+  [PaymentProvider.SEPAY]: new Set(),
 };
 
 /** A VNPay IPN or querydr answer (ROADMAP 3.4, 3.7): `confirmPayment`. */
@@ -59,7 +61,10 @@ export interface ConfirmPaymentInput {
 export interface SettlePaymentInput {
   /** The gateway that answered; a payment of another gateway with this reference is not found. */
   provider: PaymentProvider;
-  /** Our order reference at that gateway (`txn_ref`: VNPay `vnp_TxnRef`, MoMo `orderId`). */
+  /**
+   * Our order reference at that gateway (`txn_ref`: VNPay `vnp_TxnRef`, MoMo `orderId`, SePay
+   * the payment code in the transfer content).
+   */
   txnRef: string;
   /** What the gateway reported, read from an answer whose signature was checked. */
   report: PaymentReport;
