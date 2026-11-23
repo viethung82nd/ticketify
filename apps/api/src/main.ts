@@ -7,7 +7,9 @@ import { setupRealtime } from './modules/realtime/realtime-io.adapter';
 import { setupSwagger } from './swagger';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: SePay's webhook signature covers the body bytes as received (req.rawBody), not a
+  // re-serialized JSON. The parsed body is unchanged for every other route.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
   app.useLogger(app.get(Logger));
 
   const config = app.get(AppConfig);

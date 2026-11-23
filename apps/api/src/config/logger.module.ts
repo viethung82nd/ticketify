@@ -29,7 +29,13 @@ export function pinoLoggerModule(): DynamicModule {
       const options: Options = {
         level: config.get('LOG_LEVEL'),
         genReqId: requestIdFrom,
-        redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],
+        // x-sepay-signature: the SePay webhook HMAC (not a key, but never worth logging).
+        redact: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'req.headers["x-sepay-signature"]',
+          'res.headers["set-cookie"]',
+        ],
         // The request line and query of the VNPay return URL and IPN carry vnp_SecureHash.
         serializers: { req: redactRequest },
         // pino takes a transport or a destination, never both.
