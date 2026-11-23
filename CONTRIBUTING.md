@@ -12,9 +12,10 @@ Three kinds of test, three Jest projects. The suffix is what selects a file, so 
 
 | Kind | Directory | File suffix | Config | Opt-in flag | Run by |
 |---|---|---|---|---|---|
-| unit | `apps/api/src/**`, `apps/api/prisma/**` (next to the code) | `*.spec.ts` | `jest.unit.config.js` | — | `pnpm test:unit`, `ci.yml` |
+| unit | `apps/api/src/**`, `apps/api/prisma/**` (next to the code) | `*.spec.ts` | `jest.unit.config.js` | — | `pnpm test:unit`; in `ci.yml` through `test:coverage` |
 | web unit (Vitest + Testing Library, jsdom) | `apps/web/src/**` (next to the code) | `*.test.ts`, `*.test.tsx` | `test` block of `apps/web/vite.config.ts` | — | `pnpm test:unit`, `ci.yml` |
-| integration | `apps/api/test/integration/<domain>/` | `*.int-spec.ts` | `jest.integration.config.js` | — | `pnpm test:integration`, `ci.yml` |
+| integration | `apps/api/test/integration/<domain>/` | `*.int-spec.ts` | `jest.integration.config.js` | — | `pnpm test:integration`; in `ci.yml` through `test:coverage` |
+| API coverage gate (unit + integration, merged) | — | — | `jest.coverage.config.js` | — | `pnpm --filter @ticketify/api test:coverage`, `ci.yml` |
 | concurrency scenario (A, B, C) | `apps/api/test/scenarios/` | `*.spec.ts` | `jest.scenarios.config.js` | `RUN_SCENARIO_TESTS=1` | `booking-scenarios.yml` only |
 | end-to-end (Playwright, Chromium) | `apps/web/e2e/` | `*.spec.ts` | `apps/web/playwright.config.ts` | — (own command) | `pnpm --filter @ticketify/web test:e2e`, `e2e.yml` only |
 
@@ -29,6 +30,8 @@ Shared, not owned by one project: `test/support/` (helpers: app env, auth, datab
 Two integration suites read files under `docs/` through `__dirname`, so the documents cannot drift from what runs: `schema/erd.int-spec.ts` reads `docs/erd.md`, and `payment/admin-review.int-spec.ts` reads `docs/needs-review-queries.sql`. Those paths are not typechecked — if you move a suite or a document, open both ends.
 
 A test that holds a row lock from its own `pg` `Client` to make the API wait (the voucher lock in `booking/booking-voucher-race.int-spec.ts`) must not be able to hang forever: if the code under test ever waits without a `lock_timeout`, the `await` on the request never returns, the `finally` that would roll the lock back never runs, and Jest stops only at the job timeout. Give such a session a safety `setTimeout` that rolls it back after a few times the expected wait, and clear it in `finally`, so the test fails instead of hanging (5.3 found this with a mutation that dropped the voucher's `FOR UPDATE`: the `voucher_usages` insert then waited on its foreign key's `FOR KEY SHARE`).
+
+**Coverage gate (ROADMAP 6.4).** `ci.yml` runs the API unit and integration projects in one Jest run (`jest.coverage.config.js`) and fails under the thresholds there: lines and statements >= 80 % overall and >= 90 % in `modules/bookings`, `modules/payment`, `modules/tickets` and `infra/outbox`, with branch and function floors just under what the suites reach today. The report (`apps/api/coverage/`, `lcov-report/index.html`) is uploaded as the `api-coverage` artifact. Write tests for behaviour (what a client, a gateway or the worker sees), not for the number; a defensive branch that cannot happen is better left uncovered than tested through mocks of impossible states. Options that Jest only reads at the top level (`testTimeout`, `collectCoverage`) must be set in `jest.coverage.config.js`: inside a project they are ignored.
 
 To run a few integration folders one suite at a time (the clean signal on Windows, see the flakiness note in ROADMAP), pass the flag **without** `--`: `pnpm --filter @ticketify/api test:integration --runInBand test/integration/booking`. After `--` Jest takes `--runInBand` as a path pattern, the suites run in parallel, and with the larger pools of some suites Postgres answers `sorry, too many clients already` (its limit is 100).
 

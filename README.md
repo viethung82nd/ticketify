@@ -58,6 +58,7 @@ API **không khởi động** nếu biến môi trường thiếu hoặc sai: l�
 | `pnpm typecheck` | `tsc --noEmit` cho mọi package |
 | `pnpm test:unit` | Unit test (không cần Docker) |
 | `pnpm test:integration` | Integration test với Postgres + Redis thật (Testcontainers) |
+| `pnpm --filter @ticketify/api test:coverage` | Unit + integration API trong một lần chạy, gộp coverage và kiểm ngưỡng (tổng ≥ 80 %, module lõi ≥ 90 %), như CI; báo cáo ở `apps/api/coverage/` |
 | `RUN_SCENARIO_TESTS=1 pnpm --filter @ticketify/api test:scenarios` | Kịch bản A, B và C (500 request giữ một ghế; nhóm ghế giao nhau; IPN dưới tải), xem mục "Giữ ghế (API)" |
 | `pnpm build` | Build shared, API, web |
 | `pnpm db:migrate` | `prisma migrate dev` (tạo migration mới khi đổi schema) |
