@@ -1,6 +1,8 @@
 import {
   type CreatedMomoPayment,
   createdMomoPaymentSchema,
+  type CreatedSepayPayment,
+  createdSepayPaymentSchema,
   type CreatedVnpayPayment,
   createdVnpayPaymentSchema,
   type MomoReturnResult,
@@ -24,6 +26,16 @@ export async function createVnpayPayment(bookingId: string): Promise<CreatedVnpa
 export async function createMomoPayment(bookingId: string): Promise<CreatedMomoPayment> {
   const res = await apiClient.post<unknown>('/payments/momo', { bookingId });
   return createdMomoPaymentSchema.parse(res.data);
+}
+
+/**
+ * `POST /payments/sepay`: the bank-transfer details (VietQR, amount, exact content) of the booking.
+ * Only the booking id is sent; calling again while the attempt is open hands the same code back.
+ * The answer never means "paid": the booking is confirmed by SePay's webhook on the server.
+ */
+export async function createSepayPayment(bookingId: string): Promise<CreatedSepayPayment> {
+  const res = await apiClient.post<unknown>('/payments/sepay', { bookingId });
+  return createdSepayPaymentSchema.parse(res.data);
 }
 
 /**
