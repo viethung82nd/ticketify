@@ -1,0 +1,12 @@
+{
+  "runId": "20261123T185643Z-mixed-traffic-r25",
+  "script": "mixed-traffic",
+  "startedAtUtc": "20261123T185643Z",
+  "loadGenerator": "k6 in Docker (grafana/k6:2.4.0) on the SAME machine as the API, worker and databases",
+  "host": { "cpu": "11th Gen Intel(R) Core(TM) i5-11320H @ 3.20GHz", "cores": "4", "logicalProcessors": "8", "ram": "19.7 GB", "os": "Microsoft Windows 11 Home 10.0.26300" },
+  "docker": { "engine": "Docker Desktop", "version": "28.1.1", "vmCpus": "8", "vmMemoryBytes": "10295164928" },
+  "postgres": { "version": "16.15", "maxConnections": "100", "sharedBuffers": "128MB", "workMem": "4MB", "database": "ticketify_load01", "databaseSize": "415 MB" },
+  "api": { "baseUrl": "http://host.docker.internal:3100", "databasePoolMax": "10", "processes": "1 API + 1 worker (node, outside Docker)" },
+  "k6": { "version": "k6 v2.4.0 (commit/dd9395906d, go1.27.3, linux/amd64)", "rate": "25", "duration": "3m", "preAllocatedVUs": "default", "maxVUs": "default", "maxSeats": "default" },
+  "deadlocksBefore": 0
+}

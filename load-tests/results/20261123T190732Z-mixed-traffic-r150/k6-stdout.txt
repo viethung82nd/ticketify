@@ -1,0 +1,22 @@
+
+Ticketify load test — mixed-traffic
+settings: {"script":"mixed-traffic","baseUrl":"http://host.docker.internal:3100","rate":150,"duration":"3m","preAllocatedVUs":30,"maxVUs":300,"maxSeats":4,"weights":"browse:35 movieDetail:20 showtimesOfDay:25 myBookings:5 book:15"}
+requests: 43621 (242.3/s)
+http_req_failed: 0.000 %
+http_req_duration{expected_response:true}: p50 67.8 ms  p95 477.6 ms  p99 710.2 ms  max 1131.4 ms
+http_req_duration{name:movies_search}: p50 92.4 ms  p95 336.4 ms  p99 412.2 ms  max 521.8 ms
+http_req_duration{name:movies_list}: p50 67.3 ms  p95 193.3 ms  p99 245.9 ms  max 312.4 ms
+http_req_duration{name:seat_map}: p50 108.0 ms  p95 586.9 ms  p99 693.4 ms  max 855.5 ms
+http_req_duration{name:movie_detail}: p50 78.7 ms  p95 441.6 ms  p99 560.4 ms  max 663.2 ms
+http_req_duration{name:my_bookings}: p50 119.2 ms  p95 246.3 ms  p99 304.1 ms  max 374.5 ms
+http_req_duration{name:showtime_list}: p50 35.5 ms  p95 160.2 ms  p99 208.2 ms  max 262.9 ms
+http_req_duration{name:cancel}: p50 87.5 ms  p95 215.4 ms  p99 281.5 ms  max 331.9 ms
+http_req_duration{name:hold}: p50 241.6 ms  p95 822.5 ms  p99 955.2 ms  max 1131.4 ms
+http_req_duration{name:showtime_dates}: p50 32.1 ms  p95 150.7 ms  p99 200.4 ms  max 258.6 ms
+http_req_duration: p50 67.8 ms  p95 477.6 ms  p99 710.2 ms  max 1131.4 ms
+holds_created: 3483
+holds_refused: 5
+bookings_cancelled: 1118
+iterations: 26911
+dropped_iterations: 90
+k6 exit code: 99 (99 = a threshold was crossed)

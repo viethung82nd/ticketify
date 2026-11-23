@@ -77,13 +77,28 @@ Mỗi lần chạy tạo `load-tests/results/<thời điểm UTC>-<kịch bản>
   `shared_buffers`, kích thước DB), `DATABASE_POOL_MAX` của API, tham số k6;
 - `summary.json`: summary **thô** của k6 (mọi metric, p50/p90/p95/p99 theo từng endpoint);
 - `k6-stdout.txt`: bản tóm tắt ngắn;
-- `verify.txt`: kết quả `sql/verify-no-duplicates.sql`. `run.sh` dừng với mã 3 nếu một quy tắc khác 0.
+- `verify.txt`: kết quả `sql/verify-no-duplicates.sql`. `run.sh` dừng với mã 3 nếu một quy tắc khác 0;
+- `docker-stats.csv`: CPU/RAM của container Postgres, Redis và **k6** khoảng mỗi 5 giây;
+- `processes.csv` (khi có `API_PIDS`, chỉ Windows): CPU/RAM của tiến trình API và worker mỗi 2 giây,
+  tính theo % **một** lõi (`tools/sample-processes.ps1`).
 
 `POOL_MAX` phải khai đúng giá trị API đang chạy: `run.sh` không nhìn được vào tiến trình API.
 
-Biến cho k6: `RATE`, `DURATION`, `PRE_VUS`, `MAX_VUS`, `MAX_SEATS` (1–6). Biến khác của `run.sh`:
-`BASE_URL` (mặc định `http://host.docker.internal:3100`), `PG_CONTAINER`, `K6_IMAGE` (mặc định
-`grafana/k6:2.4.0`), `RESULTS_ROOT`, `LABEL`.
+Biến cho k6: `RATE`, `DURATION` (dạng `Ns` hoặc `Nm`), `PRE_VUS`, `MAX_VUS`, `MAX_SEATS` (1–6). Biến
+khác của `run.sh`: `BASE_URL` (mặc định `http://host.docker.internal:3100`), `PG_CONTAINER`,
+`REDIS_CONTAINER`, `K6_IMAGE` (mặc định `grafana/k6:2.4.0`), `RESULTS_ROOT`, `LABEL`, `API_PIDS`
+(PID của API và worker, cách nhau bằng dấu phẩy, **API trước**).
+
+Gom nhiều lần chạy thành bảng Markdown (chỉ đọc file trong thư mục kết quả):
+
+```bash
+node load-tests/tools/summarize.mjs load-tests/results/<lần chạy> [<lần chạy> …]
+```
+
+**Luôn xem CPU của k6** (`docker-stats.csv`) trước khi tin một số đo: k6 chạy cùng máy, nếu nó
+dùng nhiều CPU thì cả tải lẫn server đều bị méo. Hai lỗi như vậy đã gặp khi viết script (parse
+nguyên sơ đồ ghế bằng JS, giải mã lại cả file dữ liệu ở mỗi lượt); số đo của chúng nằm riêng ở
+`results/exploratory/` kèm giải thích.
 
 ## Giới hạn cần ghi kèm mọi số liệu
 

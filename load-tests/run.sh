@@ -9,7 +9,9 @@
 # script cannot see inside the API process, so it is declared here and written into meta.json).
 # Optional: RATE, DURATION, PRE_VUS, MAX_VUS, MAX_SEATS (passed to k6), BASE_URL (default
 # http://host.docker.internal:3100), PG_CONTAINER (default ticketify-postgres-1), K6_IMAGE,
-# RESULTS_ROOT (default load-tests/results), LABEL (added to the run folder name).
+# RESULTS_ROOT (default load-tests/results), LABEL (added to the run folder name), API_PIDS
+# (comma-separated Windows process ids of the API and worker: samples their CPU, see tools/), and
+# REDIS_CONTAINER (default ticketify-redis-1). DURATION must be Ns or Nm for the sampler.
 set -euo pipefail
 
 SCRIPT="${1:?usage: run.sh hot-showtime|mixed-traffic}"
@@ -69,8 +71,30 @@ cat >"$OUT/meta.json" <<EOF
 EOF
 
 echo "Run $RUN_ID → $OUT"
+
+# Resource samples while k6 runs: Postgres/Redis containers (docker stats, every ~5 s) and, when
+# API_PIDS lists the API/worker process ids on Windows, their CPU and memory (every 2 s).
+SAMPLING="$OUT/.sampling"
+touch "$SAMPLING"
+(
+  echo "time_utc,container,cpu_pct,mem_usage"
+  while [ -f "$SAMPLING" ]; do
+    # Every running container, filtered: the k6 container does not exist yet on the first pass.
+    docker stats --no-stream --format "{{.Name}},{{.CPUPerc}},{{.MemUsage}}" 2>/dev/null |
+      grep -E "^($PG_CONTAINER|${REDIS_CONTAINER:-ticketify-redis-1}|k6-run-$STAMP)," |
+      sed "s/^/$(date -u +%H:%M:%S),/" || true
+    sleep 3
+  done
+) >"$OUT/docker-stats.csv" &
+STATS_PID=$!
+if [ -n "${API_PIDS:-}" ] && command -v powershell.exe >/dev/null 2>&1; then
+  SECONDS_TOTAL=$(( $(echo "${DURATION:-2m}" | sed -E 's/^([0-9]+)m$/\1*60/; s/^([0-9]+)s$/\1/') + 10 ))
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$HERE/tools/sample-processes.ps1" \
+    -Pids "$API_PIDS" -Seconds "$SECONDS_TOTAL" -Out "$OUT/processes.csv" &
+fi
+
 set +e
-MSYS_NO_PATHCONV=1 docker run --rm \
+MSYS_NO_PATHCONV=1 docker run --rm --name "k6-run-$STAMP" \
   -v "$HERE:/load-tests" -v "$OUT:/results" \
   -e BASE_URL="$BASE_URL" -e RESULTS_DIR=/results \
   ${RATE:+-e RATE="$RATE"} ${DURATION:+-e DURATION="$DURATION"} \
@@ -78,6 +102,9 @@ MSYS_NO_PATHCONV=1 docker run --rm \
   ${MAX_SEATS:+-e MAX_SEATS="$MAX_SEATS"} \
   "$K6_IMAGE" run --quiet "/load-tests/$SCRIPT.js" | tee "$OUT/k6-stdout.txt"
 K6_EXIT=${PIPESTATUS[0]}
+rm -f "$SAMPLING"
+wait "$STATS_PID" 2>/dev/null
+wait 2>/dev/null
 set -e
 echo "k6 exit code: $K6_EXIT (99 = a threshold was crossed)" | tee -a "$OUT/k6-stdout.txt"
 
