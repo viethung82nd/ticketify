@@ -47,12 +47,24 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Unit tests
-        run: pnpm test:unit
+      - name: Unit tests (web)
+        run: pnpm --filter @ticketify/web test:unit
 
-      # Postgres + Redis via Testcontainers (Docker is available on ubuntu-latest).
-      - name: Integration tests
-        run: pnpm test:integration
+      # API unit + integration in ONE Jest run, so their coverage is merged, then checked against
+      # the thresholds in apps/api/jest.coverage.config.js (ROADMAP 6.4: total >= 80 %, booking,
+      # payment, tickets, outbox >= 90 %). Postgres + Redis via Testcontainers (Docker is
+      # available on ubuntu-latest).
+      - name: API tests with coverage gate
+        run: pnpm --filter @ticketify/api test:coverage
+
+      - name: Upload API coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-coverage
+          path: apps/api/coverage/
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Build
         run: pnpm build

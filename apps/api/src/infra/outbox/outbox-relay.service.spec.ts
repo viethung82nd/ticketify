@@ -3,7 +3,7 @@ import type { PrismaService } from '../prisma/prisma.service';
 import { DeliveryAction, type DeliveryJobData } from '../queue/delivery-queue';
 import type { DeliveryQueueProducer } from '../queue/delivery-queue.producer';
 import { OutboxEventType } from './outbox-events';
-import { OUTBOX_MAX_ATTEMPTS } from './outbox-relay';
+import { OUTBOX_BATCH_SIZE, OUTBOX_MAX_ATTEMPTS } from './outbox-relay';
 import { OutboxRelay } from './outbox-relay.service';
 
 const EVENT_ID = '01a3a1aa-7100-7679-b8b1-0000000000f1';
@@ -133,5 +133,98 @@ describe('OutboxRelay.pollOnce', () => {
 
     expect(statements[1]?.values).toContain(relay.lockedBy);
     expect(relay.lockedBy).toContain(String(process.pid));
+  });
+});
+
+describe('OutboxRelay loop', () => {
+  const INTERVAL = 1000;
+  const round = (claimed: number) => ({
+    reclaimed: 0,
+    claimed,
+    published: claimed,
+    retried: 0,
+    failed: 0,
+  });
+
+  function loop(intervalMs: number) {
+    const { relay } = harness([]);
+    const looping = new OutboxRelay(
+      relay['prisma'],
+      new FakeClock(NOW),
+      relay['producer'],
+      intervalMs,
+    );
+    const warn = jest.spyOn(looping['logger'], 'warn').mockImplementation(() => undefined);
+    jest.spyOn(looping['logger'], 'log').mockImplementation(() => undefined);
+    const poll = jest.spyOn(looping, 'pollOnce');
+    return { looping, warn, poll };
+  }
+
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('a poll interval of 0 switches the loop off: no round ever runs', async () => {
+    const { looping, poll } = loop(0);
+
+    looping.onApplicationBootstrap();
+    await jest.advanceTimersByTimeAsync(10 * INTERVAL);
+
+    expect(poll).not.toHaveBeenCalled();
+  });
+
+  it('a round that throws (database down) is logged and tried again one interval later', async () => {
+    const { looping, warn, poll } = loop(INTERVAL);
+    poll.mockRejectedValueOnce(new Error('connection refused')).mockResolvedValue(round(0));
+
+    looping.onApplicationBootstrap();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(poll).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('Outbox round failed, retrying: connection refused');
+
+    await jest.advanceTimersByTimeAsync(INTERVAL - 1);
+    expect(poll).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(poll).toHaveBeenCalledTimes(2);
+
+    await looping.onApplicationShutdown();
+  });
+
+  it('a full batch is followed at once by another round; a short one waits an interval', async () => {
+    const { looping, poll } = loop(INTERVAL);
+    poll
+      .mockResolvedValueOnce(round(OUTBOX_BATCH_SIZE))
+      .mockResolvedValueOnce(round(OUTBOX_BATCH_SIZE))
+      .mockResolvedValue(round(3));
+
+    looping.onApplicationBootstrap();
+    // The two full rounds each schedule the next one with no delay.
+    for (let i = 0; i < 3; i++) await jest.advanceTimersByTimeAsync(1);
+    expect(poll).toHaveBeenCalledTimes(3);
+
+    await jest.advanceTimersByTimeAsync(INTERVAL - 10);
+    expect(poll).toHaveBeenCalledTimes(3);
+    await jest.advanceTimersByTimeAsync(10);
+    expect(poll).toHaveBeenCalledTimes(4);
+
+    await looping.onApplicationShutdown();
+  });
+
+  it('shutdown waits for the round in flight and schedules no other', async () => {
+    const { looping, poll } = loop(INTERVAL);
+    let finish: (report: ReturnType<typeof round>) => void = () => undefined;
+    poll.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+
+    looping.onApplicationBootstrap();
+    await jest.advanceTimersByTimeAsync(0);
+    const stopped = looping.onApplicationShutdown();
+    let done = false;
+    void stopped.then(() => (done = true));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(done).toBe(false);
+
+    finish(round(0));
+    await stopped;
+    await jest.advanceTimersByTimeAsync(10 * INTERVAL);
+    expect(poll).toHaveBeenCalledTimes(1);
   });
 });
