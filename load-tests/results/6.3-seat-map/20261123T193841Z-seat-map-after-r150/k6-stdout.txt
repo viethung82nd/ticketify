@@ -1,0 +1,11 @@
+
+Ticketify load test — seat-map
+settings: {"script":"seat-map","baseUrl":"http://host.docker.internal:3100","rate":150,"duration":"1m","preAllocatedVUs":30,"maxVUs":300}
+requests: 9000 (147.0/s)
+http_req_failed: 0.000 %
+http_req_duration{name:seat_map}: p50 8.5 ms  p95 23.8 ms  p99 63.2 ms  max 1225.8 ms
+http_req_duration{expected_response:true}: p50 8.5 ms  p95 23.8 ms  p99 63.2 ms  max 1225.8 ms
+http_req_duration: p50 8.5 ms  p95 23.8 ms  p99 63.2 ms  max 1225.8 ms
+iterations: 9000
+dropped_iterations: 0
+k6 exit code: 0 (99 = a threshold was crossed)
